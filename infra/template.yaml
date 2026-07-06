@@ -1,0 +1,356 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: CampusMeet target infrastructure skeleton - no resources are deployed by this repository.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  DomainName:
+    Type: String
+    Default: example.invalid
+    Description: TODO(M5) Domain to configure after DNS ownership is confirmed.
+  CognitoCallbackUrls:
+    Type: CommaDelimitedList
+    Default: http://localhost:5173/app
+  GoogleSecretReference:
+    Type: String
+    Default: /campusmeet/dev/google-oauth
+    NoEcho: true
+    Description: Secrets Manager or Parameter Store reference only; never put the secret value here.
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    Timeout: 10
+    MemorySize: 256
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+    Tags: &Tags
+      Project: CampusMeet
+      Environment: !Ref Environment
+      ManagedBy: IaC
+
+Resources:
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+
+  FrontendOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'campusmeet-${Environment}-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'CampusMeet ${Environment} static frontend'
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        Origins:
+          - Id: frontend-s3
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref FrontendOriginAccessControl
+            S3OriginConfig: { OriginAccessIdentity: '' }
+        DefaultCacheBehavior:
+          TargetOriginId: frontend-s3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+          ForwardedValues: { QueryString: false, Cookies: { Forward: none } }
+        CustomErrorResponses:
+          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html }
+          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html }
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontReadOnly
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+      CorsConfiguration:
+        AllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+        AllowHeaders: [authorization, content-type, x-request-id]
+        AllowOrigins: ['*'] # TODO(M5): replace with the deployed CloudFront domain.
+      Tags: *Tags
+
+  ApiLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-api'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          [
+            {
+              Effect: Allow,
+              Principal: { Service: lambda.amazonaws.com },
+              Action: 'sts:AssumeRole',
+            },
+          ]
+      ManagedPolicyArns:
+        [!Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']
+      Policies:
+        - PolicyName: CampusMeetApiDataAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:Query]
+                Resource:
+                  - !GetAtt GroupsTable.Arn
+                  - !GetAtt MeetingsTable.Arn
+                  - !GetAtt TasksTable.Arn
+                  - !GetAtt NotificationsTable.Arn
+              - Effect: Allow
+                Action:
+                  [scheduler:CreateSchedule, scheduler:UpdateSchedule, scheduler:DeleteSchedule]
+                Resource: !Sub 'arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/campusmeet-*'
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt SchedulerExecutionRole.Arn
+      Tags: *Tags
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      {
+        BuildMethod: esbuild,
+        BuildProperties: { EntryPoints: [src/index.ts], Target: es2022, Minify: false },
+      }
+    Properties:
+      CodeUri: ../services/api
+      Handler: src/index.handler
+      Role: !GetAtt ApiLambdaRole.Arn
+      Environment:
+        Variables:
+          GROUPS_TABLE: !Ref GroupsTable
+          MEETINGS_TABLE: !Ref MeetingsTable
+          TASKS_TABLE: !Ref TasksTable
+          NOTIFICATIONS_TABLE: !Ref NotificationsTable
+          GOOGLE_SECRET_REFERENCE: !Ref GoogleSecretReference
+      Events:
+        Health: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /health, Method: GET } }
+        Proxy:
+          { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: '/{proxy+}', Method: ANY } }
+      Tags: *Tags
+
+  ReminderLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-reminder'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          [
+            {
+              Effect: Allow,
+              Principal: { Service: lambda.amazonaws.com },
+              Action: 'sts:AssumeRole',
+            },
+          ]
+      ManagedPolicyArns:
+        [!Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']
+      Policies:
+        - PolicyName: ReminderDelivery
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {
+                  Effect: Allow,
+                  Action: [dynamodb:GetItem, dynamodb:PutItem],
+                  Resource: [!GetAtt MeetingsTable.Arn, !GetAtt NotificationsTable.Arn],
+                }
+              - { Effect: Allow, Action: [ses:SendEmail], Resource: '*' } # TODO(M5): scope after SES identities are known.
+      Tags: *Tags
+
+  ReminderFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      {
+        BuildMethod: esbuild,
+        BuildProperties: { EntryPoints: [src/index.ts], Target: es2022, Minify: false },
+      }
+    Properties:
+      CodeUri: ../services/api
+      Handler: src/index.reminderHandler
+      Role: !GetAtt ReminderLambdaRole.Arn
+      Environment:
+        Variables:
+          MEETINGS_TABLE: !Ref MeetingsTable
+          NOTIFICATIONS_TABLE: !Ref NotificationsTable
+          SES_CONFIGURATION_SET: !Ref SesConfigurationSet
+      Tags: *Tags
+
+  SchedulerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-scheduler'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          [
+            {
+              Effect: Allow,
+              Principal: { Service: scheduler.amazonaws.com },
+              Action: 'sts:AssumeRole',
+            },
+          ]
+      Policies:
+        - PolicyName: InvokeReminderOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              [
+                {
+                  Effect: Allow,
+                  Action: lambda:InvokeFunction,
+                  Resource: !GetAtt ReminderFunction.Arn,
+                },
+              ]
+      Tags: *Tags
+
+  DeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-deployment-placeholder'
+      Description: TODO(M5) Placeholder; replace with a reviewed CI deployment role before enabling deploy.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          [
+            {
+              Effect: Allow,
+              Principal: { Service: !Sub 'cloudformation.${AWS::URLSuffix}' },
+              Action: 'sts:AssumeRole',
+            },
+          ]
+      Policies:
+        - PolicyName: ReadStackOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement: [{ Effect: Allow, Action: [cloudformation:DescribeStacks], Resource: '*' }]
+      Tags: *Tags
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'campusmeet-${Environment}'
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      DeletionProtection: INACTIVE # TODO(M5): enable for production after cleanup policy is agreed.
+      UserPoolTags: *Tags
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub 'campusmeet-${Environment}-web'
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      CallbackURLs: !Ref CognitoCallbackUrls
+      SupportedIdentityProviders: [COGNITO]
+
+  GroupsTable:
+    Type: AWS::DynamoDB::Table
+    Properties: &TableProperties
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
+      KeySchema: [{ AttributeName: id, KeyType: HASH }]
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false }
+      Tags: *Tags
+  MeetingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties: *TableProperties
+  TasksTable:
+    Type: AWS::DynamoDB::Table
+    Properties: *TableProperties
+  NotificationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties: *TableProperties
+
+  SesConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties: { Name: !Sub 'campusmeet-${Environment}' }
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      { LogGroupName: !Sub '/aws/lambda/${ApiFunction}', RetentionInDays: 14, Tags: *Tags }
+  ReminderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      { LogGroupName: !Sub '/aws/lambda/${ReminderFunction}', RetentionInDays: 14, Tags: *Tags }
+
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'campusmeet-${Environment}-alarms'
+      Tags: *Tags
+
+  ApiErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'campusmeet-${Environment}-api-errors'
+      AlarmDescription: TODO(M5) Tune threshold from observed demo traffic.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref ApiFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      Tags: *Tags
+
+Outputs:
+  FrontendBucketName: { Value: !Ref FrontendBucket }
+  CloudFrontDomainName: { Value: !GetAtt FrontendDistribution.DomainName }
+  ApiUrl:
+    { Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Environment}' }
+  UserPoolId: { Value: !Ref UserPool }
+  ConfiguredDomainPlaceholder: { Value: !Ref DomainName }

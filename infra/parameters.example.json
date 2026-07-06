@@ -1,0 +1,6 @@
+{
+  "Environment": "dev",
+  "DomainName": "campusmeet.example.com",
+  "CognitoCallbackUrls": "http://localhost:5173/app,https://campusmeet.example.com/app",
+  "GoogleSecretReference": "/campusmeet/dev/google-oauth"
+}
