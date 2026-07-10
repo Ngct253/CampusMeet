@@ -16,28 +16,28 @@ Kế hoạch này chuyển scaffold thành các vertical slice có thể demo tr
 
 ## 2. Phân công ownership
 
-| Thành viên | Ownership chính                    | Đầu ra bàn giao                                                                                             | Không phải ownership chính                   | Phối hợp chính                                       |
-| ---------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------- |
-| M1         | Frontend foundation và dashboard   | AppShell, route guard, loading/error/empty state, dashboard cá nhân/nhóm, frontend API boundary             | Group workflow, Google OAuth, AWS deployment | M2/M3 về contract; M5 về Cognito/config              |
-| M2         | Group, membership, invitation      | Vertical slice UI/API/test cho nhóm, thành viên, lời mời                                                    | Dashboard và Google integration              | M1 về UI; M3 về authorization/repository             |
-| M3         | Meeting, minutes, task, domain/API | Meeting/minutes/decision/action item/task, validation, authorization theo `groupId`, access pattern và test | Google token, SAM deployment                 | M2 về membership; M4 về Calendar; M5 về data/runtime |
-| M4         | Google Calendar và Google Meet     | OAuth connect/disconnect, Calendar Event, conference states `PENDING/READY/FAILED`, retry không tạo trùng   | Dashboard, reminder infrastructure           | M3 về meeting lifecycle; M5 về secret/permission     |
-| M5         | AWS, reminder và vận hành          | SAM/IaC, Cognito/API/Lambda boundary, Scheduler/Reminder, CloudWatch/SNS, CI/CD, cost và cleanup            | Feature UI và domain workflow                | Tất cả owner về env, metrics và deployment           |
+| Thành viên | Ownership chính                   | Đầu ra bàn giao                                                                                            | Không phải ownership chính                | Phối hợp chính                                       |
+| ------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------- |
+| M1           | Frontend foundation và dashboard  | AppShell, route guard, loading/error/empty state, dashboard cá nhân/nhóm, frontend API boundary            | Group workflow, Google OAuth, AWS deployment | M2/M3 về contract; M5 về Cognito/config               |
+| M2           | Group, membership, invitation      | Vertical slice UI/API/test cho nhóm, thành viên, lời mời                                                 | Dashboard và Google integration             | M1 về UI; M3 về authorization/repository              |
+| M3           | Meeting, minutes, task, domain/API | Meeting/minutes/decision/action item/task, validation, authorization theo`groupId`, access pattern và test | Google token, SAM deployment                 | M2 về membership; M4 về Calendar; M5 về data/runtime |
+| M4           | Google Calendar và Google Meet    | OAuth connect/disconnect, Calendar Event, conference states`PENDING/READY/FAILED`, retry không tạo trùng | Dashboard, reminder infrastructure           | M3 về meeting lifecycle; M5 về secret/permission      |
+| M5           | AWS, reminder và vận hành       | SAM/IaC, Cognito/API/Lambda boundary, Scheduler/Reminder, CloudWatch/SNS, CI/CD, cost và cleanup             | Feature UI và domain workflow               | Tất cả owner về env, metrics và deployment          |
 
 Ownership là người chịu trách nhiệm chính về outcome, không có nghĩa một người phải tự làm toàn bộ code. Mọi integration phải qua API contract và Pull Request.
 
 ## 3. Kế hoạch 8 tuần
 
-| Tuần | Mục tiêu                     | Công việc chính                                                                                       | Mốc kiểm tra                                                       |
-| ---- | ---------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| 1    | Khóa baseline                | Commit scaffold, chốt API/data model/Git workflow, test Google OAuth feasibility sớm, rà SAM skeleton | 5 máy đều install và quality gates pass; owner đã gán              |
-| 2    | Group foundation             | Group CRUD nội bộ, membership model, authorization boundary cơ bản                                    | Tạo/xem group bằng UI → API dev/local                              |
-| 3    | Invitation và meeting nội bộ | Invitation accept/reject/expiry, meeting CRUD chưa Google                                             | Mốc MVP 1 chạy đầu-cuối và có test quyền âm                        |
-| 4    | Luồng sau họp                | Minutes, decisions, action items, tasks, dashboard                                                    | Mốc MVP 2 chạy đầu-cuối                                            |
-| 5    | Google integration           | OAuth, Calendar Event, conference lifecycle, retry/idempotency                                        | Demo `PENDING/READY/FAILED`, không có Meet link giả                |
-| 6    | Reminder và notification     | EventBridge one-time schedule, Reminder Lambda, in-app notification; SES nếu đủ điều kiện             | Hủy meeting không gửi reminder; notification không phụ thuộc email |
-| 7    | Gia cố                       | Cross-group authorization, lỗi Google, cancel meeting, CloudWatch logs/metrics/alarm/SNS              | Test 401/403, retry, cancel và alarm có bằng chứng                 |
-| 8    | Đóng băng                    | Fix lỗi, demo, workshop song ngữ, cleanup rehearsal                                                   | Quality gates pass, evidence đủ, cloud cleanup xác nhận            |
+| Tuần | Mục tiêu                      | Công việc chính                                                                                       | Mốc kiểm tra                                                           |
+| ----- | ------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 1     | Khóa baseline                  | Commit scaffold, chốt API/data model/Git workflow, test Google OAuth feasibility sớm, rà SAM skeleton | 5 máy đều install và quality gates pass; owner đã gán             |
+| 2     | Group foundation                | Group CRUD nội bộ, membership model, authorization boundary cơ bản                                   | Tạo/xem group bằng UI → API dev/local                                 |
+| 3     | Invitation và meeting nội bộ | Invitation accept/reject/expiry, meeting CRUD chưa Google                                               | Mốc MVP 1 chạy đầu-cuối và có test quyền âm                     |
+| 4     | Luồng sau họp                 | Minutes, decisions, action items, tasks, dashboard                                                       | Mốc MVP 2 chạy đầu-cuối                                             |
+| 5     | Google integration              | OAuth, Calendar Event, conference lifecycle, retry/idempotency                                           | Demo`PENDING/READY/FAILED`, không có Meet link giả                  |
+| 6     | Reminder và notification       | EventBridge one-time schedule, Reminder Lambda, in-app notification; SES nếu đủ điều kiện          | Hủy meeting không gửi reminder; notification không phụ thuộc email |
+| 7     | Gia cố                         | Cross-group authorization, lỗi Google, cancel meeting, CloudWatch logs/metrics/alarm/SNS                | Test 401/403, retry, cancel và alarm có bằng chứng                   |
+| 8     | Đóng băng                    | Fix lỗi, demo, workshop song ngữ, cleanup rehearsal                                                    | Quality gates pass, evidence đủ, cloud cleanup xác nhận              |
 
 Hai mốc MVP bắt buộc:
 
@@ -46,16 +46,16 @@ Hai mốc MVP bắt buộc:
 
 ## 4. Phụ thuộc giữa các luồng
 
-| Luồng                 | Phụ thuộc                                               | Owner chính | Owner phối hợp                  |
-| --------------------- | ------------------------------------------------------- | ----------- | ------------------------------- |
-| Group                 | Cognito identity, shared DTO                            | M2          | M1, M3, M5                      |
-| Membership/invitation | Group, authorization, email/link policy                 | M2          | M3, M5                          |
-| Meeting               | Group membership, organizer rule                        | M3          | M1, M4                          |
-| Google integration    | Meeting lifecycle, OAuth config, secret storage         | M4          | M3, M5                          |
-| Reminder              | Meeting status, scheduler role, notification repository | M5          | M3, M4                          |
-| Minutes/task          | Completed meeting, active member rule                   | M3          | M1, M2                          |
-| Dashboard             | Meeting/task APIs và permission                         | M1          | M2, M3                          |
-| Monitoring            | API/Reminder signals, SNS subscription                  | M5          | M2–M4 định nghĩa metric hữu ích |
+| Luồng                | Phụ thuộc                                             | Owner chính | Owner phối hợp                      |
+| --------------------- | ------------------------------------------------------- | ------------ | ------------------------------------- |
+| Group                 | Cognito identity, shared DTO                            | M2           | M1, M3, M5                            |
+| Membership/invitation | Group, authorization, email/link policy                 | M2           | M3, M5                                |
+| Meeting               | Group membership, organizer rule                        | M3           | M1, M4                                |
+| Google integration    | Meeting lifecycle, OAuth config, secret storage         | M4           | M3, M5                                |
+| Reminder              | Meeting status, scheduler role, notification repository | M5           | M3, M4                                |
+| Minutes/task          | Completed meeting, active member rule                   | M3           | M1, M2                                |
+| Dashboard             | Meeting/task APIs và permission                        | M1           | M2, M3                                |
+| Monitoring            | API/Reminder signals, SNS subscription                  | M5           | M2–M4 định nghĩa metric hữu ích |
 
 ## 5. Git và Pull Request
 
@@ -129,17 +129,17 @@ Không đưa token, credential, user data hoặc log nhạy cảm vào evidence.
 
 ## 8. Điểm cần nhóm chốt
 
-| Nội dung                         | Lựa chọn/Ghi chú                                         | Người chốt   | Hạn chốt         |
-| -------------------------------- | -------------------------------------------------------- | ------------ | ---------------- |
-| Tên thật tương ứng M1–M5         | Điền sau buổi phân công                                  | Cả nhóm      | Tuần 1           |
-| GitHub Issues hay GitHub Project | Chọn một nguồn theo dõi duy nhất                         | Cả nhóm      | Tuần 1           |
-| AWS Region dev                   | Chưa chốt; kiểm tra availability/chi phí                 | M5 + cả nhóm | Trước deploy dev |
-| Email demo SES                   | Chưa chốt sender/recipient và consent                    | M5           | Trước tuần 6     |
-| Redirect URI local               | Dự kiến `http://localhost:5173/...`; M4/M5 xác nhận flow | M4 + M5      | Tuần 1           |
-| Redirect URI deployed            | Phụ thuộc CloudFront/custom domain output                | M4 + M5      | Trước tuần 5     |
-| Quyền ghi biên bản               | SRS cho phép cấu hình; cần rule MVP cụ thể               | M2 + M3      | Tuần 2           |
-| Quyền tạo/giao task              | Chốt admin-only hay quyền được ủy quyền                  | M2 + M3      | Tuần 2           |
-| Khi Google integration lỗi       | Chốt retry limit, trạng thái và UX action                | M3 + M4      | Trước tuần 5     |
-| Ngày khóa scope MVP              | Không thêm feature ngoài SRS sau mốc                     | Cả nhóm      | Cuối tuần 1      |
-| DynamoDB access pattern/index    | Placeholder hiện chưa phải database design hoàn chỉnh    | M3 + M5      | Trước tuần 2     |
+| Nội dung                        | Lựa chọn/Ghi chú                                           | Người chốt  | Hạn chốt         |
+| -------------------------------- | ------------------------------------------------------------- | -------------- | ------------------ |
+| Tên thật tương ứng M1–M5   | Điền sau buổi phân công                                  | Cả nhóm      | Tuần 1            |
+| GitHub Issues hay GitHub Project | Chọn một nguồn theo dõi duy nhất                         | Cả nhóm      | Tuần 1            |
+| AWS Region dev                   | Chưa chốt; kiểm tra availability/chi phí                  | M5 + cả nhóm | Trước deploy dev |
+| Email demo SES                   | Chưa chốt sender/recipient và consent                      | M5             | Trước tuần 6    |
+| Redirect URI local               | Dự kiến`http://localhost:5173/...`; M4/M5 xác nhận flow | M4 + M5        | Tuần 1            |
+| Redirect URI deployed            | Phụ thuộc CloudFront/custom domain output                   | M4 + M5        | Trước tuần 5    |
+| Quyền ghi biên bản            | SRS cho phép cấu hình; cần rule MVP cụ thể              | M2 + M3        | Tuần 2            |
+| Quyền tạo/giao task            | Chốt admin-only hay quyền được ủy quyền                | M2 + M3        | Tuần 2            |
+| Khi Google integration lỗi      | Chốt retry limit, trạng thái và UX action                 | M3 + M4        | Trước tuần 5    |
+| Ngày khóa scope MVP            | Không thêm feature ngoài SRS sau mốc                      | Cả nhóm      | Cuối tuần 1      |
+| DynamoDB access pattern/index    | Placeholder hiện chưa phải database design hoàn chỉnh    | M3 + M5        | Trước tuần 2    |
 | CORS/domain/retention/PITR       | Chốt theo môi trường và budget                           | M5 + cả nhóm | Trước deploy dev |
