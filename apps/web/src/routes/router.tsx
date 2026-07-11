@@ -6,11 +6,11 @@ import { NotificationsPage } from '../features/notifications/pages/Notifications
 import { SettingsPage } from '../features/settings/pages/SettingsPage';
 import { TasksPage } from '../features/tasks/pages/TasksPage';
 import { AppShell } from '../layouts/AppShell';
+import { LandingPage } from '../pages/LandingPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
-import { HomePage, SignInPage, SignUpPage } from '../pages/PublicPages';
-
+import { SignInPage, SignUpPage } from '../pages/PublicPages';
 export const router = createBrowserRouter([
-  { path: '/', element: <HomePage /> },
+  { path: '/', element: <LandingPage /> },
   { path: '/sign-in', element: <SignInPage /> },
   { path: '/sign-up', element: <SignUpPage /> },
   {
