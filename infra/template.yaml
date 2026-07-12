@@ -11,9 +11,6 @@ Parameters:
     Type: String
     Default: example.invalid
     Description: TODO(M5) Domain to configure after DNS ownership is confirmed.
-  CognitoCallbackUrls:
-    Type: CommaDelimitedList
-    Default: http://localhost:5173/app
   GoogleSecretReference:
     Type: String
     Default: /campusmeet/dev/google-oauth
@@ -112,6 +109,14 @@ Resources:
         AllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
         AllowHeaders: [authorization, content-type, x-request-id]
         AllowOrigins: ['*'] # TODO(M5): replace with the deployed CloudFront domain.
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPool}'
+              audience: [!Ref UserPoolClient]
       Tags: *Tags
 
   ApiLambdaRole:
@@ -170,9 +175,20 @@ Resources:
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           GOOGLE_SECRET_REFERENCE: !Ref GoogleSecretReference
       Events:
-        Health: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: /health, Method: GET } }
+        Health:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /health
+            Method: GET
+            Auth: { Authorizer: NONE }
         Proxy:
-          { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Path: '/{proxy+}', Method: ANY } }
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: '/{proxy+}'
+            Method: ANY
+            Auth: { Authorizer: CognitoAuthorizer }
       Tags: *Tags
 
   ReminderLambdaRole:
@@ -278,6 +294,7 @@ Resources:
       UserPoolName: !Sub 'campusmeet-${Environment}'
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig: { AllowAdminCreateUserOnly: false }
       DeletionProtection: INACTIVE # TODO(M5): enable for production after cleanup policy is agreed.
       UserPoolTags: *Tags
 
@@ -287,11 +304,8 @@ Resources:
       ClientName: !Sub 'campusmeet-${Environment}-web'
       UserPoolId: !Ref UserPool
       GenerateSecret: false
-      AllowedOAuthFlowsUserPoolClient: true
-      AllowedOAuthFlows: [code]
-      AllowedOAuthScopes: [openid, email, profile]
-      CallbackURLs: !Ref CognitoCallbackUrls
-      SupportedIdentityProviders: [COGNITO]
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
 
   GroupsTable:
     Type: AWS::DynamoDB::Table
@@ -353,4 +367,5 @@ Outputs:
   ApiUrl:
     { Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Environment}' }
   UserPoolId: { Value: !Ref UserPool }
+  UserPoolClientId: { Value: !Ref UserPoolClient }
   ConfiguredDomainPlaceholder: { Value: !Ref DomainName }

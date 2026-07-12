@@ -22,6 +22,90 @@ button,
   color: white;
   text-decoration: none;
 }
+button:not(:disabled) { cursor: pointer; }
+button:disabled { opacity: 0.65; }
+.auth-status { min-height: 100vh; display: grid; place-items: center; padding: 2rem; text-align: center; }
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: #123f9b;
+}
+.auth-panel {
+  width: min(100%, 28rem);
+  background: white;
+  padding: clamp(1.5rem, 5vw, 2.5rem);
+  border-radius: 0.8rem;
+}
+.auth-brand {
+  display: inline-block;
+  color: #123f9b;
+  margin-bottom: 2rem;
+}
+.auth-panel h1 {
+  font-size: 2rem;
+  line-height: 1.15;
+  margin: 0 0 1.5rem;
+}
+.auth-form,
+.auth-field {
+  display: grid;
+  gap: 0.5rem;
+}
+.auth-form { gap: 1rem; }
+.auth-field span { font-weight: 700; }
+.auth-field input {
+  width: 100%;
+  min-height: 2.75rem;
+  border: 1px solid #9ca9bd;
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  color: #17223b;
+  background: white;
+  font: inherit;
+}
+.password-control { position: relative; }
+.password-control input { padding-right: 3.25rem; }
+.password-control button {
+  position: absolute;
+  right: 0.125rem;
+  top: 50%;
+  width: 2.5rem;
+  min-width: 2.5rem;
+  height: 2.5rem;
+  min-height: 2.5rem;
+  padding: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: #68758a;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+}
+.password-control button:hover { background: #f2f5f9; color: #2947aa; }
+.password-control button:focus-visible {
+  outline: 2px solid #3157d5;
+  outline-offset: -3px;
+}
+.auth-field input:focus-visible,
+.auth-panel a:focus-visible,
+.auth-panel button:focus-visible {
+  outline: 3px solid #ffdf5d;
+  outline-offset: 2px;
+}
+.auth-form button { min-height: 2.75rem; font: inherit; font-weight: 700; }
+.button-secondary { background: #e7ecff; color: #2947aa; }
+.auth-error { color: #a51f2d; margin: 0; }
+.auth-success { color: #175b3d; margin: 0 0 1rem; }
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin: 1.25rem 0 0;
+}
+.auth-links a { color: #2947aa; min-height: 2.75rem; display: inline-flex; align-items: center; }
 .public-page {
   max-width: 44rem;
   min-height: 100vh;
@@ -87,6 +171,8 @@ button,
   justify-content: space-between;
   border-bottom: 1px solid #e2e6ef;
 }
+.topbar-user { display: flex; align-items: center; gap: 0.75rem; }
+.topbar-user button { padding: 0.5rem 0.75rem; }
 .mock-banner {
   background: #fff0c2;
   color: #654a00;

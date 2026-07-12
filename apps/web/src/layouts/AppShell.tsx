@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { mockUser } from '../mocks/data';
+import { useAuth } from '../auth/AuthProvider';
 
 export function Sidebar() {
   const links = [
@@ -26,10 +26,17 @@ export function Sidebar() {
 }
 
 export function Topbar() {
+  const auth = useAuth();
+  const identity = auth.status === 'authenticated'
+    ? auth.user.signInDetails?.loginId ?? auth.user.username
+    : '';
   return (
     <header className="topbar">
       <span className="mock-banner">Chế độ dữ liệu mô phỏng</span>
-      <span>{mockUser.displayName}</span>
+      <div className={'topbar-user'}>
+        <span>{identity}</span>
+        <button type={'button'} onClick={() => void auth.signOut()}>Đăng xuất</button>
+      </div>
     </header>
   );
 }
