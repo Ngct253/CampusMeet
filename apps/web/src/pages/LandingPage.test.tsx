@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LandingPage } from './LandingPage';
+
+vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({ status: 'unauthenticated' }) }));
 
 describe('LandingPage', () => {
   afterEach(cleanup);
@@ -56,6 +58,6 @@ describe('LandingPage', () => {
     );
     expect(
       document.querySelector('a[href="/sign-in"], a[href="/sign-up"], a[href^="/app/"]'),
-    ).toBeNull();
+    ).not.toBeNull();
   });
 });

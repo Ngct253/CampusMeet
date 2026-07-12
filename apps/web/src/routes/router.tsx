@@ -5,17 +5,19 @@ import { GroupMeetingsPage, MeetingDetailPage } from '../features/meetings/pages
 import { NotificationsPage } from '../features/notifications/pages/NotificationsPage';
 import { SettingsPage } from '../features/settings/pages/SettingsPage';
 import { TasksPage } from '../features/tasks/pages/TasksPage';
-import { AppShell } from '../layouts/AppShell';
+import { RequireAuth } from '../auth/RequireAuth';
 import { LandingPage } from '../pages/LandingPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
-import { SignInPage, SignUpPage } from '../pages/PublicPages';
+import { ConfirmSignUpPage, ForgotPasswordPage, SignInPage, SignUpPage } from '../pages/PublicPages';
 export const router = createBrowserRouter([
   { path: '/', element: <LandingPage /> },
   { path: '/sign-in', element: <SignInPage /> },
   { path: '/sign-up', element: <SignUpPage /> },
+  { path: '/confirm-sign-up', element: <ConfirmSignUpPage /> },
+  { path: '/forgot-password', element: <ForgotPasswordPage /> },
   {
     path: '/app',
-    element: <AppShell />,
+    element: <RequireAuth />,
     children: [
       { index: true, element: <AppIndexPage /> },
       { path: 'dashboard', element: <DashboardPage /> },

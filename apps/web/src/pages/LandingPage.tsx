@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { LandingProductPreview } from '../components/LandingProductPreview';
+import { useAuth } from '../auth/AuthProvider';
 import './landing.css';
 
 const workflow = [
@@ -10,6 +11,7 @@ const workflow = [
 ] as const;
 
 export function LandingPage() {
+  const auth = useAuth();
   const pageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -46,6 +48,10 @@ export function LandingPage() {
           <a href="#quy-trinh">Quy trình</a>
           <a href="#xem-truoc">Xem trước</a>
           <a href="#pham-vi">Phạm vi</a>
+          {auth.status === 'authenticated' ? <a href={'/app/dashboard'}>Vào ứng dụng</a> : <>
+            <a href={'/sign-in'}>Đăng nhập</a>
+            <a href={'/sign-up'}>Tạo tài khoản</a>
+          </>}
         </nav>
       </header>
 

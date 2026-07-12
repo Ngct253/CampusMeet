@@ -4,6 +4,7 @@ import { groupsHandler, membershipsHandler } from './handlers/groups';
 import { healthHandler } from './handlers/health';
 import { integrationsHandler } from './handlers/integrations';
 import { meetingsHandler } from './handlers/meetings';
+import { meHandler } from './handlers/me';
 import { minutesHandler } from './handlers/minutes';
 import { notificationsHandler } from './handlers/notifications';
 import { tasksHandler } from './handlers/tasks';
@@ -12,6 +13,7 @@ import { notImplemented } from './utils/response';
 
 const routes: Record<string, APIGatewayProxyHandlerV2> = {
   'GET /health': healthHandler,
+  'GET /me': meHandler,
   'ANY /groups': groupsHandler,
   'ANY /memberships': membershipsHandler,
   'ANY /meetings': meetingsHandler,

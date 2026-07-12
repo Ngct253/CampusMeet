@@ -2,8 +2,13 @@
 import '@testing-library/jest-dom/vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
+
+vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({
+  status: 'authenticated', user: { username: 'lan', userId: 'user-1' },
+  signOut: vi.fn(), error: null,
+}) }));
 
 describe('AppShell', () => {
   it('renders navigation and mock mode banner', () => {
