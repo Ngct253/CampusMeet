@@ -26,7 +26,7 @@ Globals:
     Environment:
       Variables:
         ENVIRONMENT: !Ref Environment
-    Tags: &Tags
+    Tags: &SamTags
       Project: CampusMeet
       Environment: !Ref Environment
       ManagedBy: IaC
@@ -43,7 +43,7 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
-      Tags:
+      Tags: &ResourceTags
         - { Key: Project, Value: CampusMeet }
         - { Key: Environment, Value: !Ref Environment }
         - { Key: ManagedBy, Value: IaC }
@@ -80,10 +80,7 @@ Resources:
         CustomErrorResponses:
           - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html }
           - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html }
-      Tags:
-        - { Key: Project, Value: CampusMeet }
-        - { Key: Environment, Value: !Ref Environment }
-        - { Key: ManagedBy, Value: IaC }
+      Tags: *ResourceTags
 
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -117,7 +114,7 @@ Resources:
             JwtConfiguration:
               issuer: !Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPool}'
               audience: [!Ref UserPoolClient]
-      Tags: *Tags
+      Tags: *SamTags
 
   ApiLambdaRole:
     Type: AWS::IAM::Role
@@ -154,7 +151,7 @@ Resources:
               - Effect: Allow
                 Action: iam:PassRole
                 Resource: !GetAtt SchedulerExecutionRole.Arn
-      Tags: *Tags
+      Tags: *ResourceTags
 
   ApiFunction:
     Type: AWS::Serverless::Function
@@ -189,7 +186,7 @@ Resources:
             Path: '/{proxy+}'
             Method: ANY
             Auth: { Authorizer: CognitoAuthorizer }
-      Tags: *Tags
+      Tags: *SamTags
 
   ReminderLambdaRole:
     Type: AWS::IAM::Role
@@ -218,7 +215,7 @@ Resources:
                   Resource: [!GetAtt MeetingsTable.Arn, !GetAtt NotificationsTable.Arn],
                 }
               - { Effect: Allow, Action: [ses:SendEmail], Resource: '*' } # TODO(M5): scope after SES identities are known.
-      Tags: *Tags
+      Tags: *ResourceTags
 
   ReminderFunction:
     Type: AWS::Serverless::Function
@@ -236,7 +233,7 @@ Resources:
           MEETINGS_TABLE: !Ref MeetingsTable
           NOTIFICATIONS_TABLE: !Ref NotificationsTable
           SES_CONFIGURATION_SET: !Ref SesConfigurationSet
-      Tags: *Tags
+      Tags: *SamTags
 
   SchedulerExecutionRole:
     Type: AWS::IAM::Role
@@ -264,7 +261,7 @@ Resources:
                   Resource: !GetAtt ReminderFunction.Arn,
                 },
               ]
-      Tags: *Tags
+      Tags: *ResourceTags
 
   DeploymentRole:
     Type: AWS::IAM::Role
@@ -286,7 +283,7 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement: [{ Effect: Allow, Action: [cloudformation:DescribeStacks], Resource: '*' }]
-      Tags: *Tags
+      Tags: *ResourceTags
 
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -295,8 +292,15 @@ Resources:
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
       AdminCreateUserConfig: { AllowAdminCreateUserOnly: false }
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
       DeletionProtection: INACTIVE # TODO(M5): enable for production after cleanup policy is agreed.
-      UserPoolTags: *Tags
+      UserPoolTags: *SamTags
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
@@ -314,7 +318,7 @@ Resources:
       AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
       KeySchema: [{ AttributeName: id, KeyType: HASH }]
       PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false }
-      Tags: *Tags
+      Tags: *ResourceTags
   MeetingsTable:
     Type: AWS::DynamoDB::Table
     Properties: *TableProperties
@@ -332,17 +336,17 @@ Resources:
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      { LogGroupName: !Sub '/aws/lambda/${ApiFunction}', RetentionInDays: 14, Tags: *Tags }
+      { LogGroupName: !Sub '/aws/lambda/${ApiFunction}', RetentionInDays: 14, Tags: *ResourceTags }
   ReminderLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      { LogGroupName: !Sub '/aws/lambda/${ReminderFunction}', RetentionInDays: 14, Tags: *Tags }
+      { LogGroupName: !Sub '/aws/lambda/${ReminderFunction}', RetentionInDays: 14, Tags: *ResourceTags }
 
   AlarmTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub 'campusmeet-${Environment}-alarms'
-      Tags: *Tags
+      Tags: *ResourceTags
 
   ApiErrorAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -359,7 +363,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlarmTopic]
-      Tags: *Tags
+      Tags: *ResourceTags
 
 Outputs:
   FrontendBucketName: { Value: !Ref FrontendBucket }
