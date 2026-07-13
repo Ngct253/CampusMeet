@@ -66,13 +66,13 @@ Resources:
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
-        EntryPoints: [src/auth-integration.ts]
+        EntryPoints: [auth-integration.ts]
         Target: es2022
         Minify: false
     Properties:
       FunctionName: !Sub '${AWS::StackName}-api'
-      CodeUri: ../services/api
-      Handler: src/auth-integration.handler
+      CodeUri: ../services/api/src
+      Handler: auth-integration.handler
       Runtime: nodejs22.x
       Architectures: [arm64]
       Timeout: 10
