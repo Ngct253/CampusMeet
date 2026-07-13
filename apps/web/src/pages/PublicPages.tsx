@@ -9,9 +9,21 @@ import {
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
+import {
+  accountUnavailableMessage,
+  forgotPasswordNeutralMessage,
+  mapAuthError,
+  normalizeEmail,
+  resendCodeNeutralMessage,
+  validateConfirmation,
+  validateConfirmationCode,
+  validateEmail,
+  validatePassword,
+  type AuthField,
+  type AuthOperation,
+} from '../lib/auth-errors';
 
 const pendingEmailKey = 'campusmeet:pendingEmail';
-const accountUnavailableMessage = 'Tính năng tài khoản hiện chưa khả dụng. Vui lòng thử lại sau.';
 
 function destination() {
   const saved = sessionStorage.getItem('campusmeet:returnTo');
@@ -19,88 +31,210 @@ function destination() {
   return saved === '/app' || saved?.startsWith('/app/') ? saved : '/app/dashboard';
 }
 
-const normalizeEmail = (email: string) => email.trim().toLowerCase();
-
-function message(error: unknown) {
-  const name = error instanceof Error ? error.name : '';
-  if (name === 'UserNotConfirmedException') return 'Tài khoản chưa được xác nhận.';
-  if (name === 'NotAuthorizedException') return 'Email hoặc mật khẩu không đúng.';
-  if (name === 'UsernameExistsException') return 'Email này đã có tài khoản.';
-  if (name === 'CodeMismatchException') return 'Mã xác nhận không đúng.';
-  if (name === 'ExpiredCodeException') return 'Mã xác nhận đã hết hạn. Vui lòng gửi mã mới.';
-  if (name === 'LimitExceededException') return 'Bạn đã thử quá nhiều lần. Vui lòng chờ rồi thử lại.';
-  return 'Không thể hoàn tất yêu cầu. Vui lòng thử lại.';
-}
-
 function AuthPage({ title, children }: { title: string; children: ReactNode }) {
-  return <main className={'auth-page'}>
-    <section className={'auth-panel'} aria-labelledby={'auth-title'}>
-      <Link className={'brand auth-brand'} to={'/'}>CampusMeet</Link>
-      <h1 id={'auth-title'}>{title}</h1>
-      {children}
-    </section>
-  </main>;
+  return (
+    <main className={'auth-page'}>
+      <section className={'auth-panel'} aria-labelledby={'auth-title'}>
+        <Link className={'brand auth-brand'} to={'/'}>
+          CampusMeet
+        </Link>
+        <h1 id={'auth-title'}>{title}</h1>
+        {children}
+      </section>
+    </main>
+  );
 }
 
-function Field({ label, name, type = 'text', autoComplete, value, onChange }: {
+function Field({
+  label,
+  name,
+  type = 'text',
+  autoComplete,
+  value,
+  onChange,
+  errors = [],
+}: {
   label: string;
   name: string;
   type?: string;
   autoComplete: string;
   value: string;
   onChange: (value: string) => void;
+  errors?: string[];
 }) {
-  return <label className={'auth-field'} htmlFor={name}>
-    <span>{label}</span>
-    <input id={name} name={name} type={type} autoComplete={autoComplete} value={value}
-      onChange={(event) => onChange(event.target.value)} required />
-  </label>;
+  const errorId = `${name}-error`;
+  return (
+    <div className={'auth-field'}>
+      <label htmlFor={name}>{label}</label>
+      <input
+        id={name}
+        name={name}
+        type={type}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required
+        aria-invalid={errors.length > 0}
+        aria-describedby={errors.length ? errorId : undefined}
+      />
+      <FieldErrors id={errorId} errors={errors} />
+    </div>
+  );
 }
 
 function PasswordVisibilityIcon({ visible }: { visible: boolean }) {
-  return <svg viewBox={'0 0 24 24'} width={'20'} height={'20'} fill={'none'}
-    stroke={'currentColor'} strokeWidth={'1.8'} strokeLinecap={'round'} strokeLinejoin={'round'}
-    aria-hidden={'true'}>
-    <path d={'M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z'} />
-    <circle cx={'12'} cy={'12'} r={'2.75'} />
-    {visible && <path d={'m4 4 16 16'} />}
-  </svg>;
+  return (
+    <svg
+      viewBox={'0 0 24 24'}
+      width={'20'}
+      height={'20'}
+      fill={'none'}
+      stroke={'currentColor'}
+      strokeWidth={'1.8'}
+      strokeLinecap={'round'}
+      strokeLinejoin={'round'}
+      aria-hidden={'true'}
+    >
+      <path d={'M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z'} />
+      <circle cx={'12'} cy={'12'} r={'2.75'} />
+      {visible && <path d={'m4 4 16 16'} />}
+    </svg>
+  );
 }
 
-function PasswordField({ label, name, autoComplete, value, onChange }: {
+function PasswordField({
+  label,
+  name,
+  autoComplete,
+  value,
+  onChange,
+  errors = [],
+}: {
   label: string;
   name: string;
   autoComplete: string;
   value: string;
   onChange: (value: string) => void;
+  errors?: string[];
 }) {
   const [visible, setVisible] = useState(false);
   const action = visible ? 'Ẩn mật khẩu' : 'Hiện mật khẩu';
-  return <div className={'auth-field'}>
-    <label htmlFor={name}>{label}</label>
-    <div className={'password-control'}>
-      <input id={name} name={name} type={visible ? 'text' : 'password'} autoComplete={autoComplete}
-        value={value} onChange={(event) => onChange(event.target.value)} required />
-      <button type={'button'} aria-label={action} title={action} aria-pressed={visible}
-        onClick={() => setVisible((current) => !current)}>
-        <PasswordVisibilityIcon visible={visible} />
-      </button>
+  const errorId = `${name}-error`;
+  return (
+    <div className={'auth-field'}>
+      <label htmlFor={name}>{label}</label>
+      <div className={'password-control'}>
+        <input
+          id={name}
+          name={name}
+          type={visible ? 'text' : 'password'}
+          autoComplete={autoComplete}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          required
+          aria-invalid={errors.length > 0}
+          aria-describedby={errors.length ? errorId : undefined}
+        />
+        <button
+          type={'button'}
+          aria-label={action}
+          title={action}
+          aria-pressed={visible}
+          onClick={() => setVisible((current) => !current)}
+        >
+          <PasswordVisibilityIcon visible={visible} />
+        </button>
+      </div>
+      <FieldErrors id={errorId} errors={errors} />
     </div>
-  </div>;
+  );
 }
 
-function ErrorMessage({ error, errorRef }: { error: string; errorRef: React.RefObject<HTMLParagraphElement | null> }) {
-  return error ? <p className={'auth-error'} ref={errorRef} tabIndex={-1} aria-live={'polite'}>{error}</p> : null;
+function FieldErrors({ id, errors }: { id: string; errors: string[] }) {
+  if (!errors.length) return null;
+  return errors.length === 1 ? (
+    <span className={'auth-field-error'} id={id}>
+      {errors[0]}
+    </span>
+  ) : (
+    <ul className={'auth-field-error'} id={id}>
+      {errors.map((error) => (
+        <li key={error}>{error}</li>
+      ))}
+    </ul>
+  );
+}
+
+function ErrorMessage({
+  error,
+  errorRef,
+}: {
+  error: string;
+  errorRef: React.RefObject<HTMLParagraphElement | null>;
+}) {
+  return error ? (
+    <p className={'auth-error'} ref={errorRef} tabIndex={-1} role={'alert'}>
+      {error}
+    </p>
+  ) : null;
 }
 
 function useFormError() {
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<AuthField, string[]>>>({});
   const errorRef = useRef<HTMLParagraphElement>(null);
   const showError = (value: string) => {
+    setFieldErrors({});
     setError(value);
     requestAnimationFrame(() => errorRef.current?.focus());
   };
-  return { error, errorRef, showError, clearError: () => setError('') };
+  const showFieldErrors = (
+    values: Partial<Record<AuthField, string | string[] | undefined>>,
+    ids: Partial<Record<AuthField, string>>,
+  ) => {
+    const next = Object.fromEntries(
+      Object.entries(values)
+        .filter(([, value]) => value && (typeof value === 'string' || value.length))
+        .map(([field, value]) => [field, typeof value === 'string' ? [value] : value]),
+    ) as Partial<Record<AuthField, string[]>>;
+    setError('');
+    setFieldErrors(next);
+    const first = Object.keys(next)[0] as AuthField | undefined;
+    if (first) requestAnimationFrame(() => document.getElementById(ids[first] ?? '')?.focus());
+    return Object.keys(next).length > 0;
+  };
+  const showMappedError = (
+    cause: unknown,
+    operation: AuthOperation,
+    ids: Partial<Record<AuthField, string>>,
+  ) => {
+    const mapped = mapAuthError(cause, operation);
+    if (mapped.field) showFieldErrors({ [mapped.field]: mapped.message }, ids);
+    else showError(mapped.message);
+    return mapped;
+  };
+  const clearField = (...fields: AuthField[]) => {
+    setError('');
+    setFieldErrors((current) => {
+      const next = { ...current };
+      for (const field of fields) delete next[field];
+      return next;
+    });
+  };
+  const clearError = () => {
+    setError('');
+    setFieldErrors({});
+  };
+  return {
+    error,
+    errorRef,
+    fieldErrors,
+    showError,
+    showFieldErrors,
+    showMappedError,
+    clearField,
+    clearError,
+  };
 }
 
 function AuthenticatedRedirect() {
@@ -114,7 +248,16 @@ export function SignInPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const { error, errorRef, showError, clearError } = useFormError();
+  const {
+    error,
+    errorRef,
+    fieldErrors,
+    showError,
+    showFieldErrors,
+    showMappedError,
+    clearField,
+    clearError,
+  } = useFormError();
   if (auth.status === 'authenticated') return <AuthenticatedRedirect />;
   const configured = auth.status !== 'configuration-error';
 
@@ -122,7 +265,16 @@ export function SignInPage() {
     event.preventDefault();
     clearError();
     const username = normalizeEmail(email);
-    if (!username || !password) return showError('Vui lòng nhập email và mật khẩu.');
+    if (
+      showFieldErrors(
+        {
+          email: validateEmail(email),
+          password: password ? undefined : 'Vui lòng nhập mật khẩu.',
+        },
+        { email: 'sign-in-email', password: 'sign-in-password' },
+      )
+    )
+      return;
     if (!configured) return showError(accountUnavailableMessage);
     setSubmitting(true);
     try {
@@ -132,29 +284,66 @@ export function SignInPage() {
         navigate('/confirm-sign-up');
         return;
       }
-      if (!result.isSignedIn) return showError('Tài khoản cần thêm một bước xác thực chưa được hỗ trợ.');
+      if (!result.isSignedIn)
+        return showError('Tài khoản cần thêm một bước xác thực chưa được hỗ trợ.');
       await auth.refreshAuth();
       navigate(destination(), { replace: true });
     } catch (cause) {
       if (cause instanceof Error && cause.name === 'UserNotConfirmedException') {
         sessionStorage.setItem(pendingEmailKey, username);
         navigate('/confirm-sign-up');
-      } else showError(message(cause));
+      } else
+        showMappedError(cause, 'sign-in', {
+          email: 'sign-in-email',
+          password: 'sign-in-password',
+        });
     } finally {
       setSubmitting(false);
     }
   }
 
-  return <AuthPage title={'Đăng nhập'}>
-    {location.state?.message && <p className={'auth-success'} aria-live={'polite'}>{location.state.message}</p>}
-    <form className={'auth-form'} onSubmit={(event) => void submit(event)} noValidate>
-      <Field label={'Email'} name={'sign-in-email'} type={'email'} autoComplete={'email'} value={email} onChange={setEmail} />
-      <PasswordField label={'Mật khẩu'} name={'sign-in-password'} autoComplete={'current-password'} value={password} onChange={setPassword} />
-      <ErrorMessage error={error} errorRef={errorRef} />
-      <button type={'submit'} disabled={submitting || !email.trim() || !password}>{submitting ? 'Đang đăng nhập...' : 'Đăng nhập'}</button>
-    </form>
-    <div className={'auth-links'}><Link to={'/forgot-password'}>Quên mật khẩu</Link><Link to={'/sign-up'}>Tạo tài khoản</Link></div>
-  </AuthPage>;
+  return (
+    <AuthPage title={'Đăng nhập'}>
+      {location.state?.message && (
+        <p className={'auth-success'} aria-live={'polite'}>
+          {location.state.message}
+        </p>
+      )}
+      <form className={'auth-form'} onSubmit={(event) => void submit(event)} noValidate>
+        <Field
+          label={'Email'}
+          name={'sign-in-email'}
+          type={'email'}
+          autoComplete={'email'}
+          value={email}
+          onChange={(value) => {
+            setEmail(value);
+            clearField('email');
+          }}
+          errors={fieldErrors.email}
+        />
+        <PasswordField
+          label={'Mật khẩu'}
+          name={'sign-in-password'}
+          autoComplete={'current-password'}
+          value={password}
+          onChange={(value) => {
+            setPassword(value);
+            clearField('password', 'confirmation');
+          }}
+          errors={fieldErrors.password}
+        />
+        <ErrorMessage error={error} errorRef={errorRef} />
+        <button type={'submit'} disabled={submitting}>
+          {submitting ? 'Đang đăng nhập...' : 'Đăng nhập'}
+        </button>
+      </form>
+      <div className={'auth-links'}>
+        <Link to={'/forgot-password'}>Quên mật khẩu</Link>
+        <Link to={'/sign-up'}>Tạo tài khoản</Link>
+      </div>
+    </AuthPage>
+  );
 }
 
 export function SignUpPage() {
@@ -164,7 +353,16 @@ export function SignUpPage() {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const { error, errorRef, showError, clearError } = useFormError();
+  const {
+    error,
+    errorRef,
+    fieldErrors,
+    showError,
+    showFieldErrors,
+    showMappedError,
+    clearField,
+    clearError,
+  } = useFormError();
   if (auth.status === 'authenticated') return <AuthenticatedRedirect />;
   const configured = auth.status !== 'configuration-error';
 
@@ -172,14 +370,34 @@ export function SignUpPage() {
     event.preventDefault();
     clearError();
     const username = normalizeEmail(email);
-    if (!username || !password || !confirmation) return showError('Vui lòng nhập đầy đủ thông tin.');
-    if (password !== confirmation) return showError('Mật khẩu xác nhận không khớp.');
+    if (
+      showFieldErrors(
+        {
+          email: validateEmail(email),
+          password: validatePassword(password),
+          confirmation: validateConfirmation(password, confirmation),
+        },
+        {
+          email: 'sign-up-email',
+          password: 'sign-up-password',
+          confirmation: 'sign-up-confirmation',
+        },
+      )
+    )
+      return;
     if (!configured) return showError(accountUnavailableMessage);
     setSubmitting(true);
     try {
-      const result = await signUp({ username, password, options: { userAttributes: { email: username } } });
+      const result = await signUp({
+        username,
+        password,
+        options: { userAttributes: { email: username } },
+      });
       if (result.isSignUpComplete) {
-        navigate('/sign-in', { replace: true, state: { message: 'Tài khoản đã được tạo. Bạn có thể đăng nhập.' } });
+        navigate('/sign-in', {
+          replace: true,
+          state: { message: 'Tài khoản đã được tạo. Bạn có thể đăng nhập.' },
+        });
       } else if (result.nextStep.signUpStep === 'CONFIRM_SIGN_UP') {
         sessionStorage.setItem(pendingEmailKey, username);
         navigate('/confirm-sign-up');
@@ -187,22 +405,62 @@ export function SignUpPage() {
         showError('Tài khoản cần thêm một bước xác thực chưa được hỗ trợ.');
       }
     } catch (cause) {
-      showError(message(cause));
+      showMappedError(cause, 'sign-up', {
+        email: 'sign-up-email',
+        password: 'sign-up-password',
+      });
     } finally {
       setSubmitting(false);
     }
   }
 
-  return <AuthPage title={'Tạo tài khoản'}>
-    <form className={'auth-form'} onSubmit={(event) => void submit(event)} noValidate>
-      <Field label={'Email'} name={'sign-up-email'} type={'email'} autoComplete={'email'} value={email} onChange={setEmail} />
-      <PasswordField label={'Mật khẩu'} name={'sign-up-password'} autoComplete={'new-password'} value={password} onChange={setPassword} />
-      <PasswordField label={'Xác nhận mật khẩu'} name={'sign-up-confirmation'} autoComplete={'new-password'} value={confirmation} onChange={setConfirmation} />
-      <ErrorMessage error={error} errorRef={errorRef} />
-      <button type={'submit'} disabled={submitting || !email.trim() || !password || !confirmation || password !== confirmation}>{submitting ? 'Đang tạo tài khoản...' : 'Tạo tài khoản'}</button>
-    </form>
-    <p className={'auth-links'}>Đã có tài khoản? <Link to={'/sign-in'}>Đăng nhập</Link></p>
-  </AuthPage>;
+  return (
+    <AuthPage title={'Tạo tài khoản'}>
+      <form className={'auth-form'} onSubmit={(event) => void submit(event)} noValidate>
+        <Field
+          label={'Email'}
+          name={'sign-up-email'}
+          type={'email'}
+          autoComplete={'email'}
+          value={email}
+          onChange={(value) => {
+            setEmail(value);
+            clearField('email');
+          }}
+          errors={fieldErrors.email}
+        />
+        <PasswordField
+          label={'Mật khẩu'}
+          name={'sign-up-password'}
+          autoComplete={'new-password'}
+          value={password}
+          onChange={(value) => {
+            setPassword(value);
+            clearField('password', 'confirmation');
+          }}
+          errors={fieldErrors.password}
+        />
+        <PasswordField
+          label={'Xác nhận mật khẩu'}
+          name={'sign-up-confirmation'}
+          autoComplete={'new-password'}
+          value={confirmation}
+          onChange={(value) => {
+            setConfirmation(value);
+            clearField('confirmation');
+          }}
+          errors={fieldErrors.confirmation}
+        />
+        <ErrorMessage error={error} errorRef={errorRef} />
+        <button type={'submit'} disabled={submitting}>
+          {submitting ? 'Đang tạo tài khoản...' : 'Tạo tài khoản'}
+        </button>
+      </form>
+      <p className={'auth-links'}>
+        Đã có tài khoản? <Link to={'/sign-in'}>Đăng nhập</Link>
+      </p>
+    </AuthPage>
+  );
 }
 
 export function ConfirmSignUpPage() {
@@ -212,7 +470,16 @@ export function ConfirmSignUpPage() {
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState('');
-  const { error, errorRef, showError, clearError } = useFormError();
+  const {
+    error,
+    errorRef,
+    fieldErrors,
+    showError,
+    showFieldErrors,
+    showMappedError,
+    clearField,
+    clearError,
+  } = useFormError();
   if (auth.status === 'authenticated') return <AuthenticatedRedirect />;
   const configured = auth.status !== 'configuration-error';
 
@@ -220,15 +487,30 @@ export function ConfirmSignUpPage() {
     event.preventDefault();
     clearError();
     const username = normalizeEmail(email);
-    if (!username || !code.trim()) return showError('Vui lòng nhập email và mã xác nhận.');
+    if (
+      showFieldErrors(
+        {
+          email: validateEmail(email),
+          code: validateConfirmationCode(code),
+        },
+        { email: 'confirm-email', code: 'confirmation-code' },
+      )
+    )
+      return;
     if (!configured) return showError(accountUnavailableMessage);
     setSubmitting(true);
     try {
       await confirmSignUp({ username, confirmationCode: code.trim() });
       sessionStorage.removeItem(pendingEmailKey);
-      navigate('/sign-in', { replace: true, state: { message: 'Tài khoản đã được xác nhận. Bạn có thể đăng nhập.' } });
+      navigate('/sign-in', {
+        replace: true,
+        state: { message: 'Tài khoản đã được xác nhận. Bạn có thể đăng nhập.' },
+      });
     } catch (cause) {
-      showError(message(cause));
+      showMappedError(cause, 'confirm-sign-up', {
+        email: 'confirm-email',
+        code: 'confirmation-code',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -237,29 +519,67 @@ export function ConfirmSignUpPage() {
   async function resend() {
     clearError();
     const username = normalizeEmail(email);
-    if (!username) return showError('Vui lòng nhập email trước khi gửi lại mã.');
+    if (showFieldErrors({ email: validateEmail(email) }, { email: 'confirm-email' })) return;
     if (!configured) return showError(accountUnavailableMessage);
     setSubmitting(true);
     try {
       await resendSignUpCode({ username });
-      setNotice('Mã xác nhận mới đã được gửi tới email của bạn.');
+      setNotice(resendCodeNeutralMessage);
     } catch (cause) {
-      showError(message(cause));
+      const mapped = mapAuthError(cause, 'resend-code');
+      if (mapped.neutral) setNotice(mapped.message);
+      else showMappedError(cause, 'resend-code', { email: 'confirm-email' });
     } finally {
       setSubmitting(false);
     }
   }
 
-  return <AuthPage title={'Xác nhận tài khoản'}>
-    {notice && <p className={'auth-success'} aria-live={'polite'}>{notice}</p>}
-    <form className={'auth-form'} onSubmit={(event) => void submit(event)} noValidate>
-      <Field label={'Email'} name={'confirm-email'} type={'email'} autoComplete={'email'} value={email} onChange={setEmail} />
-      <Field label={'Mã xác nhận'} name={'confirmation-code'} autoComplete={'one-time-code'} value={code} onChange={setCode} />
-      <ErrorMessage error={error} errorRef={errorRef} />
-      <button type={'submit'} disabled={submitting || !email.trim() || !code.trim()}>Xác nhận</button>
-      <button className={'button-secondary'} type={'button'} onClick={() => void resend()} disabled={submitting || !email.trim()}>Gửi lại mã</button>
-    </form>
-  </AuthPage>;
+  return (
+    <AuthPage title={'Xác nhận tài khoản'}>
+      {notice && (
+        <p className={'auth-success'} aria-live={'polite'}>
+          {notice}
+        </p>
+      )}
+      <form className={'auth-form'} onSubmit={(event) => void submit(event)} noValidate>
+        <Field
+          label={'Email'}
+          name={'confirm-email'}
+          type={'email'}
+          autoComplete={'email'}
+          value={email}
+          onChange={(value) => {
+            setEmail(value);
+            clearField('email');
+          }}
+          errors={fieldErrors.email}
+        />
+        <Field
+          label={'Mã xác nhận'}
+          name={'confirmation-code'}
+          autoComplete={'one-time-code'}
+          value={code}
+          onChange={(value) => {
+            setCode(value);
+            clearField('code');
+          }}
+          errors={fieldErrors.code}
+        />
+        <ErrorMessage error={error} errorRef={errorRef} />
+        <button type={'submit'} disabled={submitting}>
+          Xác nhận
+        </button>
+        <button
+          className={'button-secondary'}
+          type={'button'}
+          onClick={() => void resend()}
+          disabled={submitting}
+        >
+          Gửi lại mã
+        </button>
+      </form>
+    </AuthPage>
+  );
 }
 
 export function ForgotPasswordPage() {
@@ -271,47 +591,145 @@ export function ForgotPasswordPage() {
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const { error, errorRef, showError, clearError } = useFormError();
+  const [notice, setNotice] = useState('');
+  const {
+    error,
+    errorRef,
+    fieldErrors,
+    showError,
+    showFieldErrors,
+    showMappedError,
+    clearField,
+    clearError,
+  } = useFormError();
   if (auth.status === 'authenticated') return <AuthenticatedRedirect />;
   const configured = auth.status !== 'configuration-error';
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     clearError();
-    setSubmitting(true);
+    setNotice('');
     try {
       if (step === 1) {
         const username = normalizeEmail(email);
-        if (!username) return showError('Vui lòng nhập email.');
+        if (showFieldErrors({ email: validateEmail(email) }, { email: 'reset-email' })) return;
         if (!configured) return showError(accountUnavailableMessage);
+        setSubmitting(true);
         const result = await resetPassword({ username });
+        setNotice(forgotPasswordNeutralMessage);
         if (result.nextStep.resetPasswordStep === 'CONFIRM_RESET_PASSWORD_WITH_CODE') setStep(2);
         else navigate('/sign-in', { replace: true });
       } else {
-        if (!code.trim() || !password || !confirmation) return showError('Vui lòng nhập đầy đủ thông tin.');
-        if (password !== confirmation) return showError('Mật khẩu xác nhận không khớp.');
+        if (
+          showFieldErrors(
+            {
+              code: validateConfirmationCode(code),
+              password: validatePassword(password),
+              confirmation: validateConfirmation(password, confirmation),
+            },
+            {
+              code: 'reset-code',
+              password: 'new-password',
+              confirmation: 'new-password-confirmation',
+            },
+          )
+        )
+          return;
         if (!configured) return showError(accountUnavailableMessage);
-        await confirmResetPassword({ username: normalizeEmail(email), confirmationCode: code.trim(), newPassword: password });
-        navigate('/sign-in', { replace: true, state: { message: 'Mật khẩu đã được đặt lại. Bạn có thể đăng nhập.' } });
+        setSubmitting(true);
+        await confirmResetPassword({
+          username: normalizeEmail(email),
+          confirmationCode: code.trim(),
+          newPassword: password,
+        });
+        navigate('/sign-in', {
+          replace: true,
+          state: { message: 'Mật khẩu đã được đặt lại. Bạn có thể đăng nhập.' },
+        });
       }
     } catch (cause) {
-      showError(message(cause));
+      const operation = step === 1 ? 'forgot-password' : 'confirm-reset-password';
+      const mapped = mapAuthError(cause, operation);
+      if (operation === 'forgot-password' && mapped.neutral) {
+        setNotice(mapped.message);
+        setStep(2);
+      } else {
+        showMappedError(cause, operation, {
+          email: 'reset-email',
+          code: 'reset-code',
+          password: 'new-password',
+        });
+      }
     } finally {
       setSubmitting(false);
     }
   }
 
-  return <AuthPage title={'Quên mật khẩu'}>
-    <form className={'auth-form'} onSubmit={(event) => void submit(event)} noValidate>
-      <Field label={'Email'} name={'reset-email'} type={'email'} autoComplete={'email'} value={email} onChange={setEmail} />
-      {step === 2 && <>
-        <Field label={'Mã xác nhận'} name={'reset-code'} autoComplete={'one-time-code'} value={code} onChange={setCode} />
-        <PasswordField label={'Mật khẩu mới'} name={'new-password'} autoComplete={'new-password'} value={password} onChange={setPassword} />
-        <PasswordField label={'Xác nhận mật khẩu mới'} name={'new-password-confirmation'} autoComplete={'new-password'} value={confirmation} onChange={setConfirmation} />
-      </>}
-      <ErrorMessage error={error} errorRef={errorRef} />
-      <button type={'submit'} disabled={submitting || !email.trim() || (step === 2 && (!code.trim() || !password || !confirmation || password !== confirmation))}>{step === 1 ? 'Gửi mã xác nhận' : 'Đặt mật khẩu mới'}</button>
-    </form>
-    <p className={'auth-links'}><Link to={'/sign-in'}>Quay lại đăng nhập</Link></p>
-  </AuthPage>;
+  return (
+    <AuthPage title={'Quên mật khẩu'}>
+      {notice && (
+        <p className={'auth-success'} aria-live={'polite'}>
+          {notice}
+        </p>
+      )}
+      <form className={'auth-form'} onSubmit={(event) => void submit(event)} noValidate>
+        <Field
+          label={'Email'}
+          name={'reset-email'}
+          type={'email'}
+          autoComplete={'email'}
+          value={email}
+          onChange={(value) => {
+            setEmail(value);
+            clearField('email');
+          }}
+          errors={fieldErrors.email}
+        />
+        {step === 2 && (
+          <>
+            <Field
+              label={'Mã xác nhận'}
+              name={'reset-code'}
+              autoComplete={'one-time-code'}
+              value={code}
+              onChange={(value) => {
+                setCode(value);
+                clearField('code');
+              }}
+              errors={fieldErrors.code}
+            />
+            <PasswordField
+              label={'Mật khẩu mới'}
+              name={'new-password'}
+              autoComplete={'new-password'}
+              value={password}
+              onChange={(value) => {
+                setPassword(value);
+                clearField('password');
+              }}
+              errors={fieldErrors.password}
+            />
+            <PasswordField
+              label={'Xác nhận mật khẩu mới'}
+              name={'new-password-confirmation'}
+              autoComplete={'new-password'}
+              value={confirmation}
+              onChange={(value) => {
+                setConfirmation(value);
+                clearField('confirmation');
+              }}
+              errors={fieldErrors.confirmation}
+            />
+          </>
+        )}
+        <ErrorMessage error={error} errorRef={errorRef} />
+        <button type={'submit'} disabled={submitting}>
+          {submitting ? 'Đang xử lý...' : step === 1 ? 'Gửi mã xác nhận' : 'Đặt mật khẩu mới'}
+        </button>
+      </form>
+      <p className={'auth-links'}>
+        <Link to={'/sign-in'}>Quay lại đăng nhập</Link>
+      </p>
+    </AuthPage>
+  );
 }

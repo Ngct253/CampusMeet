@@ -16,6 +16,13 @@ Resources:
       AutoVerifiedAttributes: [email]
       AdminCreateUserConfig: { AllowAdminCreateUserOnly: false }
       MfaConfiguration: 'OFF'
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient

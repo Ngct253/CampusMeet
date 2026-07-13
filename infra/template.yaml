@@ -292,6 +292,13 @@ Resources:
       UsernameAttributes: [email]
       AutoVerifiedAttributes: [email]
       AdminCreateUserConfig: { AllowAdminCreateUserOnly: false }
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
       DeletionProtection: INACTIVE # TODO(M5): enable for production after cleanup policy is agreed.
       UserPoolTags: *SamTags
 
