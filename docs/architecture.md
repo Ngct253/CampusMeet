@@ -2,9 +2,16 @@
 
 ## Trạng thái hiện tại
 
-Repository mới có application shell, mock data, shared contracts, Lambda handler skeleton và AWS SAM skeleton. Chỉ `GET /health` có xử lý thật ở mức tối thiểu; API nghiệp vụ, Cognito, DynamoDB, Google, reminder và email chưa được kết nối. Chưa có AWS resource nào được deploy.
+Repository đang chuyển từ scaffold sang các vertical slice thật:
 
-## Kiến trúc mục tiêu đã chốt
+- Cognito authentication đã được triển khai và kiểm thử bằng stack integration riêng; stack kiểm thử trước đó đã cleanup.
+- Frontend nghiệp vụ vẫn còn mock ở nhiều màn hình.
+- API nghiệp vụ và DynamoDB repositories vẫn còn skeleton/TODO; việc bảng tồn tại không đồng nghĩa backend đã persistence thật.
+- Nhóm đã chốt phạm vi M5 gồm upload an toàn, live transcription, AIJob, transcript, Bedrock RAG nhiều meeting và citation.
+- Account dev hiện có 17 bảng DynamoDB legacy được tạo trước khi data model được review. Các bảng này chưa phải source of truth mới và không được xóa trước audit/backup.
+- Data model v2 dùng 5 bảng vật lý, được định nghĩa tại `infra/data-foundation.yaml` và giải thích tại [Mô hình DynamoDB v2](dynamodb-data-model.md).
+
+## Kiến trúc mục tiêu
 
 ```mermaid
 flowchart LR
@@ -14,6 +21,7 @@ flowchart LR
   DG["Deepgram\nOptional STT adapter"]
   E["Email recipient"]
   CF["CloudFront\nEdge / global"]
+
   subgraph AWS["AWS Cloud"]
     subgraph R["AWS Region"]
       S3["S3 static private bucket"]
@@ -22,7 +30,15 @@ flowchart LR
       APIG["API Gateway HTTP API"]
       API["API Lambda"]
       PORT["Repository interfaces"]
-      DDB["DynamoDB"]
+
+      subgraph DDB["DynamoDB data foundation v2"]
+        IDT["identity"]
+        COL["collaboration"]
+        MTG["meeting-data"]
+        TSK["task-data"]
+        AIW["ai-work"]
+      end
+
       SCH["EventBridge Scheduler"]
       REM["Reminder Lambda"]
       SFN["Step Functions\nAI jobs"]
@@ -36,79 +52,101 @@ flowchart LR
       SNS["SNS topic"]
     end
   end
+
   U -->|"1. tải frontend"| CF --> S3
   U -->|"mở cuộc họp + side panel"| MA
   MA -->|"tải route add-on HTTPS"| CF
-  U -->|"2. gọi API"| APIG -->|"3. invoke"| API
-  U -. "xác thực mục tiêu" .-> COG
-  API -->|"4. gọi repository"| PORT --> DDB
-  API -. "5. Calendar / Meet artifacts" .-> G
+  U -->|"2. gọi API + JWT"| APIG -->|"3. invoke"| API
+  U -. "đăng nhập" .-> COG
+  API -->|"4. application/repository"| PORT --> DDB
+  API -. "5. Calendar / Meet artifact" .-> G
   SCH -->|"6. invoke"| REM
-  REM -->|"7a. tạo notification"| DDB
+  REM -->|"7a. đọc meeting + tạo notification"| DDB
   REM -. "7b. thử gửi email" .-> SES --> E
   API -->|"8. presigned URL"| S3C
   U -->|"9. upload trực tiếp"| S3C
-  S3C -->|"10. tạo AI job"| SFN
-  SFN -->|"11a. STT mặc định"| TR
-  SFN -. "11b. adapter tùy chọn" .-> DG
-  SFN -->|"12. parse / generation"| AI --> BR
-  BR -->|"13. grounded retrieval"| KB --> VEC
-  AI -->|"14. transcript / job / citation"| DDB
+  API -->|"10. tạo AIJob"| DDB
+  API -->|"11. start execution"| SFN
+  SFN -->|"12a. STT"| TR
+  SFN -. "12b. adapter tùy chọn" .-> DG
+  SFN -->|"13. parse / normalize / generation"| AI --> BR
+  BR -->|"14. grounded retrieval"| KB --> VEC
+  AI -->|"15. job/source/citation metadata"| DDB
   API --> CW
   REM --> CW
   SFN --> CW
   AI --> CW
-  CW -->|"15. alarm"| SNS
+  CW -->|"16. alarm"| SNS
 ```
 
-Luồng chính:
+## Luồng chính
 
-1. Browser tải static frontend qua CloudFront và S3 private.
-2. Browser gọi API Gateway bằng token Cognito ở giai đoạn triển khai thật.
-3. API Gateway gọi API Lambda.
-4. Lambda gọi repository interface; adapter DynamoDB thật chưa tồn tại.
-5. Google Calendar dùng để tạo/sửa/hủy event và Meet link. Meet REST API là adapter hậu họp để lấy conference artifacts khi gói/quyền thực tế cho phép; nếu không có thì UI dùng upload/recording fallback.
+1. Browser tải React assets qua CloudFront và S3 private.
+2. Cognito xác thực người dùng; frontend gọi API Gateway bằng JWT.
+3. API Gateway kiểm tra token trước khi invoke Lambda.
+4. Lambda gọi application service và repository; backend luôn kiểm tra membership/role theo `groupId`.
+5. Google Calendar tạo/sửa/hủy event và Meet link. Meet REST API chỉ lấy artifact khi artifact tồn tại và OAuth scope cho phép.
 6. EventBridge Scheduler gọi Reminder Lambda theo one-time schedule.
-7. Reminder tạo in-app notification trước, sau đó mới thử gửi email SES.
-8. API chỉ cấp presigned URL sau kiểm tra quyền và metadata.
-9. Browser upload tài liệu/audio trực tiếp vào S3 user-content; file lớn không đi qua API Gateway/Lambda.
-10. Upload hợp lệ tạo `AIJob`; Step Functions điều phối parse, STT, ingestion và generation bất đồng bộ.
-11. `SpeechToTextProvider` xử lý ngôn ngữ đang nói; tiếng Việt là ngôn ngữ benchmark ưu tiên. Amazon Transcribe là adapter AWS mặc định, provider khác có thể thay thế theo cấu hình.
-12. AI Worker gọi Amazon Bedrock. Model ID là cấu hình, không hard-code trong domain.
-13. RAG dùng Bedrock Knowledge Bases + S3 Vectors với ba scope `CURRENT_MEETING`, `SELECTED_MEETINGS`, `WHOLE_GROUP`; mỗi query chỉ có một `groupId` và phải filter group/meeting-set/ACL/source status trước retrieval.
-14. Transcript segment, job status, conversation metadata, task/tool proposal và group progress snapshot nằm trong DynamoDB; nội dung media nằm trong S3 private.
-15. CloudWatch theo dõi core và AI pipeline; Alarm gửi cảnh báo qua SNS.
-16. CampusMeet web vẫn là sản phẩm chính. Google Meet có thể tải một route side panel tối giản từ cùng CloudFront origin; route này lấy meeting context bằng Meet Add-ons SDK và gọi chung API/authorization, không có backend riêng.
+7. Reminder đọc `meeting-data`, ghi notification vào `identity`, rồi thử gửi SES; email lỗi không rollback notification.
+8. API cấp presigned URL sau khi kiểm tra membership, MIME, size, checksum và object key.
+9. Browser upload binary trực tiếp vào S3; audio/file lớn không đi qua API Gateway hoặc Lambda payload.
+10. Complete-upload hợp lệ tạo đúng một `AIJob` idempotent trong `ai-work`.
+11. Step Functions điều phối parse, STT, ingestion và generation bất đồng bộ.
+12. Live STT lưu chỉ final segment theo sequence; partial result chỉ hiển thị tạm.
+13. AI Worker chuẩn hóa source, gọi Bedrock và cập nhật trạng thái an toàn.
+14. Approved source được ingest vào Knowledge Base/S3 Vectors với filterable metadata `groupId`, `meetingId`, `sourceType`, `sourceId`, `version`, `approved`.
+15. Conversation, citation, proposal, KnowledgeSource và AIJob control metadata nằm trong `ai-work`; binary và vector không nằm trong DynamoDB.
+16. CloudWatch theo dõi core + AI pipeline và gửi cảnh báo qua SNS.
 
-CloudFront là edge/global service; các AWS service còn lại được đặt trong Region. MVP không đặt Lambda trong VPC và không dùng NAT Gateway để tránh chi phí, độ trễ và vận hành không cần thiết.
+## Data foundation 5 bảng
 
-Sơ đồ là **target architecture**, không phải bằng chứng đã deploy hoặc đã tích hợp Google/AWS.
+| Bảng | Aggregate chính |
+| --- | --- |
+| `identity` | User, preference, Google integration reference, OAuth state, notification |
+| `collaboration` | Group, membership, invitation, audit event |
+| `meeting-data` | Meeting, attendee, agenda, minutes, reminder, attachment metadata, recording, consent, live session, transcript/segment |
+| `task-data` | Task và task history, index theo group/assignee/meeting |
+| `ai-work` | AIJob, KnowledgeSource, conversation/message/citation, task/tool proposal, idempotency |
+
+Mỗi entity logic vẫn tồn tại. Việc gom bảng dùng composite `PK/SK`, sparse GSI và item collection; không nhồi toàn bộ project thành một item hoặc một partition.
+
+`infra/data-foundation.yaml` là data stack độc lập. `infra/template.yaml` là application stack và chỉ tham chiếu tên 5 bảng qua `DataTablePrefix`; nó không tạo lại DynamoDB tables.
 
 ## Quyết định AI và Google đã chốt
 
 - Không xây video call/WebRTC; Calendar API vẫn là luồng tạo event và Meet link.
-- Meet REST API chỉ đồng bộ participants/recording/transcript khi artifact tồn tại và OAuth scope cho phép. MVP dùng nút đồng bộ hoặc polling AWS có giới hạn; không dùng Google Workspace Events vì notification endpoint yêu cầu Google Cloud Pub/Sub.
-- Mỗi phiên họp phải khởi tạo live transcription chạy nền sau user gesture/consent và giữ hoạt động trong suốt phiên. Voice record/live transcript là nguồn duy nhất của nội dung phát biểu; agenda hoặc participant metadata không được dùng để suy đoán nội dung. Khi stream lỗi, các chức năng phụ thuộc nội dung bị khóa nhưng quản lý cuộc họp cơ bản vẫn hoạt động.
-- STT giữ ngôn ngữ đang nói, ưu tiên chất lượng tiếng Việt và chỉ gắn `Speaker 1/2/...` ẩn danh; không có speaker-to-user mapping hoặc voice identity.
-- Tài liệu có thể upload trước/trong/sau meeting. Chatbot current-meeting kết hợp document retrieval với segment final đọc trực tiếp từ transcript store; approved transcript/minutes mới ingest vào Knowledge Base cho selected/whole-group. Live source luôn được đánh dấu chưa duyệt.
-- Biên bản AI ghi diễn biến/quyết định/action item đã được nêu. Task proposal có citation và chỉ gọi Task API sau preview, xác nhận, authorization và idempotency.
-- RAG hỗ trợ current/selected/whole-group trong tối đa một group; không cross-group, reranking hoặc implicit filter trong MVP. Khi thiếu nguồn, trợ lý yêu cầu bổ sung hoặc báo không đủ căn cứ.
-- Phân tích tiến độ chỉ diễn giải snapshot task/meeting cấp nhóm do backend tính; không đánh giá cá nhân và không gây mutation.
-- CampusMeet không chuyển toàn bộ thành add-on và không nhúng giao diện Meet vào iframe thông thường. Meet Add-on chỉ là client surface tối giản trong side panel/main stage, dùng chung web assets, API, dữ liệu và authorization.
-- MVP dùng deployment add-on chưa công bố để thử nghiệm. Private Marketplace chỉ dành cho cùng Google Workspace organization; public Marketplace cần Google review/OAuth verification phù hợp và không được làm chậm Core MVP.
-- Panel trong CampusMeet web là fallback bắt buộc khi add-on chưa cài/bị quản trị viên chặn; Document PiP chỉ là progressive enhancement bổ sung.
+- Meet REST API chỉ đồng bộ participants/recording/transcript khi artifact và quyền thực tế cho phép; upload/recording fallback vẫn bắt buộc.
+- Mỗi phiên họp khởi tạo live transcription sau user gesture/consent và hiển thị trạng thái `STARTING/ACTIVE/RECONNECTING/FAILED`.
+- Voice/live transcript là nguồn nội dung phát biểu; agenda hoặc participant metadata không được dùng để suy đoán người dùng đã nói gì.
+- STT giữ ngôn ngữ đang nói, ưu tiên chất lượng tiếng Việt và chỉ gắn `Speaker N`; không tự nhận diện danh tính.
+- Partial transcript không lưu hoặc ingest. Final segment ghi idempotent theo `sessionId + sequence`/`ResultId`.
+- Chat current-meeting có thể đọc final segment được phép trực tiếp; approved transcript/minutes/file mới ingest vào Knowledge Base cho selected/whole-group RAG.
+- Retrieval luôn filter group/meeting-set/ACL/source status trước khi model nhận chunk.
+- AI output là draft có citation. Task/tool proposal chỉ thực thi sau preview, authorization, optimistic version và idempotency.
+- Phân tích tiến độ chỉ diễn giải snapshot task/meeting do backend tính; không đánh giá cá nhân.
+- CampusMeet web là sản phẩm chính; Meet Add-on chỉ là client surface dùng chung API, data và authorization.
 
 ## Nguyên tắc dữ liệu và quyền
 
 - Timestamp lưu UTC; frontend hiển thị theo timezone người dùng.
-- Một nhóm luôn có ít nhất một Group Admin.
+- Một group luôn có ít nhất một active Group Admin.
 - Chỉ active member được làm attendee hoặc assignee.
-- Mọi thao tác group-scoped phải kiểm tra membership theo `groupId` sau khi xác thực danh tính.
-- Một meeting có một organizer; Meet link chỉ hiện khi integration status là `READY`.
-- Task overdue là dữ liệu tính toán, không phải một trạng thái task mới.
-- `meetingStatus` và `googleSyncStatus` là hai state machine độc lập.
-- Tài liệu, transcript, biên bản và vector đều mang `groupId`, `meetingId`, source status và ACL; filter group/meeting-set/quyền xảy ra trước retrieval.
-- Audio, transcript và AI conversation có consent/retention; nội dung nhạy cảm không được ghi vào application log.
-- Task/tool proposal không có quyền riêng; nó chỉ được thực thi bằng quyền hiện tại của người dùng đã xác nhận.
+- Mọi thao tác group-scoped kiểm tra membership sau khi xác thực JWT.
+- Không dùng `Scan` trong request nghiệp vụ thông thường.
+- Mutation nhiều item dùng conditional write/transaction; service ngoài dùng state + idempotency, không giả lập distributed transaction.
+- File/audio/transcript/conversation áp dụng consent và retention; không ghi nội dung nhạy cảm vào application log.
+- Lambda dùng IAM execution role; không hard-code AWS credential hoặc access key.
+- Local test dùng in-memory repository hoặc DynamoDB Local; AWS dev dành cho integration test chung.
 
-Các quyết định cần nhóm chốt trước triển khai nằm trong [kế hoạch nhóm](ke-hoach-trien-khai-nhom.md).
+## Trình tự triển khai
+
+1. Audit 17 bảng legacy ở chế độ read-only.
+2. Backup/export nếu có dữ liệu.
+3. Deploy data stack v2 tạo 5 bảng mới.
+4. Verify schema, TTL, GSI và tag.
+5. Implement repository theo [mô hình v2](dynamodb-data-model.md).
+6. Deploy application stack với cùng `DataTablePrefix`.
+7. Smoke test core + M5.
+8. Chỉ sau khi không còn code đọc/ghi legacy mới xóa bảng cũ.
+
+Sơ đồ trên là kiến trúc mục tiêu. Trạng thái triển khai thực tế phải được cập nhật bằng bằng chứng CloudFormation output, smoke test và logs; không suy ra chỉ từ việc template tồn tại.

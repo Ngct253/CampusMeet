@@ -18,9 +18,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run infra:validate
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
 
-# Deliberately no AWS deploy job in scaffold CI.
+# Deliberately no AWS deploy job. Infrastructure deployment requires reviewed change sets.

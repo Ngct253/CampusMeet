@@ -1,12 +1,17 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: CampusMeet target infrastructure skeleton - no resources are deployed by this repository.
+Description: CampusMeet target application infrastructure using the shared five-table DynamoDB data foundation.
 
 Parameters:
   Environment:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+  DataTablePrefix:
+    Type: String
+    Default: campusmeet-dev
+    AllowedPattern: '^[a-z0-9-]+$'
+    Description: Prefix of the separately deployed DynamoDB data foundation.
   DomainName:
     Type: String
     Default: example.invalid
@@ -104,7 +109,7 @@ Resources:
       StageName: !Ref Environment
       CorsConfiguration:
         AllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
-        AllowHeaders: [authorization, content-type, x-request-id]
+        AllowHeaders: [authorization, content-type, x-request-id, idempotency-key]
         AllowOrigins: ['*'] # TODO(M5): replace with the deployed CloudFront domain.
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
@@ -123,32 +128,48 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          [
-            {
-              Effect: Allow,
-              Principal: { Service: lambda.amazonaws.com },
-              Action: 'sts:AssumeRole',
-            },
-          ]
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
       ManagedPolicyArns:
-        [!Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
         - PolicyName: CampusMeetApiDataAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:Query]
-                Resource:
-                  - !GetAtt GroupsTable.Arn
-                  - !GetAtt MeetingsTable.Arn
-                  - !GetAtt TasksTable.Arn
-                  - !GetAtt NotificationsTable.Arn
-              - Effect: Allow
+              - Sid: ReadWriteCampusMeetDataFoundation
+                Effect: Allow
                 Action:
-                  [scheduler:CreateSchedule, scheduler:UpdateSchedule, scheduler:DeleteSchedule]
+                  - dynamodb:DescribeTable
+                  - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:Query
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:ConditionCheckItem
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity/index/*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-collaboration'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-collaboration/index/*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data/index/*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-task-data'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-task-data/index/*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-ai-work'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-ai-work/index/*'
+              - Sid: ManageCampusMeetSchedules
+                Effect: Allow
+                Action:
+                  - scheduler:CreateSchedule
+                  - scheduler:UpdateSchedule
+                  - scheduler:DeleteSchedule
                 Resource: !Sub 'arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/campusmeet-*'
-              - Effect: Allow
+              - Sid: PassReminderRole
+                Effect: Allow
                 Action: iam:PassRole
                 Resource: !GetAtt SchedulerExecutionRole.Arn
       Tags: *ResourceTags
@@ -156,20 +177,22 @@ Resources:
   ApiFunction:
     Type: AWS::Serverless::Function
     Metadata:
-      {
-        BuildMethod: esbuild,
-        BuildProperties: { EntryPoints: [src/index.ts], Target: es2022, Minify: false },
-      }
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints: [src/index.ts]
+        Target: es2022
+        Minify: false
     Properties:
       CodeUri: ../services/api
       Handler: src/index.handler
       Role: !GetAtt ApiLambdaRole.Arn
       Environment:
         Variables:
-          GROUPS_TABLE: !Ref GroupsTable
-          MEETINGS_TABLE: !Ref MeetingsTable
-          TASKS_TABLE: !Ref TasksTable
-          NOTIFICATIONS_TABLE: !Ref NotificationsTable
+          IDENTITY_TABLE: !Sub '${DataTablePrefix}-identity'
+          COLLABORATION_TABLE: !Sub '${DataTablePrefix}-collaboration'
+          MEETING_DATA_TABLE: !Sub '${DataTablePrefix}-meeting-data'
+          TASK_DATA_TABLE: !Sub '${DataTablePrefix}-task-data'
+          AI_WORK_TABLE: !Sub '${DataTablePrefix}-ai-work'
           GOOGLE_SECRET_REFERENCE: !Ref GoogleSecretReference
       Events:
         Health:
@@ -195,43 +218,51 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          [
-            {
-              Effect: Allow,
-              Principal: { Service: lambda.amazonaws.com },
-              Action: 'sts:AssumeRole',
-            },
-          ]
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
       ManagedPolicyArns:
-        [!Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
         - PolicyName: ReminderDelivery
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - {
-                  Effect: Allow,
-                  Action: [dynamodb:GetItem, dynamodb:PutItem],
-                  Resource: [!GetAtt MeetingsTable.Arn, !GetAtt NotificationsTable.Arn],
-                }
-              - { Effect: Allow, Action: [ses:SendEmail], Resource: '*' } # TODO(M5): scope after SES identities are known.
+              - Sid: ReadMeetingAndWriteNotification
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:ConditionCheckItem
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data/index/*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity/index/*'
+              - Sid: SendReminderEmail
+                Effect: Allow
+                Action: ses:SendEmail
+                Resource: '*' # TODO(M5): scope after SES identities are known.
       Tags: *ResourceTags
 
   ReminderFunction:
     Type: AWS::Serverless::Function
     Metadata:
-      {
-        BuildMethod: esbuild,
-        BuildProperties: { EntryPoints: [src/index.ts], Target: es2022, Minify: false },
-      }
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints: [src/index.ts]
+        Target: es2022
+        Minify: false
     Properties:
       CodeUri: ../services/api
       Handler: src/index.reminderHandler
       Role: !GetAtt ReminderLambdaRole.Arn
       Environment:
         Variables:
-          MEETINGS_TABLE: !Ref MeetingsTable
-          NOTIFICATIONS_TABLE: !Ref NotificationsTable
+          MEETING_DATA_TABLE: !Sub '${DataTablePrefix}-meeting-data'
+          IDENTITY_TABLE: !Sub '${DataTablePrefix}-identity'
           SES_CONFIGURATION_SET: !Ref SesConfigurationSet
       Tags: *SamTags
 
@@ -242,25 +273,17 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          [
-            {
-              Effect: Allow,
-              Principal: { Service: scheduler.amazonaws.com },
-              Action: 'sts:AssumeRole',
-            },
-          ]
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: InvokeReminderOnly
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              [
-                {
-                  Effect: Allow,
-                  Action: lambda:InvokeFunction,
-                  Resource: !GetAtt ReminderFunction.Arn,
-                },
-              ]
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ReminderFunction.Arn
       Tags: *ResourceTags
 
   DeploymentRole:
@@ -271,18 +294,17 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          [
-            {
-              Effect: Allow,
-              Principal: { Service: !Sub 'cloudformation.${AWS::URLSuffix}' },
-              Action: 'sts:AssumeRole',
-            },
-          ]
+          - Effect: Allow
+            Principal: { Service: !Sub 'cloudformation.${AWS::URLSuffix}' }
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: ReadStackOnly
           PolicyDocument:
             Version: '2012-10-17'
-            Statement: [{ Effect: Allow, Action: [cloudformation:DescribeStacks], Resource: '*' }]
+            Statement:
+              - Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: '*'
       Tags: *ResourceTags
 
   UserPool:
@@ -311,24 +333,6 @@ Resources:
       ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
       PreventUserExistenceErrors: ENABLED
 
-  GroupsTable:
-    Type: AWS::DynamoDB::Table
-    Properties: &TableProperties
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
-      KeySchema: [{ AttributeName: id, KeyType: HASH }]
-      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false }
-      Tags: *ResourceTags
-  MeetingsTable:
-    Type: AWS::DynamoDB::Table
-    Properties: *TableProperties
-  TasksTable:
-    Type: AWS::DynamoDB::Table
-    Properties: *TableProperties
-  NotificationsTable:
-    Type: AWS::DynamoDB::Table
-    Properties: *TableProperties
-
   SesConfigurationSet:
     Type: AWS::SES::ConfigurationSet
     Properties: { Name: !Sub 'campusmeet-${Environment}' }
@@ -336,11 +340,16 @@ Resources:
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      { LogGroupName: !Sub '/aws/lambda/${ApiFunction}', RetentionInDays: 14, Tags: *ResourceTags }
+      LogGroupName: !Sub '/aws/lambda/${ApiFunction}'
+      RetentionInDays: 14
+      Tags: *ResourceTags
+
   ReminderLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      { LogGroupName: !Sub '/aws/lambda/${ReminderFunction}', RetentionInDays: 14, Tags: *ResourceTags }
+      LogGroupName: !Sub '/aws/lambda/${ReminderFunction}'
+      RetentionInDays: 14
+      Tags: *ResourceTags
 
   AlarmTopic:
     Type: AWS::SNS::Topic
@@ -369,7 +378,13 @@ Outputs:
   FrontendBucketName: { Value: !Ref FrontendBucket }
   CloudFrontDomainName: { Value: !GetAtt FrontendDistribution.DomainName }
   ApiUrl:
-    { Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Environment}' }
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Environment}'
   UserPoolId: { Value: !Ref UserPool }
   UserPoolClientId: { Value: !Ref UserPoolClient }
+  DataTablePrefix: { Value: !Ref DataTablePrefix }
+  IdentityTableName: { Value: !Sub '${DataTablePrefix}-identity' }
+  CollaborationTableName: { Value: !Sub '${DataTablePrefix}-collaboration' }
+  MeetingDataTableName: { Value: !Sub '${DataTablePrefix}-meeting-data' }
+  TaskDataTableName: { Value: !Sub '${DataTablePrefix}-task-data' }
+  AIWorkTableName: { Value: !Sub '${DataTablePrefix}-ai-work' }
   ConfiguredDomainPlaceholder: { Value: !Ref DomainName }
