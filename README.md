@@ -1,39 +1,66 @@
 # CampusMeet
 
-CampusMeet là hệ thống quản lý quy trình **trước, trong và sau cuộc họp** cho nhóm học tập, nhóm đồ án và nhóm dự án nhỏ: tạo nhóm, lập lịch, ghi biên bản, chuyển action item thành task và theo dõi tiến độ. CampusMeet không clone Google Meet; Google Meet chỉ là dịch vụ ngoài hệ thống, dự kiến được tích hợp thông qua Google Calendar API.
+CampusMeet quản lý quy trình **trước, trong và sau cuộc họp** cho nhóm học tập, đồ án và dự án nhỏ: tạo nhóm, lập lịch, ghi biên bản, chuyển action item thành task, live transcription, hỏi đáp có citation và theo dõi tiến độ.
+
+CampusMeet không clone Google Meet. Google Meet là dịch vụ ngoài được tích hợp qua Google Calendar/Meet APIs; CampusMeet web và Meet Add-on dùng chung API, dữ liệu và authorization.
 
 ## Trạng thái hiện tại
 
-Repository đang chuyển từ **scaffold** sang tích hợp thật. Đăng ký, xác nhận email, đăng nhập, đăng xuất và route bảo vệ đã được triển khai bằng Amazon Cognito; các chức năng nghiệp vụ vẫn dùng mock hoặc handler skeleton.
+Repository đang chuyển từ scaffold sang các vertical slice tích hợp thật.
 
-| Thành phần            | Trạng thái hiện tại                                                   |
-| --------------------- | --------------------------------------------------------------------- |
-| Frontend              | Có application shell, auth thật khi có env và mock data nghiệp vụ     |
-| Backend               | Có `/health`, `/me` cho auth integration và các handler skeleton      |
-| API nghiệp vụ         | Chưa triển khai, hiện có thể trả `501 Not Implemented`                |
-| Cognito               | Đã triển khai và xác minh; cần deploy stack riêng cho môi trường nhóm |
-| DynamoDB              | Chưa kết nối thật                                                     |
-| Google OAuth/Calendar | Chưa triển khai thật                                                  |
-| Reminder              | Chưa chạy thật                                                        |
-| AWS resources         | Không có stack đang hoạt động sau lần kiểm thử/cleanup                |
-| Deploy                | Auth integration đã deploy thử, smoke test và xóa thành công          |
+| Thành phần | Trạng thái |
+| --- | --- |
+| Frontend | Có application shell, Cognito auth thật khi có env; nhiều màn hình nghiệp vụ vẫn dùng mock |
+| Backend | Có `/health`, `/me` và handler skeleton; repository nghiệp vụ chưa hoàn thiện |
+| Cognito | Đã deploy/kiểm thử bằng auth integration stack; stack thử trước đó đã cleanup |
+| DynamoDB legacy | Account dev hiện có 17 bảng cũ được tạo trước khi review data model; chưa xóa |
+| DynamoDB v2 | Đã chốt thiết kế 5 bảng trong IaC; cần deploy và verify lại |
+| Google Calendar/Meet | Contract/kiến trúc đã chốt; adapter thật chưa hoàn thiện |
+| M5 AI | Đã chốt upload, live transcript, AIJob, Knowledge Base RAG nhiều meeting và citation; implementation còn theo kế hoạch M5 |
+| Full deployment | Chưa production-ready; triển khai theo từng stack/giai đoạn |
 
-## Công nghệ sử dụng
+Việc bảng AWS tồn tại không có nghĩa backend đã kết nối persistence thật. Data layer chỉ hoàn thành khi repository, authorization, transaction và integration tests đạt.
+
+## DynamoDB data model v2
+
+CampusMeet dùng 5 bảng vật lý theo access pattern:
+
+```text
+campusmeet-dev-identity
+campusmeet-dev-collaboration
+campusmeet-dev-meeting-data
+campusmeet-dev-task-data
+campusmeet-dev-ai-work
+```
+
+- `identity`: user, preference, Google integration reference, OAuth state, notification.
+- `collaboration`: group, membership, invitation, audit event.
+- `meeting-data`: meeting, attendee, agenda, minutes, reminder, attachment metadata, recording, consent, live session, transcript và segment.
+- `task-data`: task và task history, index theo group/assignee/meeting.
+- `ai-work`: AIJob, KnowledgeSource, conversation/message/citation, task/tool proposal và idempotency.
+
+Entity logic không bị xóa khi giảm từ 17 xuống 5 bảng; chúng được lưu bằng composite `PK/SK` và sparse GSI. Binary/audio nằm trong S3, vector nằm trong Bedrock Knowledge Bases/S3 Vectors.
+
+Đọc chi tiết tại [Mô hình dữ liệu DynamoDB v2](docs/dynamodb-data-model.md).
+
+## Công nghệ
 
 - Frontend: React, TypeScript, Vite, React Router, TanStack Query boundary.
-- Backend: Node.js/TypeScript theo cấu trúc AWS Lambda.
-- Hạ tầng mục tiêu: AWS SAM, S3, CloudFront, Cognito, API Gateway HTTP API, Lambda, DynamoDB, EventBridge Scheduler, SES, CloudWatch và SNS.
+- Backend: Node.js/TypeScript trên AWS Lambda.
+- Auth/API: Cognito User Pool, API Gateway HTTP API.
+- Data: DynamoDB 5-table model, S3 user-content.
+- Workflow/AI mục tiêu: EventBridge Scheduler, Step Functions, Amazon Transcribe, Amazon Bedrock, Bedrock Knowledge Bases và S3 Vectors.
+- Vận hành: CloudWatch, SNS, SES.
+- IaC: AWS SAM/CloudFormation.
 
-Đây là **target architecture**, không phải mô tả một hệ thống đã deploy.
+Đây là target architecture; trạng thái thật phải dựa trên CloudFormation outputs, smoke tests và logs.
 
-## Điều kiện cần trước khi chạy
+## Điều kiện chạy local
 
-- Node.js 22 LTS, phù hợp runtime `nodejs22.x` trong SAM template.
+- Node.js 22 LTS.
 - npm 10 trở lên.
-
-Chỉ cần AWS CLI, AWS SAM CLI và quyền AWS phù hợp khi muốn chạy đăng nhập thật. Không cần Google credential cho auth hiện tại.
-
-## Clone và chạy local
+- AWS CLI và AWS SAM CLI khi validate/deploy AWS.
+- PowerShell cho các script audit/verify hiện tại.
 
 ```bash
 git clone <repository-url>
@@ -42,51 +69,11 @@ npm install
 npm run dev
 ```
 
-`npm run dev` gọi `npm run dev:web`, khởi động Vite tại `http://localhost:5173`. Nếu chưa cấu hình Cognito, frontend hiển thị thông báo chưa kết nối AWS; dữ liệu nghiệp vụ vẫn là mock.
+`npm run dev` khởi động Vite tại `http://localhost:5173`.
 
-## Cấu hình đăng ký và đăng nhập
+## Cấu hình Cognito frontend
 
-Một thành viên phụ trách AWS deploy stack auth; các thành viên còn lại chỉ dùng ba output công khai trong `.env.local`. Không chia sẻ AWS credential, token hoặc mật khẩu.
-
-### 1. Deploy auth integration
-
-Đăng nhập AWS, xác nhận đúng account/Region, sau đó validate và build:
-
-```powershell
-aws login --profile <aws-profile> --region <aws-region>
-aws sts get-caller-identity --profile <aws-profile>
-
-sam validate --template-file infra/auth-integration.yaml --lint --profile <aws-profile> --region <aws-region>
-npm run sam:build:auth
-```
-
-Preview change set trước khi tạo tài nguyên:
-
-```powershell
-sam deploy `
-  --template-file infra/auth-integration.yaml `
-  --stack-name <stack-name> `
-  --resolve-s3 `
-  --capabilities CAPABILITY_IAM `
-  --parameter-overrides AllowedOrigin=http://localhost:5173 `
-  --no-execute-changeset `
-  --profile <aws-profile> `
-  --region <aws-region>
-```
-
-Review rồi execute change set theo [hướng dẫn cấu hình đăng nhập](docs/huong-dan-cau-hinh-dang-nhap.md). Sau khi stack hoàn thành, lấy ba output:
-
-```powershell
-aws cloudformation describe-stacks `
-  --stack-name <stack-name> `
-  --query "Stacks[0].Outputs" `
-  --profile <aws-profile> `
-  --region <aws-region>
-```
-
-### 2. Cấu hình frontend
-
-Tạo `apps/web/.env.local` từ `apps/web/.env.example` và điền output tương ứng:
+Một thành viên deploy auth stack; các thành viên khác chỉ nhận ba output public trong `apps/web/.env.local`:
 
 ```dotenv
 VITE_COGNITO_USER_POOL_ID=<UserPoolId>
@@ -94,73 +81,160 @@ VITE_COGNITO_USER_POOL_CLIENT_ID=<UserPoolClientId>
 VITE_API_BASE_URL=<ApiUrl>
 ```
 
-Ba giá trị này là cấu hình public của frontend, không phải secret. Không commit `.env.local`. Khởi động lại Vite sau mỗi lần sửa env:
+Không commit `.env.local`, token, password hoặc AWS credential.
+
+Validate/build auth:
 
 ```powershell
-npm run dev
+aws sts get-caller-identity --profile <profile>
+
+sam validate `
+  --template-file infra/auth-integration.yaml `
+  --lint `
+  --profile <profile> `
+  --region ap-southeast-1
+
+npm run sam:build:auth
 ```
 
-### 3. Kiểm tra luồng auth
+Chi tiết nằm tại [Hướng dẫn cấu hình đăng nhập](docs/huong-dan-cau-hinh-dang-nhap.md).
 
-1. Mở `http://localhost:5173/sign-up`, đăng ký bằng email có thể nhận mã.
-2. Nhập mã Cognito gửi qua email để xác nhận tài khoản.
-3. Đăng nhập tại `/sign-in`; ứng dụng phải chuyển vào route được bảo vệ.
-4. Đăng xuất; route được bảo vệ phải chuyển lại về trang đăng nhập.
-5. `/health` phải trả `200`; `/me` không có Bearer token phải trả `401`.
+## Triển khai lại DynamoDB dev
 
-Password hiện cần tối thiểu 8 ký tự, gồm chữ thường, chữ hoa, số và ký tự đặc biệt. Chi tiết deploy, smoke test, lỗi thường gặp và cleanup nằm trong [Hướng dẫn triển khai AWS theo giai đoạn](docs/huong-dan-trien-khai-aws.md).
+### 1. Audit 17 bảng cũ — không sửa/xóa
 
-Cách lấy riêng từng ID bằng CLI/AWS Console, ánh xạ output và xử lý lỗi CORS/API URL được ghi đầy đủ trong [Hướng dẫn cấu hình đăng ký và đăng nhập](docs/huong-dan-cau-hinh-dang-nhap.md).
+```powershell
+powershell -NoProfile -File scripts/audit-legacy-data-foundation.ps1 `
+  -Profile <profile> `
+  -Region ap-southeast-1 `
+  -ExpectedAccountId 604360241374 `
+  -ExportCsv legacy-dynamodb-audit.csv
+```
+
+Nếu bất kỳ bảng nào có dữ liệu, tạo backup/export và review migration trước khi xóa.
+
+### 2. Validate data template
+
+```powershell
+sam validate `
+  --template-file infra/data-foundation.yaml `
+  --lint `
+  --profile <profile> `
+  --region ap-southeast-1
+```
+
+Hoặc:
+
+```powershell
+npm run sam:validate:data -- --profile <profile> --region ap-southeast-1
+```
+
+### 3. Preview change set
+
+```powershell
+sam deploy `
+  --template-file infra/data-foundation.yaml `
+  --stack-name campusmeet-dev-data-v2 `
+  --resolve-s3 `
+  --parameter-overrides `
+    Environment=dev `
+    TablePrefix=campusmeet-dev `
+    EnablePointInTimeRecovery=false `
+    EnableDeletionProtection=false `
+  --no-execute-changeset `
+  --profile <profile> `
+  --region ap-southeast-1
+```
+
+Review change set. Nó phải tạo đúng 5 bảng mới và không sửa/xóa 17 bảng legacy.
+
+### 4. Execute và verify
+
+Sau khi execute change set:
+
+```powershell
+powershell -NoProfile -File scripts/verify-data-foundation.ps1 `
+  -Profile <profile> `
+  -Region ap-southeast-1 `
+  -TablePrefix campusmeet-dev `
+  -ExpectedAccountId 604360241374
+```
+
+Không xóa bảng cũ chỉ vì verify v2 đạt. Backend phải chuyển sang 5 biến môi trường mới và smoke test xong trước.
+
+## Biến môi trường backend
+
+Application stack truyền:
+
+```dotenv
+IDENTITY_TABLE=campusmeet-dev-identity
+COLLABORATION_TABLE=campusmeet-dev-collaboration
+MEETING_DATA_TABLE=campusmeet-dev-meeting-data
+TASK_DATA_TABLE=campusmeet-dev-task-data
+AI_WORK_TABLE=campusmeet-dev-ai-work
+```
+
+Lambda dùng IAM execution role; không đặt access key vào env của Lambda.
+
+Local development nên dùng in-memory repository hoặc DynamoDB Local. Shared AWS dev chỉ dùng cho integration/smoke test.
+
+## Quy trình nhóm với database
+
+1. Chốt use case và access pattern.
+2. Cập nhật key contract trong `docs/dynamodb-data-model.md` nếu thật sự cần.
+3. Owner infra review mọi thay đổi GSI/table.
+4. Developer code qua repository interface; handler không query DynamoDB trực tiếp.
+5. Unit test bằng in-memory repository.
+6. Local integration bằng DynamoDB Local.
+7. PR chạy lint/typecheck/test/build.
+8. Chỉ owner infra deploy shared AWS dev.
+9. Integration test dùng dữ liệu có prefix/`createdBy` của từng thành viên.
+10. Không tự tạo index/table bằng Console.
 
 ## Kiểm tra chất lượng
 
-| Lệnh                   | Mục đích                                             |
-| ---------------------- | ---------------------------------------------------- |
-| `npm run lint`         | Kiểm tra quy tắc ESLint toàn monorepo                |
-| `npm run typecheck`    | Chạy TypeScript strict check cho các workspace       |
-| `npm run test`         | Chạy smoke tests bằng Vitest                         |
-| `npm run build`        | Compile shared/API và tạo frontend production bundle |
-| `npm run format`       | Format file bằng Prettier                            |
-| `npm run format:check` | Kiểm tra format mà không sửa file                    |
+| Lệnh | Mục đích |
+| --- | --- |
+| `npm run lint` | ESLint toàn monorepo |
+| `npm run typecheck` | TypeScript strict check |
+| `npm run test` | Vitest |
+| `npm run build` | Build workspaces/frontend |
+| `npm run format:check` | Kiểm tra Prettier |
+| `npm run sam:validate:data` | Validate data foundation |
+| `npm run aws:audit:legacy-data` | Audit read-only 17 bảng cũ |
+| `npm run aws:verify:data` | Verify 5 bảng v2 |
 
-Trước Pull Request, chạy ít nhất `lint`, `typecheck`, `test` và `build`.
-
-## Lỗi thường gặp
-
-- **`npm install` lỗi chứng thư hoặc mạng:** kiểm tra proxy/CA của trường hoặc công ty; không tắt `strict-ssl`. Trên Node mới có thể thử dùng system CA theo chính sách máy.
-- **Node/npm không phù hợp:** kiểm tra bằng `node --version` và `npm --version`, ưu tiên Node.js 22 LTS.
-- **Port 5173 đang được dùng:** dừng process cũ hoặc chạy `npm run dev:web -- --port 5174`.
-- **Build/typecheck lỗi sau khi pull:** chạy lại `npm install`, sau đó `npm run typecheck` để tìm contract/import đã thay đổi.
-- **Không có `.env.local`:** giao diện vẫn chạy nhưng auth thật bị vô hiệu hóa; tạo file theo mục cấu hình đăng nhập và không commit file đó.
-- **Sửa `.env.local` nhưng auth chưa hoạt động:** restart Vite và kiểm tra ba tên biến khớp chính xác với `apps/web/.env.example`.
-- **AWS/SAM chưa chạy:** chỉ cần deploy khi nhóm muốn dùng auth thật; một người quản lý stack để tránh tạo tài nguyên trùng.
+Trước Pull Request chạy ít nhất `lint`, `typecheck`, `test`, `build` và validation liên quan tới file đã sửa.
 
 ## Cấu trúc repository
 
 ```text
-apps/web/          React/Vite application shell và mock UI
-services/api/      Lambda handlers, ports và adapter placeholders
-packages/shared/   Types, enums, DTO dùng chung
-infra/             AWS SAM source of truth
-docs/              SRS và tài liệu làm việc của nhóm
+apps/web/          React/Vite frontend
+services/api/      API Lambda, application/domain/repository boundaries
+packages/shared/   Shared types, enums, DTO
+infra/             Auth stack, data stack và application stack
+scripts/           AWS audit/verification helpers
+docs/              SRS, kiến trúc, API contract và runbook
 .github/           CI quality gates
 ```
 
-Đọc bản đồ chi tiết tại [Hướng dẫn cấu trúc repository](docs/huong-dan-cau-truc-repository.md).
+## Tài liệu chính
 
-## Tài liệu nhóm
-
-- [Hướng dẫn cấu trúc repository](docs/huong-dan-cau-truc-repository.md)
-- [Hướng dẫn cấu hình đăng ký và đăng nhập](docs/huong-dan-cau-hinh-dang-nhap.md)
-- [Kế hoạch triển khai nhóm 5 người](docs/ke-hoach-trien-khai-nhom.md)
-- [Hướng dẫn triển khai AWS theo giai đoạn](docs/huong-dan-trien-khai-aws.md)
+- [Mô hình dữ liệu DynamoDB v2](docs/dynamodb-data-model.md)
 - [Kiến trúc hệ thống](docs/architecture.md)
+- [Kế hoạch M5 upload/transcript/AI](docs/ke-hoach-m5-upload-transcript-ai.md)
+- [Hướng dẫn triển khai AWS](docs/huong-dan-trien-khai-aws.md)
+- [Hướng dẫn cấu trúc repository](docs/huong-dan-cau-truc-repository.md)
 - [API contract](docs/api-contract.md)
-- [Software Requirements Specification](docs/CampusMeet-SRS.md)
+- [SRS](docs/CampusMeet-SRS.md)
 
-## Cảnh báo bảo mật và chi phí
+## Bảo mật và chi phí
 
-- Không commit `.env`, token, secret, OAuth credential hoặc AWS credential.
-- Không deploy khi chưa được M5 và cả nhóm review; không dùng AWS root account.
-- Không chạy lệnh deploy hoặc xóa khi chưa hiểu resource và ảnh hưởng chi phí.
-- Stack auth từng được tạo để xác minh và đã cleanup; kiểm tra CloudFormation trước khi tạo stack mới.
+- Không dùng root account cho công việc hằng ngày; bật MFA.
+- Không dùng chung IAM user/access key.
+- Không commit secret, token, AWS credential hoặc dữ liệu người dùng thật.
+- Review account, Region, change set, IAM và chi phí trước deploy.
+- `PAY_PER_REQUEST` không đồng nghĩa chi phí luôn bằng 0.
+- Bật PITR/deletion protection cho staging/prod sau khi review chi phí và cleanup policy.
+- Binary ở S3 phải private, presigned URL ngắn hạn và kiểm tra checksum/metadata.
+- Retrieval AI phải filter quyền trước khi model nhận dữ liệu.
