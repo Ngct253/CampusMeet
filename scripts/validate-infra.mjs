@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-const expectedTables = [
+const expectedSuffixes = [
   'users',
   'groups',
   'memberships',
@@ -46,143 +46,129 @@ function assert(condition, message) {
   if (!condition) failures.push(message);
 }
 
-function keyAttributes(schema = []) {
-  return schema.map(({ AttributeName }) => AttributeName);
-}
-
 async function readJson(path) {
   try {
     return JSON.parse(await readFile(path, 'utf8'));
   } catch (error) {
-    failures.push(`${path} is not valid JSON/YAML-compatible JSON: ${error.message}`);
-    return { Resources: {} };
+    failures.push(`${path} is not valid JSON: ${error.message}`);
+    return {};
   }
 }
 
-const sourceTemplate = await readJson('infra/data-foundation.yaml');
-const generatedTemplate = await readJson('.aws-sam/data-foundation.generated.json');
+function normalizedSchema(schema = []) {
+  return schema.map(([name, type]) => `${type}:${name}`).sort();
+}
+
+function generatedSchema(schema = []) {
+  return schema.map(({ AttributeName, KeyType }) => `${KeyType}:${AttributeName}`).sort();
+}
+
+const spec = await readJson('infra/data-foundation.spec.json');
+const template = await readJson('.aws-sam/data-foundation.generated.json');
 const importMap = await readJson('.aws-sam/data-foundation-import.json');
 
-const sourceTables = Object.entries(sourceTemplate.Resources ?? {}).filter(
-  ([, resource]) => resource.Type === 'AWS::DynamoDB::Table',
-);
-const generatedTables = Object.entries(generatedTemplate.Resources ?? {}).filter(
-  ([, resource]) => resource.Type === 'AWS::DynamoDB::Table',
+assert(Array.isArray(spec.tables), 'Data foundation manifest must contain tables[].');
+assert(spec.tables?.length === expectedSuffixes.length, 'Data foundation manifest must define 17 tables.');
+assert(spec.defaultPrefix === 'campusmeet-dev', 'Default table prefix must be campusmeet-dev.');
+
+const actualSuffixes = (spec.tables ?? []).map(({ suffix }) => suffix).sort();
+assert(
+  JSON.stringify(actualSuffixes) === JSON.stringify([...expectedSuffixes].sort()),
+  `Unexpected table suffix inventory: [${actualSuffixes.join(', ')}].`,
 );
 
 assert(
-  sourceTables.length === expectedTables.length,
-  `Expected ${expectedTables.length} source DynamoDB tables but found ${sourceTables.length}.`,
+  Object.values(template.Resources ?? {}).filter(
+    (resource) => resource.Type === 'AWS::DynamoDB::Table',
+  ).length === expectedSuffixes.length,
+  'Generated template must contain exactly 17 DynamoDB tables.',
 );
-assert(
-  generatedTables.length === expectedTables.length,
-  `Expected ${expectedTables.length} generated DynamoDB tables but found ${generatedTables.length}.`,
-);
-assert(
-  Array.isArray(importMap) && importMap.length === expectedTables.length,
-  `Expected ${expectedTables.length} resource import entries.`,
-);
+assert(Array.isArray(importMap) && importMap.length === expectedSuffixes.length, 'Import map must contain 17 entries.');
 
-const actualSuffixes = [];
+const logicalIds = new Set();
+const suffixes = new Set();
 
-for (const [logicalId, resource] of sourceTables) {
-  const properties = resource.Properties ?? {};
-  const tableName = properties.TableName?.['Fn::Sub'];
-  const prefix = '${TablePrefix}-';
+for (let index = 0; index < (spec.tables ?? []).length; index += 1) {
+  const table = spec.tables[index];
+  const resource = template.Resources?.[table.logicalId];
+  const mapping = importMap?.[index];
+  const expectedDependency = index === 0 ? undefined : spec.tables[index - 1].logicalId;
 
-  assert(typeof tableName === 'string', `${logicalId} must define TableName with Fn::Sub.`);
-  assert(properties.BillingMode === 'PAY_PER_REQUEST', `${logicalId} must use PAY_PER_REQUEST.`);
-  assert(properties.SSESpecification?.SSEEnabled === true, `${logicalId} must enable SSE.`);
+  assert(!logicalIds.has(table.logicalId), `Duplicate logical ID: ${table.logicalId}.`);
+  assert(!suffixes.has(table.suffix), `Duplicate table suffix: ${table.suffix}.`);
+  logicalIds.add(table.logicalId);
+  suffixes.add(table.suffix);
 
-  if (typeof tableName === 'string' && tableName.startsWith(prefix)) {
-    actualSuffixes.push(tableName.slice(prefix.length));
-  } else {
-    failures.push(`${logicalId} table name must start with ${prefix}.`);
+  const usedAttributes = new Set(table.keySchema.map(([name]) => name));
+  for (const gsi of table.globalSecondaryIndexes ?? []) {
+    for (const [name] of gsi.keySchema) usedAttributes.add(name);
+  }
+  const definedAttributes = new Set(Object.keys(table.attributes));
+  for (const name of usedAttributes) {
+    assert(definedAttributes.has(name), `${table.logicalId} uses undefined key ${name}.`);
+  }
+  for (const name of definedAttributes) {
+    assert(usedAttributes.has(name), `${table.logicalId} defines unused key ${name}.`);
   }
 
-  const definitions = new Set(
-    (properties.AttributeDefinitions ?? []).map(({ AttributeName }) => AttributeName),
-  );
-  const usedAttributes = new Set(keyAttributes(properties.KeySchema));
-
-  for (const index of properties.GlobalSecondaryIndexes ?? []) {
-    assert(Boolean(index.IndexName), `${logicalId} has a GSI without IndexName.`);
-    for (const attribute of keyAttributes(index.KeySchema)) usedAttributes.add(attribute);
-  }
-
-  for (const attribute of usedAttributes) {
-    assert(definitions.has(attribute), `${logicalId} uses key ${attribute} without AttributeDefinitions.`);
-  }
-
-  for (const attribute of definitions) {
-    assert(usedAttributes.has(attribute), `${logicalId} defines unused key attribute ${attribute}.`);
-  }
-}
-
-assert(
-  JSON.stringify([...actualSuffixes].sort()) === JSON.stringify([...expectedTables].sort()),
-  `DynamoDB suffix inventory differs. Expected [${expectedTables.join(', ')}], found [${actualSuffixes.join(', ')}].`,
-);
-
-for (let index = 0; index < generatedTables.length; index += 1) {
-  const [logicalId, resource] = generatedTables[index];
-  const expectedDependency = index === 0 ? undefined : generatedTables[index - 1][0];
-  const mapping = Array.isArray(importMap) ? importMap[index] : undefined;
-
-  assert(resource.DeletionPolicy === 'Retain', `${logicalId} must use DeletionPolicy Retain.`);
+  assert(resource?.Type === 'AWS::DynamoDB::Table', `${table.logicalId} missing from generated template.`);
+  assert(resource?.DeletionPolicy === 'Retain', `${table.logicalId} must retain on stack deletion.`);
+  assert(resource?.UpdateReplacePolicy === 'Retain', `${table.logicalId} must retain on replacement.`);
+  assert(resource?.DependsOn === expectedDependency, `${table.logicalId} dependency chain is invalid.`);
+  assert(resource?.Properties?.BillingMode === 'PAY_PER_REQUEST', `${table.logicalId} must use on-demand billing.`);
+  assert(resource?.Properties?.SSESpecification?.SSEEnabled === true, `${table.logicalId} must enable SSE.`);
   assert(
-    resource.UpdateReplacePolicy === 'Retain',
-    `${logicalId} must use UpdateReplacePolicy Retain.`,
+    resource?.Properties?.TableName?.['Fn::Sub'] === `\${TablePrefix}-${table.suffix}`,
+    `${table.logicalId} generated table name is invalid.`,
   );
   assert(
-    resource.DependsOn === expectedDependency,
-    `${logicalId} must depend on ${expectedDependency ?? 'no previous table'}.`,
+    JSON.stringify(generatedSchema(resource?.Properties?.KeySchema)) ===
+      JSON.stringify(normalizedSchema(table.keySchema)),
+    `${table.logicalId} primary key drifted during generation.`,
   );
+
+  const generatedGsiNames = (resource?.Properties?.GlobalSecondaryIndexes ?? [])
+    .map(({ IndexName }) => IndexName)
+    .sort();
+  const expectedGsiNames = (table.globalSecondaryIndexes ?? []).map(({ name }) => name).sort();
   assert(
-    mapping?.LogicalResourceId === logicalId,
-    `Import map entry ${index + 1} must target ${logicalId}.`,
+    JSON.stringify(generatedGsiNames) === JSON.stringify(expectedGsiNames),
+    `${table.logicalId} GSI inventory drifted during generation.`,
   );
+
+  assert(mapping?.LogicalResourceId === table.logicalId, `${table.logicalId} import mapping is out of order.`);
+  assert(mapping?.ResourceType === 'AWS::DynamoDB::Table', `${table.logicalId} import type is invalid.`);
   assert(
-    mapping?.ResourceType === 'AWS::DynamoDB::Table',
-    `${logicalId} import entry must use AWS::DynamoDB::Table.`,
-  );
-  assert(
-    mapping?.ResourceIdentifier?.TableName?.startsWith('campusmeet-dev-'),
-    `${logicalId} import entry must target the dev prefix.`,
+    mapping?.ResourceIdentifier?.TableName === `campusmeet-dev-${table.suffix}`,
+    `${table.logicalId} import table name is invalid.`,
   );
 }
 
 const applicationTemplate = await readFile('infra/template.yaml', 'utf8');
-
 assert(
   !applicationTemplate.includes('Type: AWS::DynamoDB::Table'),
-  'infra/template.yaml must consume the shared data foundation and must not create DynamoDB tables.',
+  'Application template must not create DynamoDB tables.',
 );
-
 for (const invalidAction of ['dynamodb:TransactGetItems', 'dynamodb:TransactWriteItems']) {
   assert(!applicationTemplate.includes(invalidAction), `${invalidAction} is not a valid IAM action.`);
 }
-
 for (const variable of expectedEnvironmentVariables) {
-  assert(applicationTemplate.includes(`${variable}:`), `infra/template.yaml is missing ${variable}.`);
+  assert(applicationTemplate.includes(`${variable}:`), `Application template is missing ${variable}.`);
 }
-
 assert(
   !/^\s*[^#\n]*[&*][A-Za-z][\w-]*/m.test(applicationTemplate),
-  'infra/template.yaml must not use YAML anchors or aliases because CloudFormation does not support them.',
+  'Application template must not use YAML anchors or aliases.',
 );
 
-const synchronizedDocs = [
+for (const path of [
   'README.md',
   'docs/architecture.md',
   'docs/huong-dan-trien-khai-aws.md',
   'docs/ke-hoach-trien-khai-nhom.md',
-];
-
-for (const path of synchronizedDocs) {
+]) {
   const content = await readFile(path, 'utf8');
   assert(content.includes('campusmeet-dev'), `${path} must identify the dev table prefix.`);
-  assert(!content.includes('Chưa có AWS resource nào được deploy'), `${path} still contains stale AWS status.`);
+  assert(!content.includes('Chưa có AWS resource nào được deploy'), `${path} contains stale AWS status.`);
 }
 
 if (failures.length > 0) {
@@ -192,5 +178,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Infrastructure consistency check passed: ${sourceTables.length} tables, ${expectedEnvironmentVariables.length} Lambda table variables, retained sequential synthesis and import mapping, no duplicate table ownership.`,
+  `Infrastructure consistency check passed: ${spec.tables.length} tables, import safety, ${expectedEnvironmentVariables.length} Lambda table variables and no duplicate table ownership.`,
 );
