@@ -13,7 +13,7 @@ for (let index = 2; index < process.argv.length; index += 2) {
   args.set(key, value);
 }
 
-const sourcePath = resolve('infra/data-foundation.yaml');
+const specPath = resolve('infra/data-foundation.spec.json');
 const outputPath = resolve(
   args.get('--output') ?? '.aws-sam/data-foundation.generated.json',
 );
@@ -21,43 +21,144 @@ const importMapPath = resolve(
   args.get('--import-map') ?? '.aws-sam/data-foundation-import.json',
 );
 
-const source = JSON.parse(await readFile(sourcePath, 'utf8'));
-const tablePrefix = args.get('--prefix') ?? source.Parameters?.TablePrefix?.Default;
+const spec = JSON.parse(await readFile(specPath, 'utf8'));
+const tablePrefix = args.get('--prefix') ?? spec.defaultPrefix;
 
 if (!tablePrefix || !/^[a-z0-9-]+$/.test(tablePrefix)) {
   throw new Error(`Invalid table prefix: ${tablePrefix ?? '<missing>'}.`);
 }
 
-const tableEntries = Object.entries(source.Resources ?? {}).filter(
-  ([, resource]) => resource.Type === 'AWS::DynamoDB::Table',
-);
-
-if (tableEntries.length !== 17) {
-  throw new Error(
-    `Expected 17 DynamoDB table resources in ${sourcePath}, found ${tableEntries.length}.`,
-  );
+if (!Array.isArray(spec.tables) || spec.tables.length !== 17) {
+  throw new Error(`Expected 17 table definitions in ${specPath}.`);
 }
 
-let previousLogicalId;
+const template = {
+  AWSTemplateFormatVersion: '2010-09-09',
+  Description: 'CampusMeet DynamoDB data foundation generated from infra/data-foundation.spec.json.',
+  Parameters: {
+    Environment: {
+      Type: 'String',
+      Default: spec.defaultEnvironment ?? 'dev',
+      AllowedValues: ['dev', 'staging', 'prod'],
+    },
+    TablePrefix: {
+      Type: 'String',
+      Default: spec.defaultPrefix,
+      AllowedPattern: '^[a-z0-9-]+$',
+    },
+    EnablePointInTimeRecovery: {
+      Type: 'String',
+      Default: 'false',
+      AllowedValues: ['true', 'false'],
+    },
+    EnableDeletionProtection: {
+      Type: 'String',
+      Default: 'false',
+      AllowedValues: ['true', 'false'],
+    },
+  },
+  Conditions: {
+    EnablePitr: {
+      'Fn::Equals': [{ Ref: 'EnablePointInTimeRecovery' }, 'true'],
+    },
+    DeletionProtectionEnabledCondition: {
+      'Fn::Equals': [{ Ref: 'EnableDeletionProtection' }, 'true'],
+    },
+  },
+  Resources: {},
+  Outputs: {
+    TablePrefix: {
+      Description: 'Prefix used by every CampusMeet DynamoDB table.',
+      Value: { Ref: 'TablePrefix' },
+    },
+  },
+};
+
 const resourcesToImport = [];
+const logicalIds = new Set();
+const suffixes = new Set();
+let previousLogicalId;
 
-for (const [logicalId, resource] of tableEntries) {
-  resource.DeletionPolicy = 'Retain';
-  resource.UpdateReplacePolicy = 'Retain';
+for (const table of spec.tables) {
+  const { logicalId, suffix, attributes, keySchema, globalSecondaryIndexes = [], ttlAttribute } = table;
 
-  if (previousLogicalId) {
-    resource.DependsOn = previousLogicalId;
-  } else {
-    delete resource.DependsOn;
+  if (!/^[A-Za-z][A-Za-z0-9]+$/.test(logicalId)) {
+    throw new Error(`Invalid logicalId: ${logicalId}.`);
+  }
+  if (!/^[a-z0-9-]+$/.test(suffix)) {
+    throw new Error(`Invalid table suffix for ${logicalId}: ${suffix}.`);
+  }
+  if (logicalIds.has(logicalId) || suffixes.has(suffix)) {
+    throw new Error(`Duplicate table logicalId or suffix: ${logicalId}/${suffix}.`);
+  }
+  logicalIds.add(logicalId);
+  suffixes.add(suffix);
+
+  const usedAttributes = new Set(keySchema.map(([name]) => name));
+  for (const index of globalSecondaryIndexes) {
+    for (const [name] of index.keySchema) usedAttributes.add(name);
   }
 
-  const tableNameExpression = resource.Properties?.TableName?.['Fn::Sub'];
-  const expectedPrefix = '${TablePrefix}-';
-  if (typeof tableNameExpression !== 'string' || !tableNameExpression.startsWith(expectedPrefix)) {
-    throw new Error(`${logicalId} must use a TableName beginning with ${expectedPrefix}.`);
+  const definedAttributes = new Set(Object.keys(attributes));
+  for (const name of usedAttributes) {
+    if (!definedAttributes.has(name)) {
+      throw new Error(`${logicalId} uses undefined key attribute ${name}.`);
+    }
+  }
+  for (const name of definedAttributes) {
+    if (!usedAttributes.has(name)) {
+      throw new Error(`${logicalId} defines unused key attribute ${name}.`);
+    }
   }
 
-  const suffix = tableNameExpression.slice(expectedPrefix.length);
+  const properties = {
+    TableName: { 'Fn::Sub': `\${TablePrefix}-${suffix}` },
+    BillingMode: 'PAY_PER_REQUEST',
+    SSESpecification: { SSEEnabled: true },
+    PointInTimeRecoverySpecification: {
+      PointInTimeRecoveryEnabled: {
+        'Fn::If': ['EnablePitr', true, false],
+      },
+    },
+    DeletionProtectionEnabled: {
+      'Fn::If': ['DeletionProtectionEnabledCondition', true, false],
+    },
+    AttributeDefinitions: Object.entries(attributes).map(([AttributeName, AttributeType]) => ({
+      AttributeName,
+      AttributeType,
+    })),
+    KeySchema: keySchema.map(([AttributeName, KeyType]) => ({ AttributeName, KeyType })),
+    Tags: [
+      { Key: 'Project', Value: 'CampusMeet' },
+      { Key: 'Environment', Value: { Ref: 'Environment' } },
+      { Key: 'ManagedBy', Value: 'CloudFormation' },
+    ],
+  };
+
+  if (globalSecondaryIndexes.length > 0) {
+    properties.GlobalSecondaryIndexes = globalSecondaryIndexes.map((index) => ({
+      IndexName: index.name,
+      KeySchema: index.keySchema.map(([AttributeName, KeyType]) => ({ AttributeName, KeyType })),
+      Projection: { ProjectionType: 'ALL' },
+    }));
+  }
+
+  if (ttlAttribute) {
+    properties.TimeToLiveSpecification = {
+      AttributeName: ttlAttribute,
+      Enabled: true,
+    };
+  }
+
+  template.Resources[logicalId] = {
+    Type: 'AWS::DynamoDB::Table',
+    DeletionPolicy: 'Retain',
+    UpdateReplacePolicy: 'Retain',
+    ...(previousLogicalId ? { DependsOn: previousLogicalId } : {}),
+    Properties: properties,
+  };
+
+  template.Outputs[`${logicalId}Name`] = { Value: { Ref: logicalId } };
   resourcesToImport.push({
     ResourceType: 'AWS::DynamoDB::Table',
     LogicalResourceId: logicalId,
@@ -69,10 +170,10 @@ for (const [logicalId, resource] of tableEntries) {
 
 await mkdir(dirname(outputPath), { recursive: true });
 await mkdir(dirname(importMapPath), { recursive: true });
-await writeFile(outputPath, `${JSON.stringify(source, null, 2)}\n`, 'utf8');
+await writeFile(outputPath, `${JSON.stringify(template, null, 2)}\n`, 'utf8');
 await writeFile(importMapPath, `${JSON.stringify(resourcesToImport, null, 2)}\n`, 'utf8');
 
 console.log(
-  `Prepared ${tableEntries.length} DynamoDB tables at ${outputPath} with Retain policies and sequential dependencies.`,
+  `Prepared ${spec.tables.length} DynamoDB tables at ${outputPath} with Retain policies and sequential dependencies.`,
 );
 console.log(`Prepared resource import map for prefix ${tablePrefix} at ${importMapPath}.`);
