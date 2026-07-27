@@ -6,6 +6,8 @@
 
 Request/response types phải import từ `@campusmeet/shared`, không copy interface giữa frontend và backend.
 
+CampusMeet web và CampusMeet Meet Add-on là hai client surface của cùng hệ thống. Add-on side panel dùng lại các endpoint bên dưới, không có API đặc quyền hoặc database riêng. `meetingId`/`meetingCode` lấy từ Meet Add-ons SDK chỉ là context để ánh xạ; backend vẫn phải xác thực JWT, tìm meeting nội bộ và kiểm tra membership/role trước khi trả dữ liệu hoặc mutation.
+
 | Method                | Endpoint dự kiến               | Shared contract                                                        | Trạng thái hiện tại                            |
 | --------------------- | ------------------------------ | ---------------------------------------------------------------------- | ---------------------------------------------- |
 | GET                   | `/health`                      | `ApiSuccessResponse<{service,status,timestamp}>`                       | Đã có health handler                           |

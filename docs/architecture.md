@@ -10,6 +10,7 @@ Repository mới có application shell, mock data, shared contracts, Lambda hand
 flowchart LR
   U["User / Browser"]
   G["Google OAuth + Calendar + Meet REST\nExternal"]
+  MA["Google Meet\nAdd-on side panel host"]
   DG["Deepgram\nOptional STT adapter"]
   E["Email recipient"]
   CF["CloudFront\nEdge / global"]
@@ -36,6 +37,8 @@ flowchart LR
     end
   end
   U -->|"1. tải frontend"| CF --> S3
+  U -->|"mở cuộc họp + side panel"| MA
+  MA -->|"tải route add-on HTTPS"| CF
   U -->|"2. gọi API"| APIG -->|"3. invoke"| API
   U -. "xác thực mục tiêu" .-> COG
   API -->|"4. gọi repository"| PORT --> DDB
@@ -75,6 +78,7 @@ Luồng chính:
 13. RAG dùng Bedrock Knowledge Bases + S3 Vectors, bắt buộc filter `groupId`/ACL trước retrieval và trả citation.
 14. Transcript segment, job status, conversation metadata và tool proposal nằm trong DynamoDB; nội dung media nằm trong S3 private.
 15. CloudWatch theo dõi core và AI pipeline; Alarm gửi cảnh báo qua SNS.
+16. CampusMeet web vẫn là sản phẩm chính. Google Meet có thể tải một route side panel tối giản từ cùng CloudFront origin; route này lấy meeting context bằng Meet Add-ons SDK và gọi chung API/authorization, không có backend riêng.
 
 CloudFront là edge/global service; các AWS service còn lại được đặt trong Region. MVP không đặt Lambda trong VPC và không dùng NAT Gateway để tránh chi phí, độ trễ và vận hành không cần thiết.
 
@@ -87,7 +91,9 @@ Sơ đồ là **target architecture**, không phải bằng chứng đã deploy 
 - Recording chỉ bắt đầu sau user gesture/consent và phải hiển thị nguồn capture. Microphone không được xem là bằng chứng đã thu toàn bộ âm thanh từ Google Meet.
 - Diarization tạo `Speaker 0/1/...`; người dùng ánh xạ sang thành viên. LLM không tự đoán danh tính.
 - AI output là draft có citation. Bedrock tool use chỉ tạo `ToolProposal`; mọi mutation đi qua authorization, preview, xác nhận, idempotency và audit của API nghiệp vụ.
-- Document PiP là progressive enhancement; panel trong trang là fallback bắt buộc.
+- CampusMeet không chuyển toàn bộ thành add-on và không nhúng giao diện Meet vào iframe thông thường. Meet Add-on chỉ là client surface tối giản trong side panel/main stage, dùng chung web assets, API, dữ liệu và authorization.
+- MVP dùng deployment add-on chưa công bố để thử nghiệm. Private Marketplace chỉ dành cho cùng Google Workspace organization; public Marketplace cần Google review/OAuth verification phù hợp và không được làm chậm Core MVP.
+- Panel trong CampusMeet web là fallback bắt buộc khi add-on chưa cài/bị quản trị viên chặn; Document PiP chỉ là progressive enhancement bổ sung.
 
 ## Nguyên tắc dữ liệu và quyền
 

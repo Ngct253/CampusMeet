@@ -8,7 +8,7 @@ Hệ thống quản lý cuộc họp và công việc nhóm tích hợp Google M
 
 Tên tiếng Anh: CampusMeet - Meeting and Team Work Management System with Google Meet Integration
 
-> **Trạng thái baseline ngày 27/07/2026:** Đã chốt hướng Google Calendar + Google Meet REST API có fallback; đã chốt các nguyên tắc AI về consent/capture, diarization ẩn danh, STT provider có thể thay thế, grounded output, human-in-the-loop và RAG cách ly theo nhóm. AI MVP là luồng dọc bắt buộc; các năng lực live/agentic/RAG mở rộng triển khai theo pha.
+> **Trạng thái baseline ngày 27/07/2026:** Đã chốt hướng Google Calendar + Google Meet REST API có fallback; CampusMeet vẫn là web app độc lập trên AWS và có thể bổ sung Google Meet Add-on side panel để dùng trong cùng tab, không nhúng giao diện Meet vào CampusMeet. Đã chốt các nguyên tắc AI về consent/capture, diarization ẩn danh, STT provider có thể thay thế, grounded output, human-in-the-loop và RAG cách ly theo nhóm. AI MVP là luồng dọc bắt buộc; các năng lực live/agentic/RAG mở rộng triển khai theo pha.
 
 # Cách sử dụng tài liệu
 
@@ -70,7 +70,7 @@ CampusMeet là hệ thống quản lý cuộc họp và công việc nhóm dành
 | Thiếu quy trình sau họp | Quyết định không gắn người phụ trách hoặc hạn hoàn thành; công việc dễ bị quên. | Việc cần thực hiện trong biên bản có thể chuyển thành công việc có người phụ trách, hạn hoàn thành và trạng thái. |
 | Khó điều phối nhóm | Người quản lý không thấy cuộc họp sắp tới, việc quá hạn hay mức độ hoàn thành. | Bảng tổng quan cá nhân và nhóm hiển thị các chỉ số cần theo dõi. |
 | Tạo liên kết Meet thủ công | Người điều phối phải tự tạo sự kiện Google Calendar và gửi liên kết qua nhiều kênh. | Người tổ chức kết nối Google để CampusMeet tạo sự kiện và yêu cầu tạo liên kết hội nghị. |
-| Khó theo dõi tài liệu dài | Thành viên không có thời gian đọc toàn bộ tài liệu dài hoặc có thắc mắc trong lúc họp. | Hỗ trợ tải tài liệu và tích hợp Trợ lý AI (Chatbot dùng Document PiP) để người dùng vừa họp vừa hỏi đáp, tóm tắt tài liệu. |
+| Khó theo dõi tài liệu dài | Thành viên không có thời gian đọc toàn bộ tài liệu dài hoặc có thắc mắc trong lúc họp. | Hỗ trợ tải tài liệu và Trợ lý AI trong CampusMeet web; khi cần trải nghiệm cùng tab, dùng CampusMeet Meet Add-on ở side panel của Google Meet. Document PiP chỉ là fallback/progressive enhancement. |
 | Thiếu bằng chứng vận hành | Đồ án chỉ có giao diện CRUD nên khó thể hiện triển khai cloud đầu-cuối. | Triển khai serverless, có log, chỉ số, cảnh báo, hướng dẫn triển khai và dọn dẹp tài nguyên. |
 
 ## 1.3 Cơ sở kỹ thuật
@@ -80,6 +80,8 @@ Google Calendar API cho phép yêu cầu tạo dữ liệu hội nghị khi tạ
 EventBridge Scheduler phù hợp cho các thông báo nhắc lịch theo thời điểm cụ thể. Với phần giao diện tĩnh, mô hình S3 private REST origin kết hợp CloudFront và Origin Access Control (OAC) giúp phân phối nội dung an toàn hơn so với public S3 website bucket. [TL3][TL4]
 
 Google Meet REST API có thể cung cấp conference records, participant sessions, recordings và transcripts sau cuộc họp khi artifact thực sự tồn tại và tài khoản đã cấp đúng quyền. CampusMeet ưu tiên đồng bộ các artifact này khi khả dụng; nếu gói tài khoản, cài đặt quản trị, quyền OAuth hoặc ngôn ngữ không đáp ứng thì hệ thống chuyển sang upload thủ công hoặc ghi âm có sự đồng ý. Trong MVP, việc kiểm tra artifact dùng thao tác đồng bộ thủ công hoặc polling có giới hạn từ AWS; không phụ thuộc Google Workspace Events vì dịch vụ này yêu cầu Google Cloud Pub/Sub làm notification endpoint. [TL9][TL10][TL12][TL20][TL21]
+
+Google Meet Add-ons SDK cho phép đưa giao diện CampusMeet vào side panel hoặc main stage của Meet. CampusMeet không chuyển toàn bộ sản phẩm thành add-on: web app đầy đủ và backend vẫn được host trên AWS; Google Meet chỉ tải một route HTTPS tối giản của CampusMeet trong iframe add-on. Bản demo có thể cài deployment chưa công bố; bản private chỉ dành cho cùng Google Workspace organization, còn bản public phải qua Google Marketplace/OAuth review. [TL22][TL23][TL24][TL25]
 
 Phần AI dùng dịch vụ managed: S3 cho nội dung, Amazon Transcribe hoặc adapter STT đã benchmark cho tiếng Việt, Amazon Bedrock cho hỏi đáp/tool use và Bedrock Knowledge Bases kết hợp S3 Vectors cho truy xuất nhiều cuộc họp. Mọi nội dung sinh tự động là bản nháp có trích dẫn; mọi thao tác ghi do AI đề xuất phải đi qua kiểm tra quyền và xác nhận của người dùng. [TL13][TL14][TL15][TL16][TL17]
 
@@ -183,7 +185,7 @@ CampusMeet chỉ có hai vai trò nghiệp vụ chính: Thành viên và Quản 
 | --- | --- | --- |
 | Bắt buộc | Xác thực, nhóm/thành viên, quản lý cuộc họp, trạng thái tích hợp Calendar/Meet, nhắc lịch, biên bản, công việc, bảng tổng quan, log/cảnh báo/dọn dẹp. | Phải có để gọi là MVP. |
 | Bắt buộc cho AI MVP | Upload an toàn vào S3; batch transcription tiếng Việt; timestamp/confidence/speaker label; chỉnh sửa transcript; hỏi đáp một cuộc họp có trích dẫn; sinh bản nháp biên bản/action item; xác nhận trước khi ghi dữ liệu. | Là luồng AI dọc dùng để demo giá trị sản phẩm; phải có fallback thủ công khi STT/Bedrock lỗi. |
-| Nên có | Lời mời qua email/liên kết, đồng bộ khi sửa/hủy lịch, nhật ký thao tác, lịch theo tháng/tuần, demo email bằng SES; agenda do AI đề xuất; form cuộc họp do AI điền sẵn; Document PiP có fallback; đồng bộ artifact Google Meet khi khả dụng. | Thực hiện khi các luồng bắt buộc đã ổn định. |
+| Nên có | Lời mời qua email/liên kết, đồng bộ khi sửa/hủy lịch, nhật ký thao tác, lịch theo tháng/tuần, demo email bằng SES; agenda do AI đề xuất; form cuộc họp do AI điền sẵn; CampusMeet Meet Add-on side panel dùng cùng backend/API; Document PiP làm fallback; đồng bộ artifact Google Meet khi khả dụng. | Thực hiện khi các luồng bắt buộc đã ổn định; add-on được thử bằng deployment chưa công bố trước khi cân nhắc private/public Marketplace. |
 | Có thể có | RAG trên nhiều cuộc họp, agentic tools theo allowlist, live transcription, lịch định kỳ, tích hợp Discord/Slack, đọc hình ảnh/tài liệu nâng cao. | Thuộc pha AI mở rộng; vẫn phải dùng phân quyền, trích dẫn và human-in-the-loop. |
 | Không làm trong MVP | Video/audio call riêng, chat thời gian thực giữa các user, WebRTC/TURN, tự ghi âm khi chưa có thao tác đồng ý, tự đoán danh tính speaker, AI đọc video dài, đánh giá cá nhân từ dữ liệu Meet, hoặc để AI ghi dữ liệu mà không xác nhận. | Loại khỏi baseline 8 tuần; có thể nghiên cứu sau khi đánh giá bảo mật, chi phí và quyền riêng tư. |
 
@@ -270,6 +272,9 @@ Các yêu cầu dưới đây là nền tảng triển khai. Các yêu cầu B�
 | INT-07 | Khi artifact Google không có, chưa sẵn sàng, hết quyền hoặc không hỗ trợ tiếng Việt, giao diện cho phép upload thủ công hoặc dùng recording được đồng ý; lỗi này không làm mất biên bản/task nội bộ. |
 | INT-08 | MVP dùng nút đồng bộ hoặc polling có giới hạn từ EventBridge sau giờ kết thúc. Google Workspace Events/Pub/Sub chỉ là lựa chọn hậu MVP vì bổ sung phụ thuộc Google Cloud. [TL20] |
 | INT-09 | OAuth dùng scope tối thiểu; scope Drive/Meet hạn chế chỉ được yêu cầu khi người dùng bật đồng bộ artifact, đồng thời phải hiển thị rõ dữ liệu nào CampusMeet sẽ đọc/lưu. |
+| INT-10 | CampusMeet vẫn là web app chính. Meet Add-on chỉ cung cấp route side panel/main stage tối giản cho trải nghiệm trong cuộc họp, dùng chung API, dữ liệu, authorization và audit; không tạo backend hoặc nguồn dữ liệu riêng. [TL22][TL23] |
+| INT-11 | Add-on được host trên HTTPS origin do nhóm sở hữu, khai báo `sidePanelUrl`/`addOnOrigins` trong manifest và dùng `getMeetingInfo()` để ánh xạ `meetingId`/`meetingCode` hiện tại với meeting nội bộ. Không dùng iframe thông thường để nhúng toàn bộ giao diện Google Meet vào CampusMeet. [TL22][TL23][TL26] |
+| INT-12 | Phân phối add-on theo ba mức: deployment chưa công bố để phát triển/demo; private Marketplace cho cùng Google Workspace organization; public Marketplace cho người dùng bên ngoài sau Google review và OAuth verification nếu scope yêu cầu. Audience private/public phải được chốt trước khi publish vì không đổi được sau đó. [TL24][TL25] |
 
 # 7. Mô tả các Use Case chính
 
@@ -370,13 +375,13 @@ Các use Case sử dụng dưới đây mô tả các luồng nghiệp vụ quan
 | Người thực hiện | Quản trị viên nhóm / Thành viên |
 | Mục tiêu | Hỏi đáp tài liệu/transcript có nguồn, tạo bản nháp biên bản/action item và hỗ trợ thao tác bằng ngôn ngữ tự nhiên mà không bỏ qua quyền hoặc sự xác nhận của người dùng. |
 | Điều kiện trước | • Người dùng là thành viên đang hoạt động của nhóm.<br>• Có ít nhất một nguồn đã xử lý thành công: tài liệu, transcript hoặc biên bản.<br>• Nguồn và conversation đều mang `groupId`/ACL. |
-| Luồng hỏi đáp | 1. Mở Chatbot trong trang hoặc Document PiP nếu trình duyệt hỗ trợ.<br>2. Chọn phạm vi một cuộc họp hoặc toàn nhóm.<br>3. Có thể upload file qua presigned URL.<br>4. Hệ thống truy xuất nguồn trong đúng phạm vi quyền.<br>5. Bedrock trả lời kèm citation; người dùng mở citation để kiểm tra. |
+| Luồng hỏi đáp | 1. Mở Chatbot trong CampusMeet web hoặc Meet Add-on side panel; Document PiP chỉ dùng khi cần fallback và trình duyệt hỗ trợ.<br>2. Add-on lấy meeting context và ánh xạ với meeting nội bộ, nhưng vẫn gọi cùng API có authorization.<br>3. Chọn phạm vi một cuộc họp hoặc toàn nhóm.<br>4. Có thể upload file qua presigned URL.<br>5. Hệ thống truy xuất nguồn trong đúng phạm vi quyền.<br>6. Bedrock trả lời kèm citation; người dùng mở citation để kiểm tra. |
 | Luồng ghi âm/transcript | 1. Người dùng bấm Ghi âm và xác nhận nguồn capture/consent.<br>2. Audio upload trực tiếp lên S3.<br>3. AI job chạy STT bất đồng bộ và tạo segment có timestamp/confidence/speaker label.<br>4. Người có quyền nghe lại, sửa text và ánh xạ speaker trước khi dùng làm nguồn chính thức. |
 | Luồng sau họp | 1. Người có quyền bấm Tạo bản nháp biên bản.<br>2. AI sinh tóm tắt, quyết định và action item cùng citation.<br>3. Người dùng duyệt/chỉnh sửa.<br>4. Chỉ action item được xác nhận mới được chuyển thành task. |
 | Luồng hành động | 1. Người dùng yêu cầu tạo nhóm/cuộc họp/task hoặc cập nhật task.<br>2. Bedrock chọn tool trong allowlist và trả `ToolProposal`.<br>3. Backend kiểm tra schema, quyền và quy tắc nghiệp vụ.<br>4. Frontend hiển thị form preview.<br>5. Người dùng xác nhận; backend gọi API chuẩn và ghi audit log. |
 | Luồng truy xuất (RAG) | 1. Người dùng hỏi về các cuộc họp cũ trong một nhóm.<br>2. Knowledge Base lọc theo `groupId`/ACL và tìm đoạn liên quan.<br>3. AI trả lời kèm link tới meeting/file/transcript segment; nếu không đủ nguồn thì trả lời không xác định. |
 | Luồng phân tích | Backend tính số liệu task theo quy tắc xác định; AI chỉ diễn giải kết quả. Không dùng Meet participant/transcript để tự động chấm điểm hoặc xếp hạng thành viên. |
-| Ngoại lệ / lỗi | Khi upload/STT/Bedrock/ingestion lỗi, `AIJob` chuyển sang `FAILED` với mã an toàn, có retry giới hạn hoặc fallback nhập/sửa thủ công. Document PiP không hỗ trợ thì dùng panel trong trang. |
+| Ngoại lệ / lỗi | Khi upload/STT/Bedrock/ingestion lỗi, `AIJob` chuyển sang `FAILED` với mã an toàn, có retry giới hạn hoặc fallback nhập/sửa thủ công. Nếu add-on chưa được cài, bị quản trị viên chặn hoặc iframe/auth lỗi thì mở panel trong CampusMeet web; Document PiP chỉ là fallback bổ sung. |
 | Kết quả | Nội dung AI có thể kiểm chứng, không ghi dữ liệu trái phép và không được coi là chính xác cho tới khi người dùng có quyền duyệt. |
 
 # 8. User Story
@@ -518,7 +523,8 @@ CampusMeet sử dụng kiến trúc serverless và dịch vụ managed để gi�
 | 23 | Với tool use, Bedrock chỉ trả `ToolProposal`; backend kiểm tra schema/quyền và frontend hiển thị preview. Sau xác nhận, API nghiệp vụ chuẩn mới thực thi và ghi audit log. |
 | 24 | Sau giờ họp hoặc khi người dùng yêu cầu, Google Artifact Adapter dùng Meet REST API để kiểm tra conference record/recording/transcript; nếu không có thì hiển thị fallback upload/capture. |
 | 25 | AI job, STT, Bedrock, ingestion và tool execution gửi log/metric không chứa nội dung nhạy cảm vào CloudWatch; lỗi/chi phí vượt ngưỡng kích hoạt cảnh báo. |
-| 26 | Document PiP chỉ là lớp trải nghiệm phía Browser; nếu không hỗ trợ hoặc không có user gesture, Chatbot tiếp tục hoạt động trong panel của trang. [TL18] |
+| 26 | Khi người dùng mở CampusMeet Meet Add-on, Google Meet tải route side panel HTTPS từ cùng CloudFront origin; add-on lấy meeting context và gọi lại cùng API Gateway/Cognito boundary, không bỏ qua authorization. [TL22][TL23] |
+| 27 | Nếu add-on chưa cài, bị quản trị viên chặn hoặc không tải được, Chatbot tiếp tục hoạt động trong CampusMeet web. Document PiP chỉ là fallback phía Browser; mất PiP không làm mất dữ liệu. [TL18][TL24] |
 
 ## 10.3 Dịch vụ và lý do lựa chọn
 
@@ -681,7 +687,7 @@ Ví dụ phản hồi thành công bất đồng bộ `202 Accepted` khi lịch 
 | NFR-12 | Grounding | 100% câu trả lời có khẳng định từ nguồn nội bộ phải trả ít nhất một citation hợp lệ hoặc trạng thái không đủ căn cứ; citation mở được đúng nguồn/segment mà người dùng có quyền. |
 | NFR-13 | Độ trễ AI | API tạo upload URL/tool proposal p95 dưới 1,5 giây với dữ liệu demo; job file/audio là bất đồng bộ và phải hiển thị progress/status, không đặt SLA hoàn tất cứng phụ thuộc provider. |
 | NFR-14 | Chi phí AI | Ghi nhận token, số phút STT và chi phí ước tính theo `AIJob`; có quota theo môi trường/người dùng và cảnh báo khi vượt ngưỡng demo. |
-| NFR-15 | Tương thích | Document PiP là progressive enhancement; luồng AI đầy đủ vẫn dùng được trong panel trên trang và bằng bàn phím khi trình duyệt không hỗ trợ PiP. [TL18] |
+| NFR-15 | Tương thích | Meet Add-on side panel là trải nghiệm cùng tab nhưng không phải điều kiện sử dụng; luồng AI đầy đủ vẫn dùng được trong CampusMeet web nếu add-on chưa cài/bị chặn. Document PiP là progressive enhancement cuối cùng và mất PiP không làm mất dữ liệu. [TL18][TL22][TL24] |
 | NFR-16 | Quyền riêng tư media | Recording phải có chỉ báo đang hoạt động, consent và retention; không log nội dung audio/transcript/prompt. Xóa object, index/vector và reference liên quan theo quy trình có thể kiểm chứng. |
 
 # 13. Kiểm thử, giám sát và dọn dẹp tài nguyên
@@ -782,12 +788,12 @@ Tất cả thành viên vẫn cần hiểu luồng chính và cùng review code.
 | Tuần 2 | Nền tảng | Repository, CI, skeleton IaC, Cognito, S3 + CloudFront, API skeleton, UI khung. | Có trang triển khai thử và bằng chứng đăng nhập. |
 | Tuần 3 | Nhóm và thành viên | Tạo nhóm, lời mời/thành viên, phân quyền, kiểm thử chéo nhóm. | Có kiểm thử 403 khi truy cập nhóm khác. |
 | Tuần 4 | Cuộc họp cốt lõi | Tạo/sửa/hủy lịch, agenda, người tham dự, danh sách/lịch, nhật ký bước đầu. | Hoàn thành luồng cuộc họp nội bộ đầu-cuối. |
-| Tuần 5 | Tích hợp Google | OAuth, Google Calendar event, conference request, `googleSyncStatus`, thử lại và prototype Meet artifact sync. | Có bằng chứng tích hợp thật hoặc mock kiểm soát; fallback khi artifact không có. |
+| Tuần 5 | Tích hợp Google | OAuth, Google Calendar event, conference request, `googleSyncStatus`, thử lại, prototype Meet artifact sync và spike Meet Add-on side panel bằng deployment chưa công bố. | Có bằng chứng tích hợp thật hoặc mock kiểm soát; add-on lấy được meeting context hoặc có quyết định fallback; artifact không có vẫn dùng được. |
 | Tuần 6 | Luồng sau họp và dữ liệu AI | Nhắc lịch, biên bản, công việc, dashboard; S3 presigned upload, Attachment/AIJob, consent và recording metadata. | Hoàn thành biên bản → công việc → dashboard; upload không đi qua API payload. |
 | Tuần 7 | AI vertical slice và vận hành | Batch STT tiếng Việt, transcript editor, Bedrock hỏi đáp/citation, minutes/action-item draft; SES, CloudWatch/alarm/SNS. | Demo audio/tài liệu → transcript → biên bản/action item → hỏi đáp có nguồn; fallback thủ công hoạt động. |
 | Tuần 8 | Đóng băng và trình bày | Test quyền/RAG/tool confirmation, sửa lỗi, workshop song ngữ, video demo, cost/cleanup, thuyết trình. | Đạt điều kiện hoàn thành Core MVP + AI MVP; không mở live/agentic mở rộng nếu luồng dọc chưa ổn định. |
 
-> **Ghi chú:** Cổng kiểm soát phạm vi: AI MVP là một luồng dọc đã chốt, không phải lý do mở mọi tính năng AI. Live transcription, RAG nhiều cuộc họp đầy đủ, tool use nhiều miền, analytics mở rộng và Document PiP chỉ được mở khi Core MVP cùng AI MVP hiện có đã kiểm thử thành công. Video call/chat thời gian thực vẫn ngoài phạm vi.
+> **Ghi chú:** Cổng kiểm soát phạm vi: AI MVP là một luồng dọc đã chốt, không phải lý do mở mọi tính năng AI. Meet Add-on chỉ làm side panel tối giản và phải dùng lại web/API hiện có; quy trình public Marketplace không được chặn Core MVP. Live transcription, RAG nhiều cuộc họp đầy đủ, tool use nhiều miền, analytics mở rộng và Document PiP chỉ được mở khi Core MVP cùng AI MVP hiện có đã kiểm thử thành công. Video call/chat thời gian thực vẫn ngoài phạm vi.
 
 ## 14.3 Pha AI mở rộng sau baseline 8 tuần
 
@@ -795,7 +801,7 @@ Tất cả thành viên vẫn cần hiểu luồng chính và cùng review code.
 | --- | --- | --- | --- |
 | AI-1 | RAG nhiều cuộc họp với Knowledge Bases/S3 Vectors và citation/ACL | AI MVP một meeting ổn định, ingestion có idempotency | Test chéo nhóm không rò dữ liệu; citation mở đúng nguồn. |
 | AI-2 | Agenda/form prefill, tool proposal cho meeting/task/group | API nghiệp vụ, authorization và audit đã hoàn chỉnh | Không mutation trước xác nhận; tool replay không tạo trùng. |
-| AI-3 | Document PiP và live transcription thử nghiệm | Fallback panel, consent/capture prototype và benchmark STT đạt yêu cầu demo | Mất PiP/stream không mất dữ liệu; người dùng thấy rõ recording state. |
+| AI-3 | Meet Add-on side panel, Document PiP fallback và live transcription thử nghiệm | Web/API ổn định, add-on deployment thử nghiệm, consent/capture prototype và benchmark STT đạt yêu cầu demo | Add-on ánh xạ đúng meeting và không vượt quyền; mất add-on/PiP/stream không làm mất dữ liệu; người dùng thấy rõ recording state. |
 | AI-4 | Google Meet artifact sync nâng cao | Có tài khoản/quyền demo phù hợp và quyết định OAuth verification | Đồng bộ được khi khả dụng, fallback rõ khi không có artifact. |
 
 Nếu mục tiêu là hoàn thiện toàn bộ bốn pha với kiểm thử bảo mật, chi phí và quyền riêng tư, kế hoạch thực tế cần thêm khoảng 4 đến 8 tuần sau baseline, thay vì nhồi toàn bộ vào tuần 7-8.
@@ -865,12 +871,14 @@ Nếu mục tiêu là hoàn thiện toàn bộ bốn pha với kiểm thử bả
 | Grounding | Buộc câu trả lời AI dựa trên nguồn được phép truy cập và kèm citation kiểm chứng. |
 | RAG | Retrieval-Augmented Generation, truy xuất đoạn nguồn liên quan trước khi model sinh câu trả lời. |
 | Tool proposal | Đề xuất hành động có cấu trúc do model tạo; chưa gây mutation cho tới khi backend kiểm tra và người dùng xác nhận. |
+| Meet Add-on | Giao diện CampusMeet tối giản được Google Meet tải trong side panel/main stage; dùng chung backend và không thay thế CampusMeet web. |
+| Marketplace audience | Phạm vi phân phối add-on: deployment chưa công bố để test, private trong một Workspace organization hoặc public sau review. |
 | Document PiP | Cửa sổ nổi chứa HTML cho Chatbot trên trình duyệt hỗ trợ; là progressive enhancement và có fallback về panel trong trang. |
 | UTC | Coordinated Universal Time; chuẩn dùng để lưu thời gian nội bộ. |
 
 ## 16.2 Checklist vẽ sơ đồ kiến trúc
 
-- Vẽ Người dùng/Browser ở ngoài AWS Cloud; Google OAuth, Google Calendar và Google Meet REST API cũng ở ngoài AWS Cloud. Deepgram chỉ vẽ như provider tùy chọn nếu benchmark chọn.
+- Vẽ Người dùng/Browser ở ngoài AWS Cloud; Google OAuth, Google Calendar, Google Meet REST API và Google Meet Add-on host cũng ở ngoài AWS Cloud. Mũi tên add-on phải thể hiện Google Meet tải route HTTPS từ CloudFront rồi route đó gọi cùng API; Deepgram chỉ vẽ như provider tùy chọn nếu benchmark chọn.
 
 - Vẽ AWS Cloud, bên trong là AWS Region. CloudFront thể hiện ở lớp global/edge, không đặt như dịch vụ regional.
 
@@ -936,6 +944,16 @@ Nếu mục tiêu là hoàn thiện toàn bộ bốn pha với kiểm thử bả
 
 [TL21] Google Meet Help. Record a video meeting. Truy cập ngày 27/07/2026. https://support.google.com/meet/answer/9308681
 
+[TL22] Google for Developers. Meet add-ons SDK for Web overview. Truy cập ngày 27/07/2026. https://developers.google.com/workspace/meet/add-ons/guides/overview
+
+[TL23] Google for Developers. Deploy a Meet add-on. Truy cập ngày 27/07/2026. https://developers.google.com/workspace/meet/add-ons/guides/deploy-add-on
+
+[TL24] Google for Developers. Publish apps to the Google Workspace Marketplace. Truy cập ngày 27/07/2026. https://developers.google.com/workspace/marketplace/how-to-publish
+
+[TL25] Google for Developers. App review process and requirements for the Google Workspace Marketplace. Truy cập ngày 27/07/2026. https://developers.google.com/workspace/marketplace/about-app-review
+
+[TL26] Google for Developers. Get meeting info with the Meet Add-ons SDK. Truy cập ngày 27/07/2026. https://developers.google.com/workspace/meet/add-ons/guides/get-meeting-info
+
 ## 16.4 Quyết định thiết kế nền tảng
 
 | Mã | Quyết định | Lý do |
@@ -954,7 +972,8 @@ Nếu mục tiêu là hoàn thiện toàn bộ bốn pha với kiểm thử bả
 | ADR-12 | STT/diarization tạo speaker label ẩn danh, không nhận diện tên. | Diarization không phải voice identity; người dùng ánh xạ/chỉnh sửa để tránh gán nhầm. |
 | ADR-13 | AI output là draft có citation; tool use là proposal cần xác nhận và gọi lại API nghiệp vụ chuẩn. | Ngăn hallucination/vượt quyền, tái sử dụng authorization/idempotency/audit hiện có. [TL15] |
 | ADR-14 | RAG nhiều cuộc họp dùng Bedrock Knowledge Bases + S3 Vectors, filter `groupId`/ACL trước retrieval. | Hỗ trợ truy xuất có nguồn với vector store serverless/chi phí phù hợp dữ liệu demo. [TL16][TL17] |
-| ADR-15 | Document PiP là progressive enhancement, không phải điều kiện sử dụng Chatbot. | API cần user gesture và độ hỗ trợ trình duyệt khác nhau; panel trong trang luôn là fallback. [TL18] |
+| ADR-15 | CampusMeet vẫn là web app độc lập; Meet Add-on side panel là trải nghiệm ưu tiên khi cần dùng cùng tab, còn panel web và Document PiP là fallback. | Không nhân đôi sản phẩm/backend, không nhúng Meet bằng iframe thông thường và không để khả năng cài add-on chặn luồng chính. [TL18][TL22][TL23] |
 | ADR-16 | AI/STT provider và model ID là cấu hình, không hard-code một model/version trong SRS. | Cho phép thay model theo Region, availability, benchmark, chi phí và vòng đời dịch vụ mà không đổi nghiệp vụ. |
+| ADR-17 | MVP thử Meet Add-on bằng deployment chưa công bố; private/public Marketplace là quyết định phát hành riêng. | Private chỉ dùng trong cùng Workspace organization; public cần Google/OAuth review và audience không đổi được sau khi publish. [TL24][TL25] |
 
 > **Ghi chú:** Trạng thái nền tảng: Đây là bản tài liệu để nhóm dùng thống nhất phạm vi, triển khai và trao đổi với mentor. Sau khi mentor góp ý, nhóm chỉ cần cập nhật những phần chịu ảnh hưởng: phạm vi, yêu cầu, kiến trúc, kiểm thử và kế hoạch thực hiện.
