@@ -50,28 +50,37 @@ function keyAttributes(schema = []) {
   return schema.map(({ AttributeName }) => AttributeName);
 }
 
-const dataTemplateText = await readFile('infra/data-foundation.yaml', 'utf8');
-let dataTemplate;
-
-try {
-  dataTemplate = JSON.parse(dataTemplateText);
-} catch (error) {
-  failures.push(`infra/data-foundation.yaml is not valid JSON/YAML-compatible JSON: ${error.message}`);
-  dataTemplate = { Resources: {} };
+async function readJson(path) {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'));
+  } catch (error) {
+    failures.push(`${path} is not valid JSON/YAML-compatible JSON: ${error.message}`);
+    return { Resources: {} };
+  }
 }
 
-const tableResources = Object.entries(dataTemplate.Resources ?? {}).filter(
+const sourceTemplate = await readJson('infra/data-foundation.yaml');
+const generatedTemplate = await readJson('.aws-sam/data-foundation.generated.json');
+
+const sourceTables = Object.entries(sourceTemplate.Resources ?? {}).filter(
+  ([, resource]) => resource.Type === 'AWS::DynamoDB::Table',
+);
+const generatedTables = Object.entries(generatedTemplate.Resources ?? {}).filter(
   ([, resource]) => resource.Type === 'AWS::DynamoDB::Table',
 );
 
 assert(
-  tableResources.length === expectedTables.length,
-  `Expected ${expectedTables.length} DynamoDB tables but found ${tableResources.length}.`,
+  sourceTables.length === expectedTables.length,
+  `Expected ${expectedTables.length} source DynamoDB tables but found ${sourceTables.length}.`,
+);
+assert(
+  generatedTables.length === expectedTables.length,
+  `Expected ${expectedTables.length} generated DynamoDB tables but found ${generatedTables.length}.`,
 );
 
 const actualSuffixes = [];
 
-for (const [logicalId, resource] of tableResources) {
+for (const [logicalId, resource] of sourceTables) {
   const properties = resource.Properties ?? {};
   const tableName = properties.TableName?.['Fn::Sub'];
   const prefix = '${TablePrefix}-';
@@ -109,6 +118,21 @@ assert(
   JSON.stringify([...actualSuffixes].sort()) === JSON.stringify([...expectedTables].sort()),
   `DynamoDB suffix inventory differs. Expected [${expectedTables.join(', ')}], found [${actualSuffixes.join(', ')}].`,
 );
+
+for (let index = 0; index < generatedTables.length; index += 1) {
+  const [logicalId, resource] = generatedTables[index];
+  const expectedDependency = index === 0 ? undefined : generatedTables[index - 1][0];
+
+  assert(resource.DeletionPolicy === 'Retain', `${logicalId} must use DeletionPolicy Retain.`);
+  assert(
+    resource.UpdateReplacePolicy === 'Retain',
+    `${logicalId} must use UpdateReplacePolicy Retain.`,
+  );
+  assert(
+    resource.DependsOn === expectedDependency,
+    `${logicalId} must depend on ${expectedDependency ?? 'no previous table'}.`,
+  );
+}
 
 const applicationTemplate = await readFile('infra/template.yaml', 'utf8');
 
@@ -150,5 +174,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Infrastructure consistency check passed: ${tableResources.length} tables, ${expectedEnvironmentVariables.length} Lambda table variables, no duplicate table ownership.`,
+  `Infrastructure consistency check passed: ${sourceTables.length} tables, ${expectedEnvironmentVariables.length} Lambda table variables, retained sequential synthesis, no duplicate table ownership.`,
 );
