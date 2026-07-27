@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "defaultEnvironment": "dev",
+  "defaultPrefix": "campusmeet-dev",
+  "tables": [
+    {
+      "logicalId": "UsersTable",
+      "suffix": "users",
+      "attributes": { "userId": "S", "cognitoSub": "S" },
+      "keySchema": [["userId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "CognitoSubIndex", "keySchema": [["cognitoSub", "HASH"]] }
+      ]
+    },
+    {
+      "logicalId": "GroupsTable",
+      "suffix": "groups",
+      "attributes": { "groupId": "S", "createdBy": "S", "createdAt": "S" },
+      "keySchema": [["groupId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "CreatedByIndex", "keySchema": [["createdBy", "HASH"], ["createdAt", "RANGE"]] }
+      ]
+    },
+    {
+      "logicalId": "MembershipsTable",
+      "suffix": "memberships",
+      "attributes": { "groupId": "S", "userId": "S", "joinedAt": "S" },
+      "keySchema": [["groupId", "HASH"], ["userId", "RANGE"]],
+      "globalSecondaryIndexes": [
+        { "name": "UserMembershipsIndex", "keySchema": [["userId", "HASH"], ["joinedAt", "RANGE"]] }
+      ]
+    },
+    {
+      "logicalId": "InvitationsTable",
+      "suffix": "invitations",
+      "attributes": {
+        "invitationId": "S",
+        "tokenHash": "S",
+        "groupId": "S",
+        "statusCreatedAt": "S"
+      },
+      "keySchema": [["invitationId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "TokenHashIndex", "keySchema": [["tokenHash", "HASH"]] },
+        { "name": "GroupStatusIndex", "keySchema": [["groupId", "HASH"], ["statusCreatedAt", "RANGE"]] }
+      ],
+      "ttlAttribute": "expiresAtEpoch"
+    },
+    {
+      "logicalId": "MeetingsTable",
+      "suffix": "meetings",
+      "attributes": {
+        "meetingId": "S",
+        "groupId": "S",
+        "startAtUtc": "S",
+        "organizerId": "S",
+        "googleEventId": "S"
+      },
+      "keySchema": [["meetingId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "GroupStartAtIndex", "keySchema": [["groupId", "HASH"], ["startAtUtc", "RANGE"]] },
+        { "name": "OrganizerStartAtIndex", "keySchema": [["organizerId", "HASH"], ["startAtUtc", "RANGE"]] },
+        { "name": "GoogleEventIdIndex", "keySchema": [["googleEventId", "HASH"]] }
+      ]
+    },
+    {
+      "logicalId": "RemindersTable",
+      "suffix": "reminders",
+      "attributes": { "reminderId": "S", "meetingId": "S", "runAtUtc": "S", "status": "S" },
+      "keySchema": [["reminderId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "MeetingRunAtIndex", "keySchema": [["meetingId", "HASH"], ["runAtUtc", "RANGE"]] },
+        { "name": "StatusRunAtIndex", "keySchema": [["status", "HASH"], ["runAtUtc", "RANGE"]] }
+      ],
+      "ttlAttribute": "expiresAtEpoch"
+    },
+    {
+      "logicalId": "MinutesTable",
+      "suffix": "minutes",
+      "attributes": { "meetingId": "S" },
+      "keySchema": [["meetingId", "HASH"]]
+    },
+    {
+      "logicalId": "TasksTable",
+      "suffix": "tasks",
+      "attributes": { "taskId": "S", "assigneeId": "S", "dueAtUtc": "S", "groupStatus": "S" },
+      "keySchema": [["taskId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "AssigneeDueAtIndex", "keySchema": [["assigneeId", "HASH"], ["dueAtUtc", "RANGE"]] },
+        { "name": "GroupStatusDueAtIndex", "keySchema": [["groupStatus", "HASH"], ["dueAtUtc", "RANGE"]] }
+      ]
+    },
+    {
+      "logicalId": "NotificationsTable",
+      "suffix": "notifications",
+      "attributes": { "notificationId": "S", "userId": "S", "createdAt": "S" },
+      "keySchema": [["notificationId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "UserCreatedAtIndex", "keySchema": [["userId", "HASH"], ["createdAt", "RANGE"]] }
+      ],
+      "ttlAttribute": "expiresAtEpoch"
+    },
+    {
+      "logicalId": "AuditLogsTable",
+      "suffix": "audit-logs",
+      "attributes": { "auditId": "S", "groupId": "S", "createdAt": "S" },
+      "keySchema": [["auditId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "GroupCreatedAtIndex", "keySchema": [["groupId", "HASH"], ["createdAt", "RANGE"]] }
+      ]
+    },
+    {
+      "logicalId": "AttachmentsTable",
+      "suffix": "attachments",
+      "attributes": {
+        "attachmentId": "S",
+        "meetingId": "S",
+        "groupStatus": "S",
+        "createdAt": "S"
+      },
+      "keySchema": [["attachmentId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "MeetingCreatedAtIndex", "keySchema": [["meetingId", "HASH"], ["createdAt", "RANGE"]] },
+        { "name": "GroupStatusCreatedAtIndex", "keySchema": [["groupStatus", "HASH"], ["createdAt", "RANGE"]] }
+      ],
+      "ttlAttribute": "expiresAtEpoch"
+    },
+    {
+      "logicalId": "RecordingsTable",
+      "suffix": "recordings",
+      "attributes": { "recordingId": "S", "meetingId": "S", "createdAt": "S" },
+      "keySchema": [["recordingId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "MeetingCreatedAtIndex", "keySchema": [["meetingId", "HASH"], ["createdAt", "RANGE"]] }
+      ],
+      "ttlAttribute": "expiresAtEpoch"
+    },
+    {
+      "logicalId": "RecordingConsentsTable",
+      "suffix": "recording-consents",
+      "attributes": { "recordingId": "S", "userId": "S" },
+      "keySchema": [["recordingId", "HASH"], ["userId", "RANGE"]]
+    },
+    {
+      "logicalId": "TranscriptsTable",
+      "suffix": "transcripts",
+      "attributes": {
+        "transcriptId": "S",
+        "segmentId": "S",
+        "meetingId": "S",
+        "versionSort": "S"
+      },
+      "keySchema": [["transcriptId", "HASH"], ["segmentId", "RANGE"]],
+      "globalSecondaryIndexes": [
+        { "name": "MeetingVersionIndex", "keySchema": [["meetingId", "HASH"], ["versionSort", "RANGE"]] }
+      ],
+      "ttlAttribute": "expiresAtEpoch"
+    },
+    {
+      "logicalId": "AIJobsTable",
+      "suffix": "ai-jobs",
+      "attributes": {
+        "aiJobId": "S",
+        "groupId": "S",
+        "createdAt": "S",
+        "status": "S",
+        "updatedAt": "S"
+      },
+      "keySchema": [["aiJobId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "GroupCreatedAtIndex", "keySchema": [["groupId", "HASH"], ["createdAt", "RANGE"]] },
+        { "name": "StatusUpdatedAtIndex", "keySchema": [["status", "HASH"], ["updatedAt", "RANGE"]] }
+      ],
+      "ttlAttribute": "expiresAtEpoch"
+    },
+    {
+      "logicalId": "AIConversationsTable",
+      "suffix": "ai-conversations",
+      "attributes": {
+        "conversationId": "S",
+        "messageId": "S",
+        "userId": "S",
+        "updatedAt": "S"
+      },
+      "keySchema": [["conversationId", "HASH"], ["messageId", "RANGE"]],
+      "globalSecondaryIndexes": [
+        { "name": "UserUpdatedAtIndex", "keySchema": [["userId", "HASH"], ["updatedAt", "RANGE"]] }
+      ],
+      "ttlAttribute": "expiresAtEpoch"
+    },
+    {
+      "logicalId": "ToolProposalsTable",
+      "suffix": "tool-proposals",
+      "attributes": { "proposalId": "S", "userStatus": "S", "createdAt": "S" },
+      "keySchema": [["proposalId", "HASH"]],
+      "globalSecondaryIndexes": [
+        { "name": "UserStatusCreatedAtIndex", "keySchema": [["userStatus", "HASH"], ["createdAt", "RANGE"]] }
+      ],
+      "ttlAttribute": "expiresAtEpoch"
+    }
+  ]
+}
