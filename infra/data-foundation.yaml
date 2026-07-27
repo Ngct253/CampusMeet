@@ -1,0 +1,411 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CampusMeet DynamoDB data foundation with 17 domain tables.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  TablePrefix:
+    Type: String
+    Default: campusmeet-dev
+    AllowedPattern: '^[a-z0-9-]+$'
+  EnablePointInTimeRecovery:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  EnableDeletionProtection:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+Conditions:
+  EnablePitr: !Equals [!Ref EnablePointInTimeRecovery, 'true']
+  EnableDeletionProtectionCondition: !Equals [!Ref EnableDeletionProtection, 'true']
+
+Metadata:
+  TableDefaults: &TableDefaults
+    BillingMode: PAY_PER_REQUEST
+    SSESpecification: { SSEEnabled: true }
+    PointInTimeRecoverySpecification:
+      PointInTimeRecoveryEnabled: !If [EnablePitr, true, false]
+    DeletionProtectionEnabled: !If [EnableDeletionProtectionCondition, true, false]
+    Tags:
+      - { Key: Project, Value: CampusMeet }
+      - { Key: Environment, Value: !Ref Environment }
+      - { Key: ManagedBy, Value: CloudFormation }
+
+Resources:
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-users'
+      AttributeDefinitions:
+        - { AttributeName: userId, AttributeType: S }
+        - { AttributeName: cognitoSub, AttributeType: S }
+      KeySchema:
+        - { AttributeName: userId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: CognitoSubIndex
+          KeySchema:
+            - { AttributeName: cognitoSub, KeyType: HASH }
+          Projection: { ProjectionType: ALL }
+
+  GroupsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-groups'
+      AttributeDefinitions:
+        - { AttributeName: groupId, AttributeType: S }
+        - { AttributeName: createdBy, AttributeType: S }
+        - { AttributeName: createdAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: groupId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: CreatedByIndex
+          KeySchema:
+            - { AttributeName: createdBy, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  MembershipsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-memberships'
+      AttributeDefinitions:
+        - { AttributeName: groupId, AttributeType: S }
+        - { AttributeName: userId, AttributeType: S }
+        - { AttributeName: joinedAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: groupId, KeyType: HASH }
+        - { AttributeName: userId, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: UserMembershipsIndex
+          KeySchema:
+            - { AttributeName: userId, KeyType: HASH }
+            - { AttributeName: joinedAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  InvitationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-invitations'
+      AttributeDefinitions:
+        - { AttributeName: invitationId, AttributeType: S }
+        - { AttributeName: tokenHash, AttributeType: S }
+        - { AttributeName: groupId, AttributeType: S }
+        - { AttributeName: statusCreatedAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: invitationId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: TokenHashIndex
+          KeySchema:
+            - { AttributeName: tokenHash, KeyType: HASH }
+          Projection: { ProjectionType: ALL }
+        - IndexName: GroupStatusIndex
+          KeySchema:
+            - { AttributeName: groupId, KeyType: HASH }
+            - { AttributeName: statusCreatedAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        { AttributeName: expiresAtEpoch, Enabled: true }
+
+  MeetingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-meetings'
+      AttributeDefinitions:
+        - { AttributeName: meetingId, AttributeType: S }
+        - { AttributeName: groupId, AttributeType: S }
+        - { AttributeName: startAtUtc, AttributeType: S }
+        - { AttributeName: organizerId, AttributeType: S }
+        - { AttributeName: googleEventId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: meetingId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: GroupStartAtIndex
+          KeySchema:
+            - { AttributeName: groupId, KeyType: HASH }
+            - { AttributeName: startAtUtc, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        - IndexName: OrganizerStartAtIndex
+          KeySchema:
+            - { AttributeName: organizerId, KeyType: HASH }
+            - { AttributeName: startAtUtc, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        - IndexName: GoogleEventIdIndex
+          KeySchema:
+            - { AttributeName: googleEventId, KeyType: HASH }
+          Projection: { ProjectionType: ALL }
+
+  RemindersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-reminders'
+      AttributeDefinitions:
+        - { AttributeName: reminderId, AttributeType: S }
+        - { AttributeName: meetingId, AttributeType: S }
+        - { AttributeName: runAtUtc, AttributeType: S }
+        - { AttributeName: status, AttributeType: S }
+      KeySchema:
+        - { AttributeName: reminderId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: MeetingRunAtIndex
+          KeySchema:
+            - { AttributeName: meetingId, KeyType: HASH }
+            - { AttributeName: runAtUtc, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        - IndexName: StatusRunAtIndex
+          KeySchema:
+            - { AttributeName: status, KeyType: HASH }
+            - { AttributeName: runAtUtc, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        { AttributeName: expiresAtEpoch, Enabled: true }
+
+  MinutesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-minutes'
+      AttributeDefinitions:
+        - { AttributeName: meetingId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: meetingId, KeyType: HASH }
+
+  TasksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-tasks'
+      AttributeDefinitions:
+        - { AttributeName: taskId, AttributeType: S }
+        - { AttributeName: assigneeId, AttributeType: S }
+        - { AttributeName: dueAtUtc, AttributeType: S }
+        - { AttributeName: groupStatus, AttributeType: S }
+      KeySchema:
+        - { AttributeName: taskId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: AssigneeDueAtIndex
+          KeySchema:
+            - { AttributeName: assigneeId, KeyType: HASH }
+            - { AttributeName: dueAtUtc, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        - IndexName: GroupStatusDueAtIndex
+          KeySchema:
+            - { AttributeName: groupStatus, KeyType: HASH }
+            - { AttributeName: dueAtUtc, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  NotificationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-notifications'
+      AttributeDefinitions:
+        - { AttributeName: notificationId, AttributeType: S }
+        - { AttributeName: userId, AttributeType: S }
+        - { AttributeName: createdAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: notificationId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: UserCreatedAtIndex
+          KeySchema:
+            - { AttributeName: userId, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        { AttributeName: expiresAtEpoch, Enabled: true }
+
+  AuditLogsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-audit-logs'
+      AttributeDefinitions:
+        - { AttributeName: auditId, AttributeType: S }
+        - { AttributeName: groupId, AttributeType: S }
+        - { AttributeName: createdAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: auditId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: GroupCreatedAtIndex
+          KeySchema:
+            - { AttributeName: groupId, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  AttachmentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-attachments'
+      AttributeDefinitions:
+        - { AttributeName: attachmentId, AttributeType: S }
+        - { AttributeName: meetingId, AttributeType: S }
+        - { AttributeName: groupStatus, AttributeType: S }
+        - { AttributeName: createdAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: attachmentId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: MeetingCreatedAtIndex
+          KeySchema:
+            - { AttributeName: meetingId, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        - IndexName: GroupStatusCreatedAtIndex
+          KeySchema:
+            - { AttributeName: groupStatus, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        { AttributeName: expiresAtEpoch, Enabled: true }
+
+  RecordingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-recordings'
+      AttributeDefinitions:
+        - { AttributeName: recordingId, AttributeType: S }
+        - { AttributeName: meetingId, AttributeType: S }
+        - { AttributeName: createdAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: recordingId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: MeetingCreatedAtIndex
+          KeySchema:
+            - { AttributeName: meetingId, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        { AttributeName: expiresAtEpoch, Enabled: true }
+
+  RecordingConsentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-recording-consents'
+      AttributeDefinitions:
+        - { AttributeName: recordingId, AttributeType: S }
+        - { AttributeName: userId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: recordingId, KeyType: HASH }
+        - { AttributeName: userId, KeyType: RANGE }
+
+  TranscriptsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-transcripts'
+      AttributeDefinitions:
+        - { AttributeName: transcriptId, AttributeType: S }
+        - { AttributeName: segmentId, AttributeType: S }
+        - { AttributeName: meetingId, AttributeType: S }
+        - { AttributeName: versionSort, AttributeType: S }
+      KeySchema:
+        - { AttributeName: transcriptId, KeyType: HASH }
+        - { AttributeName: segmentId, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: MeetingVersionIndex
+          KeySchema:
+            - { AttributeName: meetingId, KeyType: HASH }
+            - { AttributeName: versionSort, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        { AttributeName: expiresAtEpoch, Enabled: true }
+
+  AIJobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-ai-jobs'
+      AttributeDefinitions:
+        - { AttributeName: aiJobId, AttributeType: S }
+        - { AttributeName: groupId, AttributeType: S }
+        - { AttributeName: createdAt, AttributeType: S }
+        - { AttributeName: status, AttributeType: S }
+        - { AttributeName: updatedAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: aiJobId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: GroupCreatedAtIndex
+          KeySchema:
+            - { AttributeName: groupId, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        - IndexName: StatusUpdatedAtIndex
+          KeySchema:
+            - { AttributeName: status, KeyType: HASH }
+            - { AttributeName: updatedAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        { AttributeName: expiresAtEpoch, Enabled: true }
+
+  AIConversationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-ai-conversations'
+      AttributeDefinitions:
+        - { AttributeName: conversationId, AttributeType: S }
+        - { AttributeName: messageId, AttributeType: S }
+        - { AttributeName: userId, AttributeType: S }
+        - { AttributeName: updatedAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: conversationId, KeyType: HASH }
+        - { AttributeName: messageId, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: UserUpdatedAtIndex
+          KeySchema:
+            - { AttributeName: userId, KeyType: HASH }
+            - { AttributeName: updatedAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        { AttributeName: expiresAtEpoch, Enabled: true }
+
+  ToolProposalsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      <<: *TableDefaults
+      TableName: !Sub '${TablePrefix}-tool-proposals'
+      AttributeDefinitions:
+        - { AttributeName: proposalId, AttributeType: S }
+        - { AttributeName: userStatus, AttributeType: S }
+        - { AttributeName: createdAt, AttributeType: S }
+      KeySchema:
+        - { AttributeName: proposalId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: UserStatusCreatedAtIndex
+          KeySchema:
+            - { AttributeName: userStatus, KeyType: HASH }
+            - { AttributeName: createdAt, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification:
+        { AttributeName: expiresAtEpoch, Enabled: true }
+
+Outputs:
+  TablePrefix: { Value: !Ref TablePrefix }
+  UsersTableName: { Value: !Ref UsersTable }
+  GroupsTableName: { Value: !Ref GroupsTable }
+  MembershipsTableName: { Value: !Ref MembershipsTable }
+  InvitationsTableName: { Value: !Ref InvitationsTable }
+  MeetingsTableName: { Value: !Ref MeetingsTable }
+  RemindersTableName: { Value: !Ref RemindersTable }
+  MinutesTableName: { Value: !Ref MinutesTable }
+  TasksTableName: { Value: !Ref TasksTable }
+  NotificationsTableName: { Value: !Ref NotificationsTable }
+  AuditLogsTableName: { Value: !Ref AuditLogsTable }
+  AttachmentsTableName: { Value: !Ref AttachmentsTable }
+  RecordingsTableName: { Value: !Ref RecordingsTable }
+  RecordingConsentsTableName: { Value: !Ref RecordingConsentsTable }
+  TranscriptsTableName: { Value: !Ref TranscriptsTable }
+  AIJobsTableName: { Value: !Ref AIJobsTable }
+  AIConversationsTableName: { Value: !Ref AIConversationsTable }
+  ToolProposalsTableName: { Value: !Ref ToolProposalsTable }
