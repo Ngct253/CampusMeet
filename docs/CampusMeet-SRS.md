@@ -595,6 +595,8 @@ CampusMeet sử dụng kiến trúc serverless và dịch vụ managed để gi�
 | POST | /meetings/{meetingId}/recordings | Người có quyền ghi | Khởi tạo recording/upload với consent và source metadata. |
 | POST | /meetings/{meetingId}/transcriptions | Người có quyền ghi | Tạo batch STT job để chuẩn hóa/phục hồi từ recording đã hợp lệ. |
 | POST | /meetings/{meetingId}/live-transcription | Người có quyền ghi | Sau consent/cấp quyền, tạo phiên streaming idempotent và trả thông tin kết nối ngắn hạn. |
+| GET | /meetings/{meetingId}/live-transcription/{sessionId} | Thành viên có quyền xem | Đọc trạng thái, heartbeat và sequence cuối của phiên. |
+| POST | /meetings/{meetingId}/live-transcription/{sessionId}/segments | Người khởi tạo phiên | Ghi batch final segment theo `ResultId/sequence`; gửi lại không tạo trùng; không nhận partial result làm nguồn chính thức. |
 | POST | /meetings/{meetingId}/live-transcription/{sessionId}/stop | Người khởi tạo hoặc người có quyền ghi | Kết thúc stream, chốt sequence cuối và kích hoạt chuẩn hóa sau họp. |
 | GET | /meetings/{meetingId}/transcripts | Thành viên | Lấy transcript/version được phép xem. |
 | PATCH | /transcripts/{transcriptId}/segments/{segmentId} | Người có quyền ghi | Sửa text/language/`Speaker N`; không ánh xạ danh tính; lưu version/audit. |
