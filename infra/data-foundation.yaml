@@ -1,1 +1,257 @@
-{"AWSTemplateFormatVersion":"2010-09-09","Description":"CampusMeet DynamoDB data foundation v2. Five domain tables cover core collaboration and M5 AI workflows.","Parameters":{"Environment":{"Type":"String","Default":"dev","AllowedValues":["dev","staging","prod"],"Description":"CampusMeet deployment environment."},"TablePrefix":{"Type":"String","Default":"campusmeet-dev","AllowedPattern":"^[a-z0-9-]+$","Description":"Stable environment prefix. New v2 table suffixes do not collide with the legacy 17-table layout."},"EnablePointInTimeRecovery":{"Type":"String","Default":"false","AllowedValues":["true","false"],"Description":"Enable PITR after reviewing cost. Recommended for staging and production."},"EnableDeletionProtection":{"Type":"String","Default":"false","AllowedValues":["true","false"],"Description":"Enable deletion protection. Recommended for staging and production."}},"Conditions":{"EnablePitr":{"Fn::Equals":[{"Ref":"EnablePointInTimeRecovery"},"true"]},"DeletionProtectionEnabledCondition":{"Fn::Equals":[{"Ref":"EnableDeletionProtection"},"true"]}},"Resources":{"IdentityTable":{"Type":"AWS::DynamoDB::Table","DeletionPolicy":"Retain","UpdateReplacePolicy":"Retain","Properties":{"TableName":{"Fn::Sub":"${TablePrefix}-identity"},"BillingMode":"PAY_PER_REQUEST","SSESpecification":{"SSEEnabled":true},"PointInTimeRecoverySpecification":{"PointInTimeRecoveryEnabled":{"Fn::If":["EnablePitr",true,false]}},"DeletionProtectionEnabled":{"Fn::If":["DeletionProtectionEnabledCondition",true,false]},"AttributeDefinitions":[{"AttributeName":"PK","AttributeType":"S"},{"AttributeName":"SK","AttributeType":"S"},{"AttributeName":"GSI1PK","AttributeType":"S"},{"AttributeName":"GSI1SK","AttributeType":"S"},{"AttributeName":"GSI2PK","AttributeType":"S"},{"AttributeName":"GSI2SK","AttributeType":"S"}],"KeySchema":[{"AttributeName":"PK","KeyType":"HASH"},{"AttributeName":"SK","KeyType":"RANGE"}],"Tags":[{"Key":"Project","Value":"CampusMeet"},{"Key":"Environment","Value":{"Ref":"Environment"}},{"Key":"ManagedBy","Value":"CloudFormation"},{"Key":"DataModelVersion","Value":"2"}],"GlobalSecondaryIndexes":[{"IndexName":"GSI1","KeySchema":[{"AttributeName":"GSI1PK","KeyType":"HASH"},{"AttributeName":"GSI1SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"GSI2","KeySchema":[{"AttributeName":"GSI2PK","KeyType":"HASH"},{"AttributeName":"GSI2SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}],"TimeToLiveSpecification":{"AttributeName":"expiresAtEpoch","Enabled":true}}},"CollaborationTable":{"Type":"AWS::DynamoDB::Table","DeletionPolicy":"Retain","UpdateReplacePolicy":"Retain","Properties":{"TableName":{"Fn::Sub":"${TablePrefix}-collaboration"},"BillingMode":"PAY_PER_REQUEST","SSESpecification":{"SSEEnabled":true},"PointInTimeRecoverySpecification":{"PointInTimeRecoveryEnabled":{"Fn::If":["EnablePitr",true,false]}},"DeletionProtectionEnabled":{"Fn::If":["DeletionProtectionEnabledCondition",true,false]},"AttributeDefinitions":[{"AttributeName":"PK","AttributeType":"S"},{"AttributeName":"SK","AttributeType":"S"},{"AttributeName":"GSI1PK","AttributeType":"S"},{"AttributeName":"GSI1SK","AttributeType":"S"},{"AttributeName":"GSI2PK","AttributeType":"S"},{"AttributeName":"GSI2SK","AttributeType":"S"}],"KeySchema":[{"AttributeName":"PK","KeyType":"HASH"},{"AttributeName":"SK","KeyType":"RANGE"}],"Tags":[{"Key":"Project","Value":"CampusMeet"},{"Key":"Environment","Value":{"Ref":"Environment"}},{"Key":"ManagedBy","Value":"CloudFormation"},{"Key":"DataModelVersion","Value":"2"}],"GlobalSecondaryIndexes":[{"IndexName":"GSI1","KeySchema":[{"AttributeName":"GSI1PK","KeyType":"HASH"},{"AttributeName":"GSI1SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"GSI2","KeySchema":[{"AttributeName":"GSI2PK","KeyType":"HASH"},{"AttributeName":"GSI2SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}],"TimeToLiveSpecification":{"AttributeName":"expiresAtEpoch","Enabled":true}}},"MeetingDataTable":{"Type":"AWS::DynamoDB::Table","DeletionPolicy":"Retain","UpdateReplacePolicy":"Retain","Properties":{"TableName":{"Fn::Sub":"${TablePrefix}-meeting-data"},"BillingMode":"PAY_PER_REQUEST","SSESpecification":{"SSEEnabled":true},"PointInTimeRecoverySpecification":{"PointInTimeRecoveryEnabled":{"Fn::If":["EnablePitr",true,false]}},"DeletionProtectionEnabled":{"Fn::If":["DeletionProtectionEnabledCondition",true,false]},"AttributeDefinitions":[{"AttributeName":"PK","AttributeType":"S"},{"AttributeName":"SK","AttributeType":"S"},{"AttributeName":"GSI1PK","AttributeType":"S"},{"AttributeName":"GSI1SK","AttributeType":"S"},{"AttributeName":"GSI2PK","AttributeType":"S"},{"AttributeName":"GSI2SK","AttributeType":"S"},{"AttributeName":"GSI3PK","AttributeType":"S"},{"AttributeName":"GSI3SK","AttributeType":"S"}],"KeySchema":[{"AttributeName":"PK","KeyType":"HASH"},{"AttributeName":"SK","KeyType":"RANGE"}],"Tags":[{"Key":"Project","Value":"CampusMeet"},{"Key":"Environment","Value":{"Ref":"Environment"}},{"Key":"ManagedBy","Value":"CloudFormation"},{"Key":"DataModelVersion","Value":"2"}],"GlobalSecondaryIndexes":[{"IndexName":"GSI1","KeySchema":[{"AttributeName":"GSI1PK","KeyType":"HASH"},{"AttributeName":"GSI1SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"GSI2","KeySchema":[{"AttributeName":"GSI2PK","KeyType":"HASH"},{"AttributeName":"GSI2SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"GSI3","KeySchema":[{"AttributeName":"GSI3PK","KeyType":"HASH"},{"AttributeName":"GSI3SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}],"TimeToLiveSpecification":{"AttributeName":"expiresAtEpoch","Enabled":true}}},"TaskDataTable":{"Type":"AWS::DynamoDB::Table","DeletionPolicy":"Retain","UpdateReplacePolicy":"Retain","Properties":{"TableName":{"Fn::Sub":"${TablePrefix}-task-data"},"BillingMode":"PAY_PER_REQUEST","SSESpecification":{"SSEEnabled":true},"PointInTimeRecoverySpecification":{"PointInTimeRecoveryEnabled":{"Fn::If":["EnablePitr",true,false]}},"DeletionProtectionEnabled":{"Fn::If":["DeletionProtectionEnabledCondition",true,false]},"AttributeDefinitions":[{"AttributeName":"PK","AttributeType":"S"},{"AttributeName":"SK","AttributeType":"S"},{"AttributeName":"GSI1PK","AttributeType":"S"},{"AttributeName":"GSI1SK","AttributeType":"S"},{"AttributeName":"GSI2PK","AttributeType":"S"},{"AttributeName":"GSI2SK","AttributeType":"S"},{"AttributeName":"GSI3PK","AttributeType":"S"},{"AttributeName":"GSI3SK","AttributeType":"S"}],"KeySchema":[{"AttributeName":"PK","KeyType":"HASH"},{"AttributeName":"SK","KeyType":"RANGE"}],"Tags":[{"Key":"Project","Value":"CampusMeet"},{"Key":"Environment","Value":{"Ref":"Environment"}},{"Key":"ManagedBy","Value":"CloudFormation"},{"Key":"DataModelVersion","Value":"2"}],"GlobalSecondaryIndexes":[{"IndexName":"GSI1","KeySchema":[{"AttributeName":"GSI1PK","KeyType":"HASH"},{"AttributeName":"GSI1SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"GSI2","KeySchema":[{"AttributeName":"GSI2PK","KeyType":"HASH"},{"AttributeName":"GSI2SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"GSI3","KeySchema":[{"AttributeName":"GSI3PK","KeyType":"HASH"},{"AttributeName":"GSI3SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}],"TimeToLiveSpecification":{"AttributeName":"expiresAtEpoch","Enabled":true}}},"AIWorkTable":{"Type":"AWS::DynamoDB::Table","DeletionPolicy":"Retain","UpdateReplacePolicy":"Retain","Properties":{"TableName":{"Fn::Sub":"${TablePrefix}-ai-work"},"BillingMode":"PAY_PER_REQUEST","SSESpecification":{"SSEEnabled":true},"PointInTimeRecoverySpecification":{"PointInTimeRecoveryEnabled":{"Fn::If":["EnablePitr",true,false]}},"DeletionProtectionEnabled":{"Fn::If":["DeletionProtectionEnabledCondition",true,false]},"AttributeDefinitions":[{"AttributeName":"PK","AttributeType":"S"},{"AttributeName":"SK","AttributeType":"S"},{"AttributeName":"GSI1PK","AttributeType":"S"},{"AttributeName":"GSI1SK","AttributeType":"S"},{"AttributeName":"GSI2PK","AttributeType":"S"},{"AttributeName":"GSI2SK","AttributeType":"S"}],"KeySchema":[{"AttributeName":"PK","KeyType":"HASH"},{"AttributeName":"SK","KeyType":"RANGE"}],"Tags":[{"Key":"Project","Value":"CampusMeet"},{"Key":"Environment","Value":{"Ref":"Environment"}},{"Key":"ManagedBy","Value":"CloudFormation"},{"Key":"DataModelVersion","Value":"2"}],"GlobalSecondaryIndexes":[{"IndexName":"GSI1","KeySchema":[{"AttributeName":"GSI1PK","KeyType":"HASH"},{"AttributeName":"GSI1SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"GSI2","KeySchema":[{"AttributeName":"GSI2PK","KeyType":"HASH"},{"AttributeName":"GSI2SK","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}],"TimeToLiveSpecification":{"AttributeName":"expiresAtEpoch","Enabled":true}}}},"Outputs":{"IdentityTableName":{"Value":{"Ref":"IdentityTable"}},"IdentityTableArn":{"Value":{"Fn::GetAtt":["IdentityTable","Arn"]}},"CollaborationTableName":{"Value":{"Ref":"CollaborationTable"}},"CollaborationTableArn":{"Value":{"Fn::GetAtt":["CollaborationTable","Arn"]}},"MeetingDataTableName":{"Value":{"Ref":"MeetingDataTable"}},"MeetingDataTableArn":{"Value":{"Fn::GetAtt":["MeetingDataTable","Arn"]}},"TaskDataTableName":{"Value":{"Ref":"TaskDataTable"}},"TaskDataTableArn":{"Value":{"Fn::GetAtt":["TaskDataTable","Arn"]}},"AIWorkTableName":{"Value":{"Ref":"AIWorkTable"}},"AIWorkTableArn":{"Value":{"Fn::GetAtt":["AIWorkTable","Arn"]}}}}
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "CampusMeet DynamoDB data foundation v2. Five domain tables cover core collaboration and M5 AI workflows.",
+  "Parameters": {
+    "Environment": {"Type": "String", "Default": "dev", "AllowedValues": ["dev", "staging", "prod"], "Description": "CampusMeet deployment environment."},
+    "TablePrefix": {
+      "Type": "String",
+      "Default": "campusmeet-dev",
+      "AllowedPattern": "^[a-z0-9-]+$",
+      "Description": "Stable environment prefix. New v2 table suffixes do not collide with the legacy 17-table layout."
+    },
+    "EnablePointInTimeRecovery": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": ["true", "false"],
+      "Description": "Enable PITR after reviewing cost. Recommended for staging and production."
+    },
+    "EnableDeletionProtection": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": ["true", "false"],
+      "Description": "Enable deletion protection. Recommended for staging and production."
+    }
+  },
+  "Conditions": {
+    "EnablePitr": {"Fn::Equals": [{"Ref": "EnablePointInTimeRecovery"}, "true"]},
+    "DeletionProtectionEnabledCondition": {"Fn::Equals": [{"Ref": "EnableDeletionProtection"}, "true"]}
+  },
+  "Resources": {
+    "IdentityTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "TableName": {"Fn::Sub": "${TablePrefix}-identity"},
+        "BillingMode": "PAY_PER_REQUEST",
+        "SSESpecification": {"SSEEnabled": true},
+        "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": {"Fn::If": ["EnablePitr", true, false]}},
+        "DeletionProtectionEnabled": {"Fn::If": ["DeletionProtectionEnabledCondition", true, false]},
+        "AttributeDefinitions": [
+          {"AttributeName": "PK", "AttributeType": "S"},
+          {"AttributeName": "SK", "AttributeType": "S"},
+          {"AttributeName": "GSI1PK", "AttributeType": "S"},
+          {"AttributeName": "GSI1SK", "AttributeType": "S"},
+          {"AttributeName": "GSI2PK", "AttributeType": "S"},
+          {"AttributeName": "GSI2SK", "AttributeType": "S"}
+        ],
+        "KeySchema": [{"AttributeName": "PK", "KeyType": "HASH"}, {"AttributeName": "SK", "KeyType": "RANGE"}],
+        "Tags": [
+          {"Key": "Project", "Value": "CampusMeet"},
+          {"Key": "Environment", "Value": {"Ref": "Environment"}},
+          {"Key": "ManagedBy", "Value": "CloudFormation"},
+          {"Key": "DataModelVersion", "Value": "2"}
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "GSI1",
+            "KeySchema": [{"AttributeName": "GSI1PK", "KeyType": "HASH"}, {"AttributeName": "GSI1SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          },
+          {
+            "IndexName": "GSI2",
+            "KeySchema": [{"AttributeName": "GSI2PK", "KeyType": "HASH"}, {"AttributeName": "GSI2SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          }
+        ],
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": true}
+      }
+    },
+    "CollaborationTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "TableName": {"Fn::Sub": "${TablePrefix}-collaboration"},
+        "BillingMode": "PAY_PER_REQUEST",
+        "SSESpecification": {"SSEEnabled": true},
+        "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": {"Fn::If": ["EnablePitr", true, false]}},
+        "DeletionProtectionEnabled": {"Fn::If": ["DeletionProtectionEnabledCondition", true, false]},
+        "AttributeDefinitions": [
+          {"AttributeName": "PK", "AttributeType": "S"},
+          {"AttributeName": "SK", "AttributeType": "S"},
+          {"AttributeName": "GSI1PK", "AttributeType": "S"},
+          {"AttributeName": "GSI1SK", "AttributeType": "S"},
+          {"AttributeName": "GSI2PK", "AttributeType": "S"},
+          {"AttributeName": "GSI2SK", "AttributeType": "S"}
+        ],
+        "KeySchema": [{"AttributeName": "PK", "KeyType": "HASH"}, {"AttributeName": "SK", "KeyType": "RANGE"}],
+        "Tags": [
+          {"Key": "Project", "Value": "CampusMeet"},
+          {"Key": "Environment", "Value": {"Ref": "Environment"}},
+          {"Key": "ManagedBy", "Value": "CloudFormation"},
+          {"Key": "DataModelVersion", "Value": "2"}
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "GSI1",
+            "KeySchema": [{"AttributeName": "GSI1PK", "KeyType": "HASH"}, {"AttributeName": "GSI1SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          },
+          {
+            "IndexName": "GSI2",
+            "KeySchema": [{"AttributeName": "GSI2PK", "KeyType": "HASH"}, {"AttributeName": "GSI2SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          }
+        ],
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": true}
+      }
+    },
+    "MeetingDataTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "TableName": {"Fn::Sub": "${TablePrefix}-meeting-data"},
+        "BillingMode": "PAY_PER_REQUEST",
+        "SSESpecification": {"SSEEnabled": true},
+        "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": {"Fn::If": ["EnablePitr", true, false]}},
+        "DeletionProtectionEnabled": {"Fn::If": ["DeletionProtectionEnabledCondition", true, false]},
+        "AttributeDefinitions": [
+          {"AttributeName": "PK", "AttributeType": "S"},
+          {"AttributeName": "SK", "AttributeType": "S"},
+          {"AttributeName": "GSI1PK", "AttributeType": "S"},
+          {"AttributeName": "GSI1SK", "AttributeType": "S"},
+          {"AttributeName": "GSI2PK", "AttributeType": "S"},
+          {"AttributeName": "GSI2SK", "AttributeType": "S"},
+          {"AttributeName": "GSI3PK", "AttributeType": "S"},
+          {"AttributeName": "GSI3SK", "AttributeType": "S"}
+        ],
+        "KeySchema": [{"AttributeName": "PK", "KeyType": "HASH"}, {"AttributeName": "SK", "KeyType": "RANGE"}],
+        "Tags": [
+          {"Key": "Project", "Value": "CampusMeet"},
+          {"Key": "Environment", "Value": {"Ref": "Environment"}},
+          {"Key": "ManagedBy", "Value": "CloudFormation"},
+          {"Key": "DataModelVersion", "Value": "2"}
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "GSI1",
+            "KeySchema": [{"AttributeName": "GSI1PK", "KeyType": "HASH"}, {"AttributeName": "GSI1SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          },
+          {
+            "IndexName": "GSI2",
+            "KeySchema": [{"AttributeName": "GSI2PK", "KeyType": "HASH"}, {"AttributeName": "GSI2SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          },
+          {
+            "IndexName": "GSI3",
+            "KeySchema": [{"AttributeName": "GSI3PK", "KeyType": "HASH"}, {"AttributeName": "GSI3SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          }
+        ],
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": true}
+      }
+    },
+    "TaskDataTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "TableName": {"Fn::Sub": "${TablePrefix}-task-data"},
+        "BillingMode": "PAY_PER_REQUEST",
+        "SSESpecification": {"SSEEnabled": true},
+        "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": {"Fn::If": ["EnablePitr", true, false]}},
+        "DeletionProtectionEnabled": {"Fn::If": ["DeletionProtectionEnabledCondition", true, false]},
+        "AttributeDefinitions": [
+          {"AttributeName": "PK", "AttributeType": "S"},
+          {"AttributeName": "SK", "AttributeType": "S"},
+          {"AttributeName": "GSI1PK", "AttributeType": "S"},
+          {"AttributeName": "GSI1SK", "AttributeType": "S"},
+          {"AttributeName": "GSI2PK", "AttributeType": "S"},
+          {"AttributeName": "GSI2SK", "AttributeType": "S"},
+          {"AttributeName": "GSI3PK", "AttributeType": "S"},
+          {"AttributeName": "GSI3SK", "AttributeType": "S"}
+        ],
+        "KeySchema": [{"AttributeName": "PK", "KeyType": "HASH"}, {"AttributeName": "SK", "KeyType": "RANGE"}],
+        "Tags": [
+          {"Key": "Project", "Value": "CampusMeet"},
+          {"Key": "Environment", "Value": {"Ref": "Environment"}},
+          {"Key": "ManagedBy", "Value": "CloudFormation"},
+          {"Key": "DataModelVersion", "Value": "2"}
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "GSI1",
+            "KeySchema": [{"AttributeName": "GSI1PK", "KeyType": "HASH"}, {"AttributeName": "GSI1SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          },
+          {
+            "IndexName": "GSI2",
+            "KeySchema": [{"AttributeName": "GSI2PK", "KeyType": "HASH"}, {"AttributeName": "GSI2SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          },
+          {
+            "IndexName": "GSI3",
+            "KeySchema": [{"AttributeName": "GSI3PK", "KeyType": "HASH"}, {"AttributeName": "GSI3SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          }
+        ],
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": true}
+      }
+    },
+    "AIWorkTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "TableName": {"Fn::Sub": "${TablePrefix}-ai-work"},
+        "BillingMode": "PAY_PER_REQUEST",
+        "SSESpecification": {"SSEEnabled": true},
+        "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": {"Fn::If": ["EnablePitr", true, false]}},
+        "DeletionProtectionEnabled": {"Fn::If": ["DeletionProtectionEnabledCondition", true, false]},
+        "AttributeDefinitions": [
+          {"AttributeName": "PK", "AttributeType": "S"},
+          {"AttributeName": "SK", "AttributeType": "S"},
+          {"AttributeName": "GSI1PK", "AttributeType": "S"},
+          {"AttributeName": "GSI1SK", "AttributeType": "S"},
+          {"AttributeName": "GSI2PK", "AttributeType": "S"},
+          {"AttributeName": "GSI2SK", "AttributeType": "S"}
+        ],
+        "KeySchema": [{"AttributeName": "PK", "KeyType": "HASH"}, {"AttributeName": "SK", "KeyType": "RANGE"}],
+        "Tags": [
+          {"Key": "Project", "Value": "CampusMeet"},
+          {"Key": "Environment", "Value": {"Ref": "Environment"}},
+          {"Key": "ManagedBy", "Value": "CloudFormation"},
+          {"Key": "DataModelVersion", "Value": "2"}
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "GSI1",
+            "KeySchema": [{"AttributeName": "GSI1PK", "KeyType": "HASH"}, {"AttributeName": "GSI1SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          },
+          {
+            "IndexName": "GSI2",
+            "KeySchema": [{"AttributeName": "GSI2PK", "KeyType": "HASH"}, {"AttributeName": "GSI2SK", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "ALL"}
+          }
+        ],
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": true}
+      }
+    }
+  },
+  "Outputs": {
+    "IdentityTableName": {"Value": {"Ref": "IdentityTable"}},
+    "IdentityTableArn": {"Value": {"Fn::GetAtt": ["IdentityTable", "Arn"]}},
+    "CollaborationTableName": {"Value": {"Ref": "CollaborationTable"}},
+    "CollaborationTableArn": {"Value": {"Fn::GetAtt": ["CollaborationTable", "Arn"]}},
+    "MeetingDataTableName": {"Value": {"Ref": "MeetingDataTable"}},
+    "MeetingDataTableArn": {"Value": {"Fn::GetAtt": ["MeetingDataTable", "Arn"]}},
+    "TaskDataTableName": {"Value": {"Ref": "TaskDataTable"}},
+    "TaskDataTableArn": {"Value": {"Fn::GetAtt": ["TaskDataTable", "Arn"]}},
+    "AIWorkTableName": {"Value": {"Ref": "AIWorkTable"}},
+    "AIWorkTableArn": {"Value": {"Fn::GetAtt": ["AIWorkTable", "Arn"]}}
+  }
+}
