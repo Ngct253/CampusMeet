@@ -27,7 +27,7 @@ flowchart LR
       REM["Reminder Lambda"]
       SFN["Step Functions\nAI jobs"]
       AI["AI Worker Lambda"]
-      TR["Amazon Transcribe\nvi-VN"]
+      TR["Amazon Transcribe\nmultilingual / vi-VN priority"]
       BR["Amazon Bedrock"]
       KB["Bedrock Knowledge Bases"]
       VEC["S3 Vectors"]
@@ -73,10 +73,10 @@ Luồng chính:
 8. API chỉ cấp presigned URL sau kiểm tra quyền và metadata.
 9. Browser upload tài liệu/audio trực tiếp vào S3 user-content; file lớn không đi qua API Gateway/Lambda.
 10. Upload hợp lệ tạo `AIJob`; Step Functions điều phối parse, STT, ingestion và generation bất đồng bộ.
-11. Amazon Transcribe `vi-VN` là STT mặc định; Deepgram chỉ là adapter thay thế sau benchmark.
+11. `SpeechToTextProvider` xử lý ngôn ngữ đang nói; tiếng Việt là ngôn ngữ benchmark ưu tiên. Amazon Transcribe là adapter AWS mặc định, provider khác có thể thay thế theo cấu hình.
 12. AI Worker gọi Amazon Bedrock. Model ID là cấu hình, không hard-code trong domain.
-13. RAG dùng Bedrock Knowledge Bases + S3 Vectors, bắt buộc filter `groupId`/ACL trước retrieval và trả citation.
-14. Transcript segment, job status, conversation metadata và tool proposal nằm trong DynamoDB; nội dung media nằm trong S3 private.
+13. RAG dùng Bedrock Knowledge Bases + S3 Vectors với ba scope `CURRENT_MEETING`, `SELECTED_MEETINGS`, `WHOLE_GROUP`; mỗi query chỉ có một `groupId` và phải filter group/meeting-set/ACL/source status trước retrieval.
+14. Transcript segment, job status, conversation metadata, task/tool proposal và group progress snapshot nằm trong DynamoDB; nội dung media nằm trong S3 private.
 15. CloudWatch theo dõi core và AI pipeline; Alarm gửi cảnh báo qua SNS.
 16. CampusMeet web vẫn là sản phẩm chính. Google Meet có thể tải một route side panel tối giản từ cùng CloudFront origin; route này lấy meeting context bằng Meet Add-ons SDK và gọi chung API/authorization, không có backend riêng.
 
@@ -88,9 +88,12 @@ Sơ đồ là **target architecture**, không phải bằng chứng đã deploy 
 
 - Không xây video call/WebRTC; Calendar API vẫn là luồng tạo event và Meet link.
 - Meet REST API chỉ đồng bộ participants/recording/transcript khi artifact tồn tại và OAuth scope cho phép. MVP dùng nút đồng bộ hoặc polling AWS có giới hạn; không dùng Google Workspace Events vì notification endpoint yêu cầu Google Cloud Pub/Sub.
-- Recording chỉ bắt đầu sau user gesture/consent và phải hiển thị nguồn capture. Microphone không được xem là bằng chứng đã thu toàn bộ âm thanh từ Google Meet.
-- Diarization tạo `Speaker 0/1/...`; người dùng ánh xạ sang thành viên. LLM không tự đoán danh tính.
-- AI output là draft có citation. Bedrock tool use chỉ tạo `ToolProposal`; mọi mutation đi qua authorization, preview, xác nhận, idempotency và audit của API nghiệp vụ.
+- Mỗi phiên họp phải khởi tạo live transcription chạy nền sau user gesture/consent và giữ hoạt động trong suốt phiên. Voice record/live transcript là nguồn duy nhất của nội dung phát biểu; agenda hoặc participant metadata không được dùng để suy đoán nội dung. Khi stream lỗi, các chức năng phụ thuộc nội dung bị khóa nhưng quản lý cuộc họp cơ bản vẫn hoạt động.
+- STT giữ ngôn ngữ đang nói, ưu tiên chất lượng tiếng Việt và chỉ gắn `Speaker 1/2/...` ẩn danh; không có speaker-to-user mapping hoặc voice identity.
+- Tài liệu có thể upload trước/trong/sau meeting. Chatbot current-meeting kết hợp document retrieval với segment final đọc trực tiếp từ transcript store; approved transcript/minutes mới ingest vào Knowledge Base cho selected/whole-group. Live source luôn được đánh dấu chưa duyệt.
+- Biên bản AI ghi diễn biến/quyết định/action item đã được nêu. Task proposal có citation và chỉ gọi Task API sau preview, xác nhận, authorization và idempotency.
+- RAG hỗ trợ current/selected/whole-group trong tối đa một group; không cross-group, reranking hoặc implicit filter trong MVP. Khi thiếu nguồn, trợ lý yêu cầu bổ sung hoặc báo không đủ căn cứ.
+- Phân tích tiến độ chỉ diễn giải snapshot task/meeting cấp nhóm do backend tính; không đánh giá cá nhân và không gây mutation.
 - CampusMeet không chuyển toàn bộ thành add-on và không nhúng giao diện Meet vào iframe thông thường. Meet Add-on chỉ là client surface tối giản trong side panel/main stage, dùng chung web assets, API, dữ liệu và authorization.
 - MVP dùng deployment add-on chưa công bố để thử nghiệm. Private Marketplace chỉ dành cho cùng Google Workspace organization; public Marketplace cần Google review/OAuth verification phù hợp và không được làm chậm Core MVP.
 - Panel trong CampusMeet web là fallback bắt buộc khi add-on chưa cài/bị quản trị viên chặn; Document PiP chỉ là progressive enhancement bổ sung.
@@ -104,8 +107,8 @@ Sơ đồ là **target architecture**, không phải bằng chứng đã deploy 
 - Một meeting có một organizer; Meet link chỉ hiện khi integration status là `READY`.
 - Task overdue là dữ liệu tính toán, không phải một trạng thái task mới.
 - `meetingStatus` và `googleSyncStatus` là hai state machine độc lập.
-- File/transcript/vector đều mang `groupId` và ACL; filter quyền xảy ra trước retrieval.
+- Tài liệu, transcript, biên bản và vector đều mang `groupId`, `meetingId`, source status và ACL; filter group/meeting-set/quyền xảy ra trước retrieval.
 - Audio, transcript và AI conversation có consent/retention; nội dung nhạy cảm không được ghi vào application log.
-- Tool proposal không có quyền riêng; nó chỉ được thực thi bằng quyền hiện tại của người dùng đã xác nhận.
+- Task/tool proposal không có quyền riêng; nó chỉ được thực thi bằng quyền hiện tại của người dùng đã xác nhận.
 
 Các quyết định cần nhóm chốt trước triển khai nằm trong [kế hoạch nhóm](ke-hoach-trien-khai-nhom.md).
