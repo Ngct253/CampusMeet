@@ -16,6 +16,9 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "sam:build:auth": "sam build --template-file infra/auth-integration.yaml",
+    "sam:validate:data": "sam validate --template-file infra/data-foundation.yaml --lint",
+    "aws:verify:data": "powershell -NoProfile -File scripts/verify-data-foundation.ps1",
+    "aws:audit:legacy-data": "powershell -NoProfile -File scripts/audit-legacy-data-foundation.ps1",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -30,7 +33,7 @@
     "@vitejs/plugin-react": "^4.5.2",
     "esbuild": "0.25.12",
     "eslint": "^9.30.0",
-    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-hooks": "^6.6.3",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.2.0",
     "jsdom": "^26.1.0",
