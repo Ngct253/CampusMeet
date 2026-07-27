@@ -1,354 +1,381 @@
-# Kế hoạch M5 — Upload, Voice Transcript và AI trong nhóm
+# Kế hoạch M5 — Upload, Transcript và RAG nhiều cuộc họp
 
-Tài liệu này chốt phạm vi M5. M5 xây pipeline AI từ tài liệu và voice record, hỗ trợ chatbot kiểu source-grounded, biên bản/task proposal, RAG tối đa trong một nhóm và phân tích tiến độ nhóm. M5 không nhận diện danh tính speaker và không sở hữu CRUD Group/Meeting/Minutes/Task.
+Tài liệu này là kế hoạch triển khai chính thức cho phạm vi M5. Phạm vi bao gồm live transcription tiếng Việt chạy nền trong phiên họp, upload an toàn, xử lý AI bất đồng bộ, hỏi đáp/sinh bản nháp có citation và RAG trên nhiều cuộc họp trong cùng nhóm.
+
+> **Quyết định đã chốt:** RAG nhiều cuộc họp không bị loại khỏi M5. Nhóm triển khai pipeline một meeting trước để kiểm chứng ingestion/citation, sau đó mở truy vấn nhiều meeting bằng cùng Knowledge Base và filter `groupId`/ACL. Đây là thứ tự triển khai, không phải giảm phạm vi.
 
 ## 1. Kết quả M5 phải bàn giao
 
-Luồng đầu-cuối:
+Luồng demo hoàn chỉnh:
 
 ```text
-upload tài liệu trước/trong/sau meeting
-→ tài liệu READY
-→ consent + cấp quyền capture
-→ live STT giữ ngôn ngữ đang nói
-→ transcript timestamp/confidence/languageCode/Speaker N
-→ chatbot hỏi đáp + tóm tắt cho người vào trễ
-→ người có quyền hiệu chỉnh/duyệt transcript
-→ AI tạo biên bản + action item + TaskProposal có citation
-→ người dùng duyệt/confirm
-→ M3 Task API tạo task idempotent
-→ RAG current/selected/whole-group
-→ AI diễn giải GroupProgressSnapshot
+Phiên họp → consent/cấp quyền capture → live transcription chạy nền
+hoặc upload tài liệu/audio để phục hồi, kiểm thử hay bổ sung nguồn
+→ Streaming STT hoặc S3 user-content + AIJob bất đồng bộ
+→ Amazon Transcribe/parse
+→ Transcript/chunk đã duyệt
+→ Bedrock Knowledge Base + S3 Vectors
+→ hỏi trên nhiều meeting trong cùng group
+→ câu trả lời hoặc minutes/action-item draft có citation
 ```
 
-Nguyên tắc bắt buộc:
+Điều kiện hoàn thành:
 
-- Voice record/live transcript là nguồn duy nhất để xác định nội dung đã được phát biểu.
-- Live transcription chạy nền trong mọi phiên họp sau user gesture/consent/capture hợp lệ.
-- STT giữ ngôn ngữ đang nói; không tự dịch. Tiếng Việt là ngôn ngữ benchmark ưu tiên.
-- Speaker chỉ là `Speaker 1`, `Speaker 2`,… trong session; không ánh xạ hoặc đoán danh tính.
-- Tài liệu có thể upload trước, trong hoặc sau meeting; chatbot chỉ dùng file `READY`.
-- Chatbot dùng tài liệu, transcript và biên bản có trạng thái phù hợp, luôn trả citation hoặc `insufficientContext`.
-- RAG có ba scope nhưng mỗi query chỉ thuộc một `groupId`; không cross-group.
-- AI tạo task proposal từ action item đã được nêu; không tự bịa assignee/deadline.
-- Task chỉ được tạo sau preview, xác nhận, authorization và idempotency qua Task API của M3.
-- Phân tích tiến độ chỉ ở cấp nhóm từ snapshot do backend tính; không chấm điểm/xếp hạng/suy diễn thái độ cá nhân.
+1. Binary không đi qua API Gateway/Lambda payload.
+2. `AIJob` dùng đúng trạng thái `QUEUED/PROCESSING/COMPLETED/FAILED/CANCELLED`.
+3. Live transcription chạy nền trong mỗi phiên họp sau consent/cấp quyền; transcript có timestamp, confidence và speaker label ẩn danh; người dùng được sửa và ánh xạ speaker bằng optimistic version.
+4. Nguồn chỉ được ingest khi đã xác minh và mang metadata quyền.
+5. Một truy vấn group RAG có thể dẫn nguồn từ ít nhất hai meeting cùng nhóm.
+6. Retrieval luôn filter `groupId` trước khi đưa chunk cho model; filter `meetingId` là tùy chọn.
+7. Citation mở đúng meeting/file/transcript segment; thiếu nguồn phải trả `insufficientContext=true`.
+8. Có test chứng minh không retrieve dữ liệu nhóm khác.
+9. Có log/metric/alarms, chi phí ước tính, retention và cleanup xuyên các kho dữ liệu.
 
-## 2. Phạm vi đã khóa
+## 2. Phạm vi và giới hạn
 
-### Thuộc M5
+### Bắt buộc
 
-- Presigned upload tài liệu/audio, trạng thái upload/scan/ingestion.
-- `AIJob` cho parse, STT, ingestion, generation.
-- Live transcription session, streaming ingest, reconnect và batch phục hồi.
-- STT đa ngôn ngữ; tiếng Việt phải có tập benchmark chính.
-- Transcript editor có version, timestamp, confidence, language và `Speaker N`.
-- Current-meeting chatbot trên tài liệu + live/approved transcript + minutes.
-- Tóm tắt phần đã diễn ra cho người vào trễ.
-- Biên bản, quyết định/action item và task proposal có citation.
-- Confirm task proposal qua M3 Task API.
-- RAG `CURRENT_MEETING`, `SELECTED_MEETINGS`, `WHOLE_GROUP`.
-- Group progress analysis từ `GroupProgressSnapshot`.
-- Authorization, citation, idempotency, monitoring, retention, cost và cleanup.
+- Presigned upload và complete-upload verification.
+- Attachment, Recording, Consent, Transcript, TranscriptSegment và AIJob.
+- Live STT tiếng Việt chạy nền qua `SpeechToTextProvider`; Amazon Transcribe `vi-VN` là provider đầu tiên.
+- Lưu liên tục segment đã ổn định; hỗ trợ batch chuẩn hóa/phục hồi sau họp.
+- Transcript editor, timestamp playback và speaker mapping.
+- Chuẩn hóa nguồn và ingestion vào Bedrock Knowledge Bases + S3 Vectors.
+- RAG trên toàn bộ hoặc một tập meeting trong cùng group.
+- Q&A, minutes draft và action-item draft có citation.
+- Authorization, idempotency, retry, monitoring, retention và cleanup.
 
-### Không thuộc M5
+### Không thuộc M5 baseline
 
-- RAG/query kết hợp nhiều group.
-- Nhận diện danh tính speaker, voice biometric hoặc speaker-to-user mapping.
-- Reranking, implicit filter, hybrid search nâng cao hoặc tự tối ưu chunking.
-- Chấm điểm/xếp hạng thành viên hoặc suy diễn thái độ.
-- AI phân tích video dài.
-- AI tự ghi minutes/task hoặc đổi task status khi chưa có xác nhận.
-- Tool use ngoài allowlist task của M5.
-- Public Marketplace, Document PiP và Meet Media API.
+- Reranking/implicit metadata filter tự suy luận.
+- Nhiều data source ngoài S3.
+- Tool proposal nhiều miền và mutation tự động.
+- Public Marketplace release.
+- Phân tích/chấm điểm cá nhân từ participant hoặc transcript.
 
-## 3. Ranh giới ownership với M1–M4
+## 3. Phụ thuộc với thành viên khác
 
-| Miền | Owner | M5 được làm | M5 không được làm |
-| --- | --- | --- | --- |
-| Group/membership | M1 | Gọi authorization helper; lưu `groupId`/ACL vào metadata AI. | Viết lại Group CRUD, membership hoặc role policy. |
-| Meeting | M2 | Dùng `meetingId`, lifecycle và meeting context. | Sửa Meeting CRUD/lifecycle hoặc tự tin `groupId` client gửi. |
-| Minutes | M3 | Sinh `MinutesDraft` có citation và gửi cho luồng review/save. | Ghi trực tiếp bảng Minutes hoặc thay quyền ghi biên bản. |
-| Task | M3 | Sinh `TaskProposal`; confirm gọi Task application service/API. | Ghi trực tiếp bảng Tasks, tự gán assignee/deadline hoặc đổi status. |
-| Dashboard/progress | M3 | Đọc `GroupProgressSnapshot` và diễn giải. | Tự tính số liệu bằng LLM hoặc tạo aggregate khác M3. |
-| Google integration | M4 | Dùng artifact reference nếu khả dụng; capture/upload là fallback. | Thay OAuth/Calendar/Meet adapter hoặc phụ thuộc artifact bắt buộc. |
-| AWS chung | M5 review | Thêm tài nguyên AI tối thiểu bằng SAM, metric/alarm/cleanup. | Viết thay toàn bộ hạ tầng của M1–M4 hoặc tạo resource trùng. |
+| Phụ thuộc        | Owner cung cấp     | M5 cần                                                                                                  |
+| ---------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
+| Group/membership | M1                 | Hàm kiểm tra active membership/role theo`groupId`; M5 không tin `groupId` client gửi nếu chưa kiểm tra. |
+| Meeting          | M2                 | `meetingId`, `groupId`, trạng thái meeting và quyền xem meeting.                                        |
+| Minutes/task     | M3                 | Contract nhận minutes/action-item draft và luồng duyệt trước khi tạo task.                              |
+| Google artifact  | M4                 | Recording/transcript reference khi Google Meet artifact tồn tại; M5 vẫn hỗ trợ upload fallback.         |
+| AWS dùng chung   | Cả nhóm, M5 review | Region, CloudFront origin, Cognito claims, naming/tagging và budget.                                    |
 
-Nếu dependency chưa hoàn thành, M5 dùng fake adapter đúng contract trong test/dev; production handler không hard-code user/group/meeting/task giả.
+M5 có thể dùng fake repository/provider đúng contract khi dependency chưa hoàn thành; không hard-code membership hoặc meeting giả vào production handler.
 
-## 4. Shared contract tối thiểu
+## 4. Contract cần khóa trước khi triển khai
 
-- `Attachment`, `CreateUploadUrlRequest`, `CompleteUploadRequest`.
-- `AIJob`, `AIJobStatus`.
-- `LiveTranscriptionSession`, `StartLiveTranscriptionRequest`.
-- `Transcript`, `TranscriptSegment`.
-- `MeetingChatRequest`, `GroupKnowledgeQuery`.
-- `GroundedAnswer`, `Citation`, `KnowledgeScope`.
-- `GenerateMinutesAndTaskProposalsRequest/Response`.
-- `TaskProposal`, `ConfirmTaskProposalRequest/Response`.
-- `GroupProgressSnapshot`, `GroupProgressAnalysisRequest/Response`.
-
-### Transcript segment
+### 4.1 Trạng thái
 
 ```text
-TranscriptSegment {
-  segmentId
-  sequence
-  startMs
-  endMs
-  text
-  confidence
-  languageCode
-  speakerLabel  // Speaker 1, Speaker 2, ...
-  version
-}
+AIJobStatus:
+QUEUED | PROCESSING | COMPLETED | FAILED | CANCELLED
+
+AttachmentStatus:
+PENDING_UPLOAD | VALIDATING | READY | REJECTED | DELETED
+
+TranscriptStatus:
+LIVE | FINALIZING | READY | FAILED
+
+LiveTranscriptionSessionStatus:
+STARTING | ACTIVE | RECONNECTING | STOPPED | FAILED
+
+IngestionStatus:
+NOT_REQUESTED | QUEUED | SYNCING | INDEXED | FAILED | STALE
 ```
 
-Không có `speakerUserId` hoặc trường nhận diện giọng nói.
+### 4.2 Entity tối thiểu
 
-### Knowledge scope
+- `Attachment`: `attachmentId`, `groupId`, `meetingId`, object key, filename hiển thị, MIME, size, checksum, status, owner, retention.
+- `Recording`: nguồn recording/capture, consent reference, duration và S3 reference.
+- `Consent`: actor, thời điểm, nguồn capture, nội dung đồng ý và thời hạn lưu.
+- `LiveTranscriptionSession`: meeting, trạng thái `STARTING/ACTIVE/RECONNECTING/STOPPED/FAILED`, nguồn capture, sequence cuối đã xác nhận và thời điểm heartbeat.
+- `AIJob`: loại job, resource nguồn, trạng thái, attempt, provider, requestId, cost metadata và lỗi an toàn.
+- `Transcript`: provider, language, trạng thái live/final, version và source recording.
+- `TranscriptSegment`: sequence, start/end, text, confidence, speakerLabel, `isFinal`, `speakerUserId?`, version và audit.
+- `KnowledgeSource`: source type/id/version, `groupId`, `meetingId`, ingestion status và normalized S3 key.
+- `Citation`: meeting/source/segment, timestamp hoặc page/chunk, tiêu đề hiển thị và URI nội bộ.
+- `GroundedAnswer`: answer, citations, scope, `insufficientContext` và conversation ID.
+
+### 4.3 Endpoint mục tiêu
+
+| Method | Endpoint                                                                | Kết quả                                                                        |
+| ------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| POST   | `/meetings/{meetingId}/attachments`                                     | Tạo attachment và presigned upload URL.                                        |
+| POST   | `/meetings/{meetingId}/attachments/{attachmentId}/complete`             | Xác minh object; trả`202` cùng `aiJobId` khi tạo job.                          |
+| GET    | `/ai/jobs/{aiJobId}`                                                    | Đọc trạng thái/progress/lỗi an toàn.                                           |
+| POST   | `/meetings/{meetingId}/transcripts`                                     | Tạo transcription job idempotent.                                              |
+| GET    | `/meetings/{meetingId}/transcripts`                                     | Lấy transcript và segment theo trang.                                          |
+| PATCH  | `/meetings/{meetingId}/transcripts/{transcriptId}/segments/{segmentId}` | Sửa text/speaker với`expectedVersion`; version cũ trả `409`.                   |
+| POST   | `/meetings/{meetingId}/live-transcription`                              | Sau consent, tạo phiên streaming idempotent và trả thông tin kết nối ngắn hạn. |
+| POST   | `/meetings/{meetingId}/live-transcription/{sessionId}/stop`             | Kết thúc stream, chốt sequence cuối và kích hoạt bước chuẩn hóa sau họp.       |
+| POST   | `/meetings/{meetingId}/ai/chat`                                         | Hỏi trong một meeting, trả`202`/job hoặc response theo contract đã chốt.       |
+| POST   | `/groups/{groupId}/ai/search`                                           | RAG trên nhiều meeting cùng nhóm; nhận`meetingIds?`.                           |
+| POST   | `/meetings/{meetingId}/ai/minutes-draft`                                | Sinh minutes/action-item draft có citation.                                    |
+
+## 5. Thiết kế upload an toàn
+
+1. API xác thực user và membership/meeting trước khi tạo attachment.
+2. Backend sinh `attachmentId` và object key; filename người dùng không được dùng làm key.
+3. API kiểm tra allowlist MIME/đuôi, size khai báo và checksum trước khi ký.
+4. Presigned URL có hạn ngắn, ký checksum và chỉ cho phép đúng object key.
+5. Browser upload trực tiếp lên S3, sau đó gọi complete.
+6. Complete handler gọi `HeadObject` để kiểm tra lại size, checksum và metadata; không tin dữ liệu complete từ client.
+7. Complete phải idempotent; gọi lại không tạo thêm AIJob.
+8. Object chưa xác minh giữ trạng thái `VALIDATING` và không được đưa vào STT/ingestion.
+9. S3 bật Block Public Access, encryption, lifecycle và CORS chỉ cho origin đã chốt; không dùng wildcard production.
+
+MVP ưu tiên audio và TXT. PDF/DOCX chỉ mở khi nhóm có parser, giới hạn tài nguyên và trạng thái quarantine/validation phù hợp.
+
+## 6. Xử lý AI bất đồng bộ
+
+### 6.1 Ranh giới quyền
+
+- API Lambda: presign, xác minh metadata, tạo/đọc AIJob và start execution.
+- Step Functions role: điều phối state machine và chỉ gọi đúng service/worker cần thiết.
+- AI Worker role: đọc prefix S3 được cấp, ghi normalized output, cập nhật bảng AI và gọi provider được cấu hình.
+- Knowledge Base service role: đọc data-source prefix và ghi đúng S3 vector index.
+
+Không cấp `transcribe:*`, `bedrock:*` hoặc `s3:*` rộng cho API Lambda.
+
+### 6.2 State machine tối thiểu
 
 ```text
-CURRENT_MEETING
-SELECTED_MEETINGS
-WHOLE_GROUP
+ValidateJob
+→ MarkProcessing
+→ Choice(sourceType)
+   ├── audio → StartTranscribe → Wait/Poll → NormalizeTranscript
+   └── text/document → ParseAndNormalize
+→ BuildKnowledgeSource
+→ Start/TrackIngestion
+→ MarkCompleted
+
+Catch mọi nhánh
+→ lưu lỗi an toàn
+→ MarkFailed
+→ metric/alarm
 ```
 
-`SELECTED_MEETINGS` bắt buộc có `meetingIds[]`; backend xác minh toàn bộ meeting thuộc path `groupId`. `WHOLE_GROUP` không nhận meeting ngoài group.
+Yêu cầu:
 
-### Task proposal
+- Execution/job name idempotent theo `aiJobId`.
+- Retry chỉ cho lỗi tạm thời, có backoff và giới hạn.
+- Timeout/cancel chuyển trạng thái rõ ràng.
+- Không ghi audio, transcript, prompt, presigned URL hoặc model response nhạy cảm vào log.
+
+### 6.3 Luồng live transcription bắt buộc
 
 ```text
-TaskProposal {
-  proposalId
-  groupId
-  meetingId
-  title
-  description?
-  assigneeId?
-  priority?
-  dueAtUtc?
-  missingFields[]
-  citations[]
-  status
-}
+Meeting bắt đầu
+→ kiểm tra membership + consent + quyền capture
+→ tạo LiveTranscriptionSession idempotent
+→ Browser gửi audio chunk qua kết nối streaming ngắn hạn
+→ SpeechToTextProvider trả partial/final segment
+→ chỉ lưu và phát sự kiện từ final segment theo sequence
+→ heartbeat/reconnect tiếp tục từ sequence cuối đã xác nhận
+→ dừng meeting hoặc stop session
+→ chốt transcript và chạy batch chuẩn hóa nếu cần
 ```
-
-Trạng thái:
-
-```text
-PENDING | CONFIRMED | EXECUTED | REJECTED | EXPIRED | FAILED
-```
-
-## 5. API mục tiêu
-
-| Method | Route | Mục đích |
-| --- | --- | --- |
-| POST | `/meetings/{meetingId}/attachments/upload-url` | Presigned URL sau quyền/metadata check. |
-| POST | `/meetings/{meetingId}/attachments/{attachmentId}/complete` | Verify checksum/scan rồi tạo parse job. |
-| GET | `/meetings/{meetingId}/attachments` | File và trạng thái ingestion. |
-| POST | `/meetings/{meetingId}/live-transcription` | Tạo session sau consent/capture. |
-| POST | `/meetings/{meetingId}/live-transcription/{sessionId}/stop` | Dừng stream, chốt sequence. |
-| POST | `/meetings/{meetingId}/transcriptions` | Batch phục hồi/chuẩn hóa. |
-| GET | `/meetings/{meetingId}/transcripts` | Đọc transcript/version. |
-| PATCH | `/transcripts/{transcriptId}/segments/{segmentId}` | Sửa text/language/`Speaker N`, lưu audit/version. |
-| POST | `/meetings/{meetingId}/ai/chat` | Current-meeting Q&A và live summary. |
-| POST | `/groups/{groupId}/ai/search` | Selected-meetings/whole-group Q&A. |
-| POST | `/meetings/{meetingId}/ai/minutes-draft` | Minutes + action item + task proposal draft. |
-| POST | `/meetings/{meetingId}/ai/task-proposals` | Thành viên meeting tạo/làm mới proposal có citation; chưa tạo Task. |
-| POST | `/ai/task-proposals/{proposalId}/confirm` | Group Admin xác nhận; kiểm tra lại và gọi M3 Task API một lần theo FR-16. |
-| POST | `/groups/{groupId}/ai/progress-analysis` | Group Admin yêu cầu diễn giải progress snapshot cấp nhóm. |
-| GET | `/ai/jobs/{aiJobId}` | Theo dõi job/status/lỗi an toàn. |
-
-Mọi route phải xác thực JWT, membership và resource ownership. Group query không tin `meetingIds` cho đến khi đã đối chiếu database.
-
-`TaskProposal` là proposal chuyên biệt của engine xác nhận chung, không tạo một cơ chế mutation thứ hai song song với `ToolProposal`; cả hai phải tái sử dụng cùng authorization/idempotency/audit boundary.
-
-## 6. Upload và nguồn chatbot
-
-Tài liệu được upload trước giờ bắt đầu, trong hoặc sau meeting, nhưng bản ghi meeting phải tồn tại trước khi cấp presigned URL. Trạng thái:
-
-```text
-UPLOADING | PROCESSING | READY | FAILED | QUARANTINED
-```
-
-Chỉ `READY` được retrieval.
-
-Source type:
-
-```text
-MEETING_DOCUMENT
-LIVE_TRANSCRIPT
-APPROVED_TRANSCRIPT
-APPROVED_MINUTES
-```
-
-Metadata bắt buộc:
-
-```text
-groupId
-meetingId
-sourceType
-sourceStatus
-sourceId
-version
-ACL
-```
-
-Current meeting dùng `LIVE_TRANSCRIPT`; AI Worker đọc segment final trực tiếp từ transcript repository, không chờ hoặc liên tục kích hoạt Knowledge Base ingestion. Citation phải ghi rõ chưa duyệt. Selected/whole-group chỉ dùng tài liệu `READY`, approved transcript và approved minutes; không đưa live transcript của meeting khác vào query nhóm trong MVP.
-
-## 7. Live transcription
-
-1. UI hiển thị consent, nguồn capture và retention.
-2. Người dùng thực hiện browser gesture/cấp quyền.
-3. Backend tạo session idempotent `STARTING`.
-4. Khi streaming sẵn sàng, session thành `ACTIVE`.
-5. Segment final được lưu theo sequence; reconnect không tạo trùng.
-6. UI luôn hiển thị trạng thái nhưng không cần nhận diện tên người.
-
-Ngôn ngữ:
-
-- Request có `languageMode=EXPLICIT|AUTO`.
-- `EXPLICIT` nhận `primaryLanguageCode`, mặc định cấu hình sản phẩm có thể là `vi-VN`.
-- `AUTO` chỉ bật khi provider/region đã được benchmark.
-- Output giữ ngôn ngữ nói; translation là feature khác, không thuộc M5.
-
-Speaker:
-
-- Label bắt đầu từ `Speaker 1`.
-- Cố giữ ổn định trong một session.
-- Người có quyền được sửa label khi diarization sai.
-- Không ánh xạ speaker sang member và chatbot không đoán danh tính.
-
-## 8. Chatbot và RAG
-
-### Current meeting
-
-- Trả lời từ tài liệu `READY`, live/approved transcript và minutes.
-- Người vào trễ có thể yêu cầu “tóm tắt đến hiện tại”.
-- Summary chỉ dùng segment đã có, nêu khoảng stream thiếu và trạng thái chưa duyệt.
-
-### Selected meetings
-
-- Người dùng chọn một số meeting trong cùng group.
-- Backend kiểm tra từng meeting thuộc group và người dùng được đọc.
-- Citation chỉ rõ meeting + source + page/segment/timestamp.
-
-### Whole group
-
-- Tìm trong tất cả meeting được phép của path group.
-- Không cross-group.
-- Nếu nguồn mâu thuẫn, trình bày theo meeting/thời gian; không tự tuyên bố nguồn cũ bị thay thế.
-
-MVP dùng retrieval cơ bản có citation; không thêm reranking hoặc implicit filter.
-
-## 9. Biên bản, action item và task
-
-AI được phép tạo:
-
-- Diễn biến/chủ đề đã thảo luận.
-- Quyết định đã được nêu.
-- Action item đã được nêu.
-- Task proposal có citation.
 
 Quy tắc:
 
-- Không cần biết danh tính speaker.
-- Chỉ lấy tên assignee khi nội dung transcript gọi tên rõ ràng.
-- Không tự đặt deadline hoặc priority.
-- Trường bắt buộc của `CreateTaskRequest` còn thiếu (`assigneeId`, `priority`) nằm trong `missingFields[]`; chatbot hỏi người dùng trước confirm. `dueAtUtc` là tùy chọn.
-- Proposal không gây mutation.
-- Confirm chỉ dành cho Group Admin theo FR-16; kiểm tra lại JWT, group membership, assignee thuộc group, priority/schema và idempotency rồi gọi M3 Task API.
-- Task lưu liên kết `meetingId` và citation nguồn.
+- Phiên live chạy nền trong mọi meeting sau khi được cấp consent/quyền; người dùng luôn nhìn thấy trạng thái `STARTING/ACTIVE/RECONNECTING/FAILED`.
+- Live transcript là nguồn chuẩn duy nhất để xác định nội dung phát biểu và cung cấp dữ liệu cho tóm tắt, quyết định, action item, hỏi đáp và RAG.
+- Agenda, attendee/participant metadata hoặc tài liệu đính kèm không được dùng để suy đoán người tham gia đã nói gì. Tài liệu chỉ là nguồn ngữ cảnh bổ sung và có citation riêng.
+- Nếu session chưa `ACTIVE`, bị mất quyền hoặc chuyển `FAILED`, backend trả trạng thái chưa đủ dữ liệu cho mọi chức năng AI phụ thuộc nội dung; không âm thầm chuyển sang nguồn suy đoán khác.
+- Partial segment có thể hiển thị tạm thời nhưng không được ingest, tạo citation hoặc cấp cho chức năng AI hạ nguồn cho tới khi thành final.
+- Reconnect và gửi lại chunk/segment phải idempotent theo `sessionId + sequence`.
 
-## 10. Phân tích tiến độ nhóm
+## 7. RAG nhiều cuộc họp
 
-M3/backend cung cấp:
+### 7.1 Chuẩn hóa và ingestion
+
+Mỗi source đã duyệt tạo:
 
 ```text
-GroupProgressSnapshot {
-  groupId
-  totalTasks
-  todoTasks
-  doingTasks
-  doneTasks
-  overdueTasks
-  upcomingDeadlines[]
-  unresolvedActionItems
-  generatedAt
+kb/{groupId}/{meetingId}/{sourceId}/v{version}/content.txt
+kb/{groupId}/{meetingId}/{sourceId}/v{version}/content.txt.metadata.json
+```
+
+Metadata filterable tối thiểu:
+
+```json
+{
+  "groupId": "group-id",
+  "meetingId": "meeting-id",
+  "sourceType": "TRANSCRIPT",
+  "sourceId": "source-id",
+  "version": 1,
+  "approved": true
 }
 ```
 
-Chỉ Group Admin được gọi theo quyền dashboard nhóm. AI chỉ diễn giải snapshot và có thể kết hợp citation meeting/task trong cùng group. Không:
+`groupId`, `meetingId` và `approved` phải là metadata filterable. Nội dung chunk lớn không đưa vào metadata filterable. M5 lưu mapping source/version/ingestion job trong DynamoDB để biết vector nào đang current hoặc stale.
 
-- So sánh nhiều group.
-- Chấm điểm/xếp hạng thành viên.
-- Suy diễn thái độ/hiệu suất cá nhân từ transcript.
-- Dùng số lần nói làm thước đo đóng góp.
-- Tự đổi task.
+### 7.2 Retrieval
 
-## 11. Bảo mật, vận hành và chi phí
+1. Backend xác thực JWT.
+2. Backend kiểm tra active membership với group từ path.
+3. Backend xây filter bắt buộc `groupId == authorizedGroupId` và `approved == true`.
+4. Nếu client chọn meeting, backend kiểm tra từng meeting thuộc group rồi thêm filter `meetingId in [...]`.
+5. Gọi `Retrieve` hoặc `RetrieveAndGenerate`; không retrieve toàn cục rồi mới post-filter.
+6. Chuẩn hóa citation về URI CampusMeet, không trả raw S3 key/URL nhạy cảm.
+7. Nếu retrieval rỗng hoặc nguồn không đủ, trả `insufficientContext=true`.
 
-- S3 private, presigned URL ngắn hạn, object key do server sinh.
-- Allowlist MIME/size/checksum/scan trước ingestion.
-- File/transcript là untrusted data; không được đổi system instruction hoặc tự kích hoạt tool.
-- Filter group/meeting-set/ACL/source status trước retrieval.
-- Không log audio, transcript, prompt, answer, token hoặc presigned URL đầy đủ.
-- Retry có giới hạn; complete/transcription/generation/confirm đều idempotent.
-- CloudWatch theo dõi stream, jobs, token, phút audio, retrieval empty, citation missing, task confirm failure.
-- Retention/xóa bao phủ S3, DynamoDB, transcript, conversation, Knowledge Base và vector.
+### 7.3 Citation
 
-## 12. Chia PR
+Citation trên UI phải hiển thị:
 
-| PR | Phạm vi | Điều kiện merge |
-| --- | --- | --- |
-| M5-01 | Contract, citation, scope, upload policy | M1/M2/M3 review; typecheck pass. |
-| M5-02 | Presigned upload + attachment lifecycle | Binary không qua API; file sai bị từ chối. |
-| M5-03 | `AIJob` + workflow skeleton | Success/failure/cancel/idempotency pass. |
-| M5-04 | STT đa ngôn ngữ + `Speaker N` | Test tiếng Việt + một ngôn ngữ khác; không có identity mapping. |
-| M5-05 | Live session + transcript editor | Consent/reconnect/version/audit pass. |
-| M5-06 | Current chat + live summary | Citation live/READY source; stream gap hiển thị. |
-| M5-07 | Minutes + task proposal + M3 confirm adapter | Missing field hỏi lại; confirm tạo đúng một task. |
-| M5-08 | Selected/whole-group RAG | Citation nhiều meeting cùng group; cross-group bị loại trước model. |
-| M5-09 | Group progress analysis | Chỉ dùng M3 snapshot; không đánh giá cá nhân/mutation. |
-| M5-10 | Monitoring, retention, cleanup, cost/demo | Alarm/failure/cleanup có bằng chứng. |
+- Tên và ngày meeting.
+- Loại nguồn: file, transcript hoặc minutes.
+- Tên file hoặc speaker/timestamp.
+- Link về meeting/source nội bộ.
+- Đoạn bằng chứng ngắn nếu người dùng có quyền.
 
-## 13. Kiểm thử nghiệm thu
+Citation không hợp lệ hoặc trỏ nguồn đã xóa làm generation thất bại an toàn; không trả câu trả lời như đã có căn cứ.
 
-- Upload trước/trong meeting chỉ thành nguồn khi `READY`.
-- Không consent thì không stream/audio object.
-- STT giữ ngôn ngữ, có `languageCode` và `Speaker N`; không có tên người.
-- Reconnect/retry không tạo segment/job trùng.
-- Người vào trễ nhận summary có citation và cảnh báo live source.
-- Minutes/action item/task proposal chỉ lấy nội dung có nguồn.
-- Assignee/deadline thiếu không được bịa.
-- Confirm hợp lệ gọi M3 Task API một lần; không quyền nhận 403.
-- Current/selected/whole-group query trả citation đúng.
-- Meeting group khác bị loại trước model.
-- Progress analysis chỉ dùng snapshot cùng group và không đánh giá cá nhân.
-- Log/retention/cleanup đạt chính sách.
+## 8. Thay đổi mã nguồn dự kiến
 
-Kịch bản demo:
+### Shared contract
 
-1. Upload tài liệu trước meeting và xác nhận `READY`.
-2. Bắt đầu meeting, consent/capture, nói tiếng Việt và một đoạn ngôn ngữ khác.
-3. Kiểm tra transcript `Speaker N`, language/timestamp/confidence.
-4. Upload thêm tài liệu trong meeting.
-5. Thành viên vào trễ yêu cầu tóm tắt đến hiện tại.
-6. Kết thúc, sửa/duyệt transcript; tạo minutes và task proposal.
-7. Bổ sung field thiếu, confirm và kiểm tra chỉ một task được tạo.
-8. Hỏi current, selected meetings và whole group; mở citation.
-9. Thử meeting/group khác và xác nhận không có nguồn rò.
-10. Yêu cầu progress analysis; kết quả chỉ ở cấp nhóm.
+- `packages/shared/src/enums/index.ts`
+- `packages/shared/src/types/index.ts`
+- `packages/shared/src/dto/index.ts`
 
-## 14. Điểm cần chốt trước M5-01
+PR contract phải merge trước khi frontend/backend tách nhánh dài.
 
-- Consent text, capture source, retention và ai được start/stop.
-- Upload allowlist/size/checksum/scan.
-- STT provider/region, `AUTO` availability và benchmark tiếng Việt + ngôn ngữ phụ.
-- Citation schema cho document/transcript/minutes/task.
-- M1 authorization helper và M2 meeting-to-group lookup.
-- M3 MinutesDraft, Task API và GroupProgressSnapshot contract.
-- Bedrock model/region, quota token/phút audio và budget alarm.
+### API
 
-Public Marketplace, Document PiP, cross-group RAG, speaker identity, RAG nâng cao và video analysis không phải blocker của M5.
+- `services/api/src/handlers/attachments.ts`
+- `services/api/src/handlers/transcripts.ts`
+- `services/api/src/handlers/ai.ts`
+- `services/api/src/application/attachments.ts`
+- `services/api/src/application/transcripts.ts`
+- `services/api/src/application/ai.ts`
+- `services/api/src/repositories/attachments.ts`
+- `services/api/src/repositories/transcripts.ts`
+- `services/api/src/repositories/ai-jobs.ts`
+- `services/api/src/domain/ai-ports.ts`
+
+### AI Worker
+
+Tạo workspace `services/ai-worker/`:
+
+- `src/index.ts`
+- `src/providers/speech-to-text.ts`
+- `src/providers/amazon-transcribe.ts`
+- `src/providers/grounded-generation.ts`
+- `src/providers/bedrock-knowledge-base.ts`
+- `src/workflows/normalize-transcript.ts`
+- `src/workflows/prepare-knowledge-source.ts`
+- `src/utils/safe-logging.ts`
+
+### Frontend
+
+- `apps/web/src/features/attachments/`
+- `apps/web/src/features/transcripts/`
+- `apps/web/src/features/ai/`
+
+Upload gắn với trang chi tiết meeting. AI UI có hai scope:
+
+- Meeting hiện tại.
+- Toàn nhóm hoặc nhiều meeting được chọn.
+
+Mỗi feature có service riêng; không gọi `fetch` trực tiếp rải rác trong component. Upload progress dùng client hỗ trợ upload progress và phải xử lý cancel/retry.
+
+### Hạ tầng
+
+`infra/template.yaml` bổ sung:
+
+- S3 user-content bucket và prefix cho normalized KB source.
+- DynamoDB Attachments, Recordings/Consents, Transcripts, AIJobs và AIConversations/KnowledgeSources theo access pattern đã chốt.
+- Step Functions state machine, AI Worker Lambda và log group.
+- Bedrock Knowledge Base, S3 data source, S3 vector bucket/index và service role.
+- IAM role tách riêng cho API, state machine, AI worker và Knowledge Base.
+- Alarms cho job failed/timeout, ingestion failed, retrieval empty/citation missing và cost threshold demo.
+- Lifecycle/TTL/cleanup output.
+
+Region chỉ được chốt sau khi kiểm tra giao của Transcribe `vi-VN`, model generation, embedding model, Bedrock Knowledge Bases và S3 Vectors. Model ID/dimension là cấu hình; không hard-code một model/version vào domain.
+
+## 9. Trình tự PR đề xuất
+
+| PR     | Phạm vi                                                            | Gate                                                                                                                                              |
+| ------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M5-01  | Contract, status, citation schema, access pattern và upload policy | M1/M2/M3 review dependency; typecheck pass.                                                                                                       |
+| M5-02  | S3 upload + Attachment repository + complete verification          | Sai MIME/size/checksum bị từ chối; binary không qua API.                                                                                          |
+| M5-03  | AIJob + Step Functions + AI Worker skeleton với fake provider      | Job chạy đủ success/failure/cancel và idempotent.                                                                                                 |
+| M5-04  | Amazon Transcribe`vi-VN` + normalize segment                       | Có timestamp/confidence/speaker ẩn danh trên audio demo.                                                                                          |
+| M5-05  | Transcript API/editor + optimistic version                         | Sửa/nghe/map speaker; version cũ trả`409`.                                                                                                        |
+| M5-05A | Live transcription session + streaming ingest                      | Sau consent, stream chạy nền; segment final được lưu theo sequence; reconnect không tạo trùng; stream lỗi khóa các AI feature phụ thuộc nội dung. |
+| M5-06  | Knowledge Base/S3 Vectors + normalized source + ingestion tracking | Một meeting được index, citation mở đúng source.                                                                                                  |
+| M5-07  | Group RAG nhiều meeting + filter/ACL + minutes draft               | Hai meeting cùng nhóm trả citation; nhóm khác không bị retrieve.                                                                                  |
+| M5-08  | Monitoring, retention, cleanup, cost và demo evidence              | Alarm/failure/cleanup test có bằng chứng.                                                                                                         |
+
+Không gộp toàn bộ SAM, API, frontend và RAG vào một PR.
+
+## 10. Verification
+
+### Automated
+
+- File sai MIME/đuôi/size/checksum.
+- Presigned URL hết hạn hoặc complete object không tồn tại.
+- Complete gọi lại không tạo job trùng.
+- User nhóm A không upload/read/query meeting nhóm B.
+- Retry state machine không tạo transcript/ingestion trùng.
+- Transcribe/provider timeout chuyển job sang `FAILED`.
+- Transcript update version cũ trả `409`.
+- Ingestion version mới làm version cũ stale/không còn là nguồn current.
+- Query một meeting chỉ trả source meeting đó.
+- Query nhiều meeting trả citation từ ít nhất hai meeting cùng group.
+- Query group A không gửi chunk group B vào model.
+- Câu không có nguồn trả `insufficientContext=true`.
+- Citation mở đúng segment/timestamp và người không quyền nhận `403`.
+- Prompt injection trong source không thay đổi filter hoặc gọi tool.
+- Log không chứa nội dung nhạy cảm.
+
+### Manual demo
+
+1. Tạo hai meeting trong cùng group.
+2. Xác nhận consent/cấp quyền và chạy live transcription cho từng meeting.
+3. Xác nhận segment final được lưu liên tục; kết thúc stream và theo dõi bước chuẩn hóa tới `COMPLETED`.
+4. Sửa transcript và ánh xạ speaker.
+5. Chờ ingestion của cả hai source thành `INDEXED`.
+6. Hỏi câu cần thông tin từ cả hai meeting.
+7. Mở citation của từng meeting.
+8. Chọn chỉ một meeting và xác nhận nguồn ngoài scope không xuất hiện.
+9. Dùng tài khoản group khác và xác nhận không retrieve được dữ liệu.
+10. Gây một job lỗi có kiểm s| col1 | col2 | col3 |
+    | ---- | ---- | ---- |
+    | | | |
+    | | | |
+
+    oát, kiểm tra alarm/log an toàn và chạy cleanup.
+
+## 11. Điểm cần chốt trước M5-01
+
+| Nội dung              | Quyết định cần có                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| AWS Region            | Giao của Transcribe`vi-VN`, Bedrock generation/embedding, Knowledge Bases và S3 Vectors. |
+| File allowlist        | Audio/TXT baseline; PDF/DOCX chỉ thêm khi parser/validation đã chốt.                     |
+| Kích thước/thời lượng | Giới hạn demo để kiểm soát Lambda, STT và chi phí.                                       |
+| Retention             | Số ngày cho raw audio, transcript, conversation, normalized source và vector.            |
+| Model config          | Generation model, embedding model/dimension và environment variables.                    |
+| Chunking              | Chiến lược baseline và evaluation dataset tối thiểu.                                     |
+| Citation              | Schema, URI nội bộ và hành vi khi source bị sửa/xóa.                                     |
+| ACL                   | Group-wide baseline hay có document-level restriction; filter bắt buộc tương ứng.        |
+| Cost quota            | Giới hạn phút STT, token/query, ingestion và alarm demo.                                 |
+
+Email SES, public Marketplace và tool proposal không phải blocker của M5-01. Live transcription là đầu vào bắt buộc của AI nội dung và phải được hoàn thành trước khi nghiệm thu luồng M5 đầu-cuối.
+
+## 12. Tài liệu kỹ thuật chính
+
+- [Amazon Transcribe supported languages](https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html)
+- [Amazon Transcribe speaker diarization](https://docs.aws.amazon.com/transcribe/latest/dg/diarization.html)
+- [S3 presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)
+- [Bedrock Knowledge Bases retrieval](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-how-retrieval.html)
+- [Bedrock Knowledge Bases metadata filtering](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-test-config.html)
+- [Bedrock Knowledge Bases with S3 Vectors](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-setup.html)
+- [S3 Vectors metadata filtering](https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors-metadata-filtering.html)
+- [DynamoDB TTL](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html)

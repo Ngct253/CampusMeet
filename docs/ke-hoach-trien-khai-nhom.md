@@ -16,13 +16,13 @@ Kế hoạch này chuyển scaffold thành các vertical slice có thể demo tr
 
 ## 2. Phân công ownership
 
-| Thành viên | Chức năng độc lập              | Đầu ra bàn giao                                                                                         | Phối hợp bắt buộc                                        |
-| ---------- | ------------------------------ | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| M1         | Nhóm và thành viên             | Group CRUD, membership, invitation, vai trò Admin/Member và kiểm tra quyền                              | M2–M5 dùng `groupId`; M5 hỗ trợ tài nguyên DynamoDB      |
-| M2         | Quản lý cuộc họp               | Meeting CRUD, agenda, attendee, organizer, trạng thái cuộc họp và lịch                                  | M1 cung cấp membership; M4 dùng meeting lifecycle        |
-| M3         | Biên bản, công việc, dashboard | Minutes, decision, action item, task status và dashboard tiến độ                                        | M1 cung cấp member/assignee; M2 cung cấp `meetingId`     |
-| M4         | Google Calendar và Meet        | Google OAuth, Calendar event, Meet link, `googleSyncStatus`, retry và artifact sync fallback            | M2 chốt lifecycle; M5 hỗ trợ secret/runtime              |
-| M5         | Upload, transcript và AI       | Upload trước/trong họp, live STT đa ngôn ngữ có `Speaker N`, chatbot/tóm tắt, biên bản + task proposal, RAG current/selected/whole-group, phân tích tiến độ nhóm, monitoring và cleanup | M1 cung cấp quyền; M2 cung cấp meeting; M3 cung cấp Minutes/Task/Progress API |
+| Thành viên | Chức năng độc lập              | Đầu ra bàn giao                                                                                                                                                                                                            | Phối hợp bắt buộc                                                 |
+| ---------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| M1         | Nhóm và thành viên             | Group CRUD, membership, invitation, vai trò Admin/Member và kiểm tra quyền                                                                                                                                                 | M2–M5 dùng`groupId`; M5 hỗ trợ tài nguyên DynamoDB                |
+| M2         | Quản lý cuộc họp               | Meeting CRUD, agenda, attendee, organizer, trạng thái cuộc họp và lịch                                                                                                                                                     | M1 cung cấp membership; M4 dùng meeting lifecycle                 |
+| M3         | Biên bản, công việc, dashboard | Minutes, decision, action item, task status và dashboard tiến độ                                                                                                                                                           | M1 cung cấp member/assignee; M2 cung cấp`meetingId`               |
+| M4         | Google Calendar và Meet        | Google OAuth, Calendar event, Meet link,`googleSyncStatus`, retry và artifact sync fallback                                                                                                                                | M2 chốt lifecycle; M5 hỗ trợ secret/runtime                       |
+| M5         | Upload, transcript và AI       | Live transcription chạy nền trong mọi cuộc họp, presigned upload, Attachment/AIJob, transcript editor, biên bản diễn biến và RAG theo meeting bằng Knowledge Bases/S3 Vectors, Bedrock Q&A/citation, monitoring và cleanup | M1 kiểm tra quyền; M2 cung cấp meeting; M3 nhận bản nháp biên bản |
 
 Ownership là người chịu trách nhiệm chính về outcome, không có nghĩa một người phải tự làm toàn bộ code. Mọi integration phải qua API contract và Pull Request.
 
@@ -34,15 +34,15 @@ Auth đăng ký/đăng nhập đã hoàn thành và là nền tảng dùng chung
 
 Mục tiêu: người đã đăng nhập tạo được nhóm, xem nhóm, mời người khác và quản lý thành viên bằng dữ liệu thật.
 
-| Loại             | File/thư mục                                                                                            | Việc cần làm                                                                      |
-| ---------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Contract         | `packages/shared/src/dto/index.ts`, `types/index.ts`, `enums/index.ts`                                  | Hoàn thiện `CreateGroupRequest`, `Group`, `Membership`, `Invitation`, role/status |
-| Frontend         | `apps/web/src/features/groups/pages/GroupPages.tsx`                                                     | Thay mock bằng form/list/detail thật; loading, empty, error và permission state   |
-| Frontend service | `apps/web/src/features/groups/service.ts`                                                               | Gọi Group/Membership/Invitation API qua API client dùng chung                     |
-| Backend          | `services/api/src/handlers/groups.ts`                                                                   | Route Group CRUD, membership và invitation; handler chỉ parse/trả response        |
-| Application/data | Tạo `services/api/src/application/groups.ts` và repository group trong `services/api/src/repositories/` | Validation, rule không xóa Admin cuối cùng, đọc/ghi DynamoDB                      |
-| Test             | Tạo test cạnh service/handler hoặc trong `services/api/tests/`                                          | Tạo nhóm thành công; member nhóm khác nhận `403`; invitation hết hạn bị từ chối   |
-| Tài liệu         | `docs/api-contract.md`                                                                                  | Cập nhật endpoint và trạng thái sau khi code chạy                                 |
+| Loại             | File/thư mục                                                                                           | Việc cần làm                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| Contract         | `packages/shared/src/dto/index.ts`, `types/index.ts`, `enums/index.ts`                                 | Hoàn thiện`CreateGroupRequest`, `Group`, `Membership`, `Invitation`, role/status |
+| Frontend         | `apps/web/src/features/groups/pages/GroupPages.tsx`                                                    | Thay mock bằng form/list/detail thật; loading, empty, error và permission state  |
+| Frontend service | `apps/web/src/features/groups/service.ts`                                                              | Gọi Group/Membership/Invitation API qua API client dùng chung                    |
+| Backend          | `services/api/src/handlers/groups.ts`                                                                  | Route Group CRUD, membership và invitation; handler chỉ parse/trả response       |
+| Application/data | Tạo`services/api/src/application/groups.ts` và repository group trong `services/api/src/repositories/` | Validation, rule không xóa Admin cuối cùng, đọc/ghi DynamoDB                     |
+| Test             | Tạo test cạnh service/handler hoặc trong`services/api/tests/`                                          | Tạo nhóm thành công; member nhóm khác nhận`403`; invitation hết hạn bị từ chối   |
+| Tài liệu         | `docs/api-contract.md`                                                                                 | Cập nhật endpoint và trạng thái sau khi code chạy                                |
 
 Tiêu chí bàn giao: đăng nhập → tạo nhóm → mời tài khoản khác → chấp nhận → xem danh sách thành viên; có test quyền chéo nhóm.
 
@@ -60,15 +60,15 @@ Trình tự M1 thực hiện:
 
 Mục tiêu: quản trị viên tạo, sửa, hủy và xem cuộc họp nội bộ, chưa phụ thuộc Google.
 
-| Loại             | File/thư mục                                                                                                | Việc cần làm                                                                  |
-| ---------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Contract         | `packages/shared/src/dto/index.ts`, `types/index.ts`, `enums/index.ts`                                      | Chốt meeting request/response, `MeetingStatus`, agenda, attendee và organizer |
-| Frontend         | `apps/web/src/features/meetings/pages/MeetingPages.tsx`                                                     | Form tạo/sửa, danh sách, chi tiết, hủy và trạng thái cuộc họp                 |
-| Frontend service | `apps/web/src/features/meetings/service.ts`                                                                 | Gọi Meeting API; không gọi Google trực tiếp từ UI                             |
-| Backend          | `services/api/src/handlers/meetings.ts`                                                                     | Meeting CRUD và cancel endpoint                                               |
-| Application/data | Tạo `services/api/src/application/meetings.ts` và repository meeting trong `services/api/src/repositories/` | Kiểm tra member/organizer, thời gian, attendee active và lifecycle            |
-| Test             | Tạo test meeting frontend/backend                                                                           | Không chọn member inactive; hủy meeting idempotent; group khác nhận `403`     |
-| Tài liệu         | `docs/api-contract.md`                                                                                      | Chốt path parameter và cập nhật endpoint thật                                 |
+| Loại             | File/thư mục                                                                                               | Việc cần làm                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Contract         | `packages/shared/src/dto/index.ts`, `types/index.ts`, `enums/index.ts`                                     | Chốt meeting request/response,`MeetingStatus`, agenda, attendee và organizer |
+| Frontend         | `apps/web/src/features/meetings/pages/MeetingPages.tsx`                                                    | Form tạo/sửa, danh sách, chi tiết, hủy và trạng thái cuộc họp                |
+| Frontend service | `apps/web/src/features/meetings/service.ts`                                                                | Gọi Meeting API; không gọi Google trực tiếp từ UI                            |
+| Backend          | `services/api/src/handlers/meetings.ts`                                                                    | Meeting CRUD và cancel endpoint                                              |
+| Application/data | Tạo`services/api/src/application/meetings.ts` và repository meeting trong `services/api/src/repositories/` | Kiểm tra member/organizer, thời gian, attendee active và lifecycle           |
+| Test             | Tạo test meeting frontend/backend                                                                          | Không chọn member inactive; hủy meeting idempotent; group khác nhận`403`     |
+| Tài liệu         | `docs/api-contract.md`                                                                                     | Chốt path parameter và cập nhật endpoint thật                                |
 
 Tiêu chí bàn giao: tạo nhóm có sẵn → tạo/sửa/hủy meeting → danh sách và chi tiết cập nhật bằng dữ liệu thật.
 
@@ -86,15 +86,15 @@ Trình tự M2 thực hiện:
 
 Mục tiêu: hoàn thành luồng sau họp từ biên bản đến task và số liệu tiến độ.
 
-| Loại             | File/thư mục                                                                                                  | Việc cần làm                                                                      |
-| ---------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Contract         | `packages/shared/src/dto/index.ts`, `types/index.ts`, `enums/index.ts`                                        | Chốt Minutes, Decision, ActionItem, Task và Dashboard DTO                         |
-| Frontend         | `apps/web/src/features/tasks/pages/TasksPage.tsx`, `apps/web/src/features/dashboard/pages/DashboardPages.tsx` | Form task, lọc/trạng thái, overdue và dashboard                                   |
-| Frontend service | `apps/web/src/features/tasks/service.ts`, `apps/web/src/features/dashboard/service.ts`                        | Gọi API task/dashboard và bỏ mock khỏi luồng hoàn chỉnh                           |
-| Backend          | `services/api/src/handlers/minutes.ts`, `tasks.ts`, `dashboard.ts`                                            | Minutes CRUD, chuyển action item thành task, update status và aggregate           |
-| Application/data | Tạo các service tương ứng trong `services/api/src/application/` và repository                                 | Kiểm tra assignee active; lưu `completedAt`; tính overdue thay vì lưu status mới  |
-| Test             | Test minutes/task/dashboard                                                                                   | Action item tạo task; chuyển `DONE` làm dashboard thay đổi; group khác nhận `403` |
-| Tài liệu         | `docs/api-contract.md`                                                                                        | Ghi endpoint và quy tắc tính dashboard                                            |
+| Loại             | File/thư mục                                                                                                  | Việc cần làm                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Contract         | `packages/shared/src/dto/index.ts`, `types/index.ts`, `enums/index.ts`                                        | Chốt Minutes, Decision, ActionItem, Task và Dashboard DTO                        |
+| Frontend         | `apps/web/src/features/tasks/pages/TasksPage.tsx`, `apps/web/src/features/dashboard/pages/DashboardPages.tsx` | Form task, lọc/trạng thái, overdue và dashboard                                  |
+| Frontend service | `apps/web/src/features/tasks/service.ts`, `apps/web/src/features/dashboard/service.ts`                        | Gọi API task/dashboard và bỏ mock khỏi luồng hoàn chỉnh                          |
+| Backend          | `services/api/src/handlers/minutes.ts`, `tasks.ts`, `dashboard.ts`                                            | Minutes CRUD, chuyển action item thành task, update status và aggregate          |
+| Application/data | Tạo các service tương ứng trong`services/api/src/application/` và repository                                  | Kiểm tra assignee active; lưu`completedAt`; tính overdue thay vì lưu status mới  |
+| Test             | Test minutes/task/dashboard                                                                                   | Action item tạo task; chuyển`DONE` làm dashboard thay đổi; group khác nhận `403` |
+| Tài liệu         | `docs/api-contract.md`                                                                                        | Ghi endpoint và quy tắc tính dashboard                                           |
 
 Tiêu chí bàn giao: meeting hoàn thành → tạo biên bản → tạo task → cập nhật `DONE` → dashboard thay đổi.
 
@@ -112,15 +112,15 @@ Trình tự M3 thực hiện:
 
 Mục tiêu: meeting nội bộ đồng bộ được Calendar/Meet mà không làm hỏng luồng khi Google lỗi.
 
-| Loại       | File/thư mục                                                                   | Việc cần làm                                                                                  |
-| ---------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| Contract   | `packages/shared/src/dto/index.ts`, `types/index.ts`, `enums/index.ts`         | Tách `GoogleSyncStatus` khỏi `MeetingStatus`; chốt connect/callback/sync response             |
-| Frontend   | Tạo `apps/web/src/features/integrations/` và bổ sung trạng thái vào Meeting UI | Connect Google, pending/ready/action-required/failed và retry                                 |
-| Backend    | `services/api/src/handlers/integrations.ts`                                    | OAuth start/callback/disconnect và sync action                                                |
-| Adapter    | `services/api/src/integrations/adapters.ts` hoặc tách `google-calendar.ts`     | Calendar create/update/delete, Meet conference request và artifact adapter                    |
-| Secret/IaC | `infra/template.yaml`, `infra/parameters.example.json`                         | Chỉ tham chiếu secret; không commit client secret; cấu hình redirect URI                      |
-| Test       | Mock Google adapter                                                            | Retry không tạo event trùng; thiếu artifact dùng fallback; không hiện Meet link trước `READY` |
-| Tài liệu   | `docs/api-contract.md`, `docs/huong-dan-trien-khai-aws.md`                     | Ghi redirect URI, scopes và trạng thái sync                                                   |
+| Loại       | File/thư mục                                                                  | Việc cần làm                                                                                 |
+| ---------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Contract   | `packages/shared/src/dto/index.ts`, `types/index.ts`, `enums/index.ts`        | Tách`GoogleSyncStatus` khỏi `MeetingStatus`; chốt connect/callback/sync response             |
+| Frontend   | Tạo`apps/web/src/features/integrations/` và bổ sung trạng thái vào Meeting UI | Connect Google, pending/ready/action-required/failed và retry                                |
+| Backend    | `services/api/src/handlers/integrations.ts`                                   | OAuth start/callback/disconnect và sync action                                               |
+| Adapter    | `services/api/src/integrations/adapters.ts` hoặc tách `google-calendar.ts`    | Calendar create/update/delete, Meet conference request và artifact adapter                   |
+| Secret/IaC | `infra/template.yaml`, `infra/parameters.example.json`                        | Chỉ tham chiếu secret; không commit client secret; cấu hình redirect URI                     |
+| Test       | Mock Google adapter                                                           | Retry không tạo event trùng; thiếu artifact dùng fallback; không hiện Meet link trước`READY` |
+| Tài liệu   | `docs/api-contract.md`, `docs/huong-dan-trien-khai-aws.md`                    | Ghi redirect URI, scopes và trạng thái sync                                                  |
 
 Tiêu chí bàn giao: meeting nội bộ → đồng bộ Calendar → nhận Meet link; lỗi Google có trạng thái rõ và retry idempotent.
 
@@ -136,30 +136,30 @@ Trình tự M4 thực hiện:
 
 ### M5 — Upload, transcript và AI
 
-Mục tiêu: tài liệu upload trước/trong họp và live transcription đa ngôn ngữ chạy nền sau consent/cấp quyền cung cấp dữ liệu cho chatbot; transcript dùng `Speaker N` ẩn danh, hỗ trợ tóm tắt người vào trễ, biên bản/action item/task proposal; RAG tối đa trong một group và AI diễn giải tiến độ nhóm. Kế hoạch chi tiết nằm tại [Kế hoạch M5 — Upload, Voice Transcript và AI trong nhóm](ke-hoach-m5-upload-transcript-ai.md).
+Mục tiêu: live transcription chạy nền trong mọi phiên họp sau consent/cấp quyền là nguồn duy nhất của nội dung phát biểu; file bổ sung đi thẳng lên S3; hệ thống tạo biên bản chỉ ghi diễn biến và trả lời có citation trong meeting hiện tại dựa trên tài liệu cuộc họp cùng biên bản đã duyệt. Kế hoạch triển khai chi tiết nằm tại [Kế hoạch M5 — Upload, Voice Transcript và Hỏi đáp theo cuộc họp](ke-hoach-m5-upload-transcript-ai.md).
 
-| Loại             | File/thư mục                                                            | Việc cần làm                                                                           |
-| ---------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Contract         | `packages/shared/src/dto/index.ts`, `types/index.ts`, `enums/index.ts`  | Attachment, AIJob, TranscriptSegment, GroupKnowledgeQuery, GroundedAnswer, TaskProposal, GroupProgressAnalysis và citation |
-| Frontend         | Tạo `apps/web/src/features/attachments/`, `transcripts/`, `ai/`         | Upload trước/trong họp, live summary, sửa `Speaker N`, scope current/selected/group, biên bản/task preview và citation |
-| Backend          | Tạo handler attachment/transcript/AI trong `services/api/src/handlers/` | Presigned URL, complete upload, job status, transcript patch và chat                   |
-| Application/data | Tạo service/repository tương ứng                                        | MIME/size/checksum, consent, ACL `groupId`/`meetingId`, version transcript và citation |
-| AWS              | `infra/template.yaml`                                                   | Streaming ingest, S3 user-content, Step Functions, Transcribe, Bedrock Knowledge Bases, S3 Vectors, log/alarm và retention tối thiểu |
-| Test             | Test policy và adapter                                                  | File sai loại bị từ chối; speaker không có danh tính; task confirm idempotent; retrieval/progress không chéo nhóm |
-| Tài liệu         | `docs/api-contract.md`, `docs/huong-dan-trien-khai-aws.md`              | Ghi upload policy, job states, cost và cleanup                                         |
+| Loại             | File/thư mục                                                           | Việc cần làm                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Contract         | `packages/shared/src/dto/index.ts`, `types/index.ts`, `enums/index.ts` | Attachment, AIJob, TranscriptSegment, MeetingChatRequest, GroundedAnswer, bản nháp biên bản diễn biến và citation                    |
+| Frontend         | Tạo`apps/web/src/features/attachments/`, `transcripts/`, `ai/`         | Upload progress, job status, transcript editor/speaker mapping, biên bản diễn biến và citation UI theo meeting                       |
+| Backend          | Tạo handler attachment/transcript/AI trong`services/api/src/handlers/` | Presigned URL, complete upload, job status, transcript patch và chat                                                                 |
+| Application/data | Tạo service/repository tương ứng                                       | MIME/size/checksum, consent, ACL`groupId`/`meetingId`, version transcript và citation                                                |
+| AWS              | `infra/template.yaml`                                                  | Streaming ingest, S3 user-content, Step Functions, Transcribe, Bedrock Knowledge Bases, S3 Vectors, log/alarm và retention tối thiểu |
+| Test             | Test policy và adapter                                                 | Binary không qua API; file sai loại bị từ chối; retrieval chéo nhóm không trả dữ liệu                                                |
+| Tài liệu         | `docs/api-contract.md`, `docs/huong-dan-trien-khai-aws.md`             | Ghi upload policy, job states, cost và cleanup                                                                                       |
 
-Tiêu chí bàn giao MVP: upload tài liệu → consent/capture → live STT giữ ngôn ngữ đang nói và `Speaker N` → chatbot/tóm tắt người vào trễ → biên bản + task proposal có citation → confirm tạo task qua M3 API → RAG current/selected/whole-group và progress analysis không rò chéo nhóm.
+Tiêu chí bàn giao MVP: phiên họp → consent/cấp quyền → live transcription chạy nền trong suốt phiên → transcript có timestamp/speaker ẩn danh → người dùng sửa → biên bản chỉ ghi diễn biến → ingestion tài liệu/biên bản → Q&A theo meeting có citation; truy vấn meeting/nhóm khác không lấy được nguồn. Upload audio dùng cho phục hồi/kiểm thử; tài liệu là nguồn RAG bổ sung.
 
 Trình tự M5 thực hiện:
 
 1. Chốt loại file, kích thước tối đa và thời gian lưu. API kiểm tra tên file, MIME, kích thước và checksum trước khi cấp đường dẫn upload tạm thời.
 2. Frontend xin presigned URL rồi upload trực tiếp lên S3. Không gửi nội dung audio/tài liệu qua API Gateway hoặc Lambda.
 3. Sau upload, tạo `AIJob` với trạng thái đang chờ/đang chạy/thành công/thất bại. Frontend đọc trạng thái định kỳ và hiển thị lỗi an toàn, không lộ log nội bộ.
-4. Step Functions điều phối công việc dài; STT giữ ngôn ngữ đang nói, benchmark tiếng Việt và tạo timestamp/confidence/`languageCode`/`Speaker N`; không nhận diện hoặc ánh xạ tên.
-5. Làm màn hình nghe/sửa text/language/speaker label theo version; trong meeting đang chạy cho phép hỏi đáp và tóm tắt live transcript có cảnh báo chưa duyệt.
-6. AI tạo biên bản, action item và `TaskProposal` có citation; `assigneeId`/`priority` bắt buộc còn thiếu được hỏi lại, deadline tùy chọn. Confirm gọi Task API của M3 sau authorization/idempotency.
-7. Ingest tài liệu `READY`, approved transcript và approved minutes với metadata `groupId`, `meetingId`, `sourceType`, `sourceStatus`, `sourceId`, `version`, ACL. Live summary đọc segment final trực tiếp; query hỗ trợ current/selected/whole-group nhưng mỗi request chỉ có một group.
-8. AI progress chỉ diễn giải `GroupProgressSnapshot` do M3/backend tính; test không lấy group khác, không chấm điểm/xếp hạng cá nhân và không mutation.
+4. Step Functions điều phối công việc dài; Amazon Transcribe tạo transcript tiếng Việt có timestamp, độ tin cậy và nhãn `Speaker 0/1`. Không tự đoán tên người nói.
+5. Làm màn hình cho người dùng nghe theo timestamp, sửa câu và tự ánh xạ speaker sang thành viên. Mỗi lần sửa cần version để tránh ghi đè thay đổi mới hơn.
+6. Từ transcript đã duyệt, hệ thống tạo bản nháp biên bản chỉ ghi diễn biến theo trình tự, không gợi ý action item/task/bước tiếp theo. Tài liệu và biên bản đã duyệt được ingest vào Bedrock Knowledge Bases/S3 Vectors với metadata filterable tối thiểu gồm `groupId`, `meetingId`, `sourceType`, `sourceId`, `version` và `approved=true`.
+7. Endpoint meeting chat kiểm tra membership trước retrieval, luôn áp filter `groupId`/`meetingId`/ACL và chỉ dùng tài liệu cuộc họp cùng biên bản đã duyệt. Nếu không đủ nguồn, trợ lý yêu cầu người dùng cung cấp thêm thông tin/tài liệu liên quan hoặc báo không đủ căn cứ.
+8. Test bắt buộc chứng minh câu trả lời chỉ dẫn nguồn từ meeting hiện tại và không bao giờ retrieve dữ liệu meeting/nhóm khác.
 9. Ghi metric số job ingestion/query lỗi-thành công, token/chi phí cơ bản và citation thiếu; đặt retention/cleanup xuyên S3, DynamoDB, Knowledge Base và vector để dữ liệu thử nghiệm không tồn tại vô hạn.
 
 ## 2.2 Quy tắc làm song song
@@ -173,43 +173,43 @@ Trình tự M5 thực hiện:
 
 ## 2.3 Giải thích thuật ngữ dùng trong bảng
 
-| Thuật ngữ              | Nghĩa trong dự án                                                                                   |
-| ---------------------- | --------------------------------------------------------------------------------------------------- |
-| Frontend (FE)          | Phần giao diện React người dùng nhìn thấy trong `apps/web`                                          |
-| Backend (BE)           | Phần Node.js/TypeScript xử lý yêu cầu trong `services/api`                                          |
-| API                    | Đường giao tiếp giữa frontend và backend, ví dụ `POST /groups`                                      |
-| Contract/DTO           | Cấu trúc dữ liệu hai phía thống nhất; đặt trong `packages/shared`, không copy lại                   |
-| Handler                | File nhận request HTTP và trả response; không chứa toàn bộ nghiệp vụ                                |
-| Application service    | Nơi điều phối nghiệp vụ như kiểm tra quyền, validation và gọi repository                            |
-| Repository             | Lớp chuyên đọc/ghi dữ liệu DynamoDB để nghiệp vụ không phụ thuộc chi tiết database                  |
-| Adapter                | Lớp kết nối dịch vụ ngoài như Google Calendar, Amazon Transcribe hoặc Bedrock                       |
-| Mock/adapter giả       | Dữ liệu hoặc dịch vụ thay thế dùng khi phát triển/test, không phải tích hợp production              |
-| Idempotent/chống trùng | Gửi lại cùng yêu cầu vẫn chỉ tạo một kết quả, ví dụ không tạo hai Calendar Event                    |
-| Presigned URL          | Đường dẫn S3 có thời hạn để browser upload trực tiếp, không chuyển file qua Lambda                  |
-| STT                    | Chuyển giọng nói thành văn bản theo ngôn ngữ đang nói; tiếng Việt là ngôn ngữ benchmark ưu tiên     |
-| Citation               | Dẫn nguồn chỉ ra câu trả lời AI dựa vào tài liệu/transcript nào                                     |
-| IaC                    | Khai báo tài nguyên AWS bằng file SAM/CloudFormation trong `infra`, không tạo tùy tiện bằng Console |
+| Thuật ngữ              | Nghĩa trong dự án                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------- |
+| Frontend (FE)          | Phần giao diện React người dùng nhìn thấy trong`apps/web`                                          |
+| Backend (BE)           | Phần Node.js/TypeScript xử lý yêu cầu trong`services/api`                                          |
+| API                    | Đường giao tiếp giữa frontend và backend, ví dụ`POST /groups`                                      |
+| Contract/DTO           | Cấu trúc dữ liệu hai phía thống nhất; đặt trong`packages/shared`, không copy lại                   |
+| Handler                | File nhận request HTTP và trả response; không chứa toàn bộ nghiệp vụ                               |
+| Application service    | Nơi điều phối nghiệp vụ như kiểm tra quyền, validation và gọi repository                           |
+| Repository             | Lớp chuyên đọc/ghi dữ liệu DynamoDB để nghiệp vụ không phụ thuộc chi tiết database                 |
+| Adapter                | Lớp kết nối dịch vụ ngoài như Google Calendar, Amazon Transcribe hoặc Bedrock                      |
+| Mock/adapter giả       | Dữ liệu hoặc dịch vụ thay thế dùng khi phát triển/test, không phải tích hợp production             |
+| Idempotent/chống trùng | Gửi lại cùng yêu cầu vẫn chỉ tạo một kết quả, ví dụ không tạo hai Calendar Event                   |
+| Presigned URL          | Đường dẫn S3 có thời hạn để browser upload trực tiếp, không chuyển file qua Lambda                 |
+| STT                    | Chuyển giọng nói thành văn bản; trong MVP dùng Amazon Transcribe tiếng Việt                        |
+| Citation               | Dẫn nguồn chỉ ra câu trả lời AI dựa vào tài liệu/transcript nào                                    |
+| IaC                    | Khai báo tài nguyên AWS bằng file SAM/CloudFormation trong`infra`, không tạo tùy tiện bằng Console |
 
 ## 3. Kế hoạch 8 tuần
 
-| Tuần | Mục tiêu                          | Công việc chính                                                                                                                  | Mốc kiểm tra                                                                                                  |
-| ---- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| 1    | Khóa baseline                     | Commit scaffold, chốt API/data model/Git workflow, test Google OAuth feasibility sớm, rà SAM skeleton                            | 5 máy đều install và quality gates pass; owner đã gán                                                         |
-| 2    | Group foundation                  | Group CRUD nội bộ, membership model, authorization boundary cơ bản                                                               | Tạo/xem group bằng UI → API dev/local                                                                         |
-| 3    | Invitation và meeting nội bộ      | Invitation accept/reject/expiry, meeting CRUD chưa Google                                                                        | Mốc MVP 1 chạy đầu-cuối và có test quyền âm                                                                   |
-| 4    | Luồng sau họp                     | Minutes, decisions, action items, tasks, dashboard                                                                               | Mốc MVP 2 chạy đầu-cuối                                                                                       |
-| 5    | Google integration                | OAuth, Calendar Event, `googleSyncStatus`, retry/idempotency, prototype Meet artifact sync và Meet Add-on side panel unpublished | Demo pending/ready/retry/action-required; add-on lấy meeting context hoặc có fallback; không có Meet link giả |
-| 6    | Reminder, notification và AI data | EventBridge reminder; S3 presigned upload; Attachment/Recording/AIJob; consent và retention                                      | Hủy meeting không gửi reminder; binary không qua API; upload policy test                                      |
-| 7    | AI vertical slice và vận hành     | Upload trước/trong họp, live STT đa ngôn ngữ + `Speaker N`, chatbot/live summary, biên bản/task proposal, ingestion và progress snapshot | Demo current meeting → minutes/task confirm → selected meetings có citation |
-| 8    | Đóng băng                         | Whole-group RAG, group progress, filter `groupId`/ACL, prompt injection, task idempotency; fix/demo/cleanup | M5 pass ba RAG scope trong một group, không rò chéo nhóm hay đánh giá cá nhân |
+| Tuần | Mục tiêu                          | Công việc chính                                                                                                                                                            | Mốc kiểm tra                                                                                                  |
+| ---- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| 1    | Khóa baseline                     | Commit scaffold, chốt API/data model/Git workflow, test Google OAuth feasibility sớm, rà SAM skeleton                                                                      | 5 máy đều install và quality gates pass; owner đã gán                                                         |
+| 2    | Group foundation                  | Group CRUD nội bộ, membership model, authorization boundary cơ bản                                                                                                         | Tạo/xem group bằng UI → API dev/local                                                                         |
+| 3    | Invitation và meeting nội bộ      | Invitation accept/reject/expiry, meeting CRUD chưa Google                                                                                                                  | Mốc MVP 1 chạy đầu-cuối và có test quyền âm                                                                   |
+| 4    | Luồng sau họp                     | Minutes, decisions, action items, tasks, dashboard                                                                                                                         | Mốc MVP 2 chạy đầu-cuối                                                                                       |
+| 5    | Google integration                | OAuth, Calendar Event,`googleSyncStatus`, retry/idempotency, prototype Meet artifact sync và Meet Add-on side panel unpublished                                            | Demo pending/ready/retry/action-required; add-on lấy meeting context hoặc có fallback; không có Meet link giả |
+| 6    | Reminder, notification và AI data | EventBridge reminder; S3 presigned upload; Attachment/Recording/AIJob; consent và retention                                                                                | Hủy meeting không gửi reminder; binary không qua API; upload policy test                                      |
+| 7    | AI vertical slice và vận hành     | Live STT tiếng Việt chạy nền, batch chuẩn hóa, transcript editor, bản nháp biên bản diễn biến, Knowledge Base/S3 Vectors ingestion và Bedrock RAG theo meeting; alarm/cost | Demo một meeting có live transcript → biên bản → ingestion tài liệu/biên bản → hỏi đáp có citation            |
+| 8    | Đóng băng                         | Test filter`groupId`/`meetingId`/ACL, citation đúng meeting, prompt injection, tool confirmation; fix, demo, cleanup rehearsal                                             | Core MVP + AI MVP gồm RAG theo meeting pass; evidence/cost/cleanup xác nhận                                   |
 
 Hai mốc MVP bắt buộc:
 
 1. Tạo nhóm → mời thành viên → tham gia nhóm → tạo cuộc họp nội bộ.
 2. Tạo cuộc họp → biên bản → task → cập nhật `DONE` → dashboard thay đổi.
-3. Upload tài liệu → meeting consent/capture → live STT có timestamp/confidence/language/`Speaker N` → chatbot/tóm tắt → biên bản/action item/task proposal → confirm tạo task → RAG current/selected/whole-group + group progress có citation và không rò chéo nhóm.
+3. Meeting → consent/cấp quyền → live transcription chạy nền trong suốt phiên → transcript có timestamp/confidence → người dùng sửa/ánh xạ speaker → bản nháp biên bản chỉ ghi diễn biến → ingestion tài liệu/biên bản vào Knowledge Base/S3 Vectors → RAG theo meeting có citation và không rò dữ liệu chéo meeting/nhóm.
 
-Pha mở rộng sau baseline: public/private Marketplace release, trợ lý nhiều tool ngoài task, Document PiP, reranking/implicit filter nếu có evaluation chứng minh cần thiết. M5 bắt buộc giữ scope tối đa một group, task mutation cần xác nhận và không nhận diện/đánh giá cá nhân.
+Pha mở rộng sau baseline: public/private Marketplace release, trợ lý yêu cầu người dùng cung cấp thông tin cuộc họp/hỏi lại khi thiếu để điền agenda-form và Document PiP. Live transcription chạy nền trong mọi phiên họp, biên bản không có gợi ý và RAG theo meeting với filter `groupId`/`meetingId`/ACL là đầu ra bắt buộc của M5.
 
 ## 4. Phụ thuộc giữa các luồng
 
@@ -225,10 +225,8 @@ Pha mở rộng sau baseline: public/private Marketplace release, trợ lý nhi�
 | Dashboard             | Meeting/task APIs và permission                                              | M3          | M1 về group; M2 về meeting                     |
 | Monitoring            | API/Reminder/AI signals, SNS subscription                                    | M5          | M1–M4 định nghĩa metric hữu ích                |
 | Attachment/recording  | Membership, S3 policy, consent/retention, checksum/scan                      | M5          | M1 về quyền; M2 về meeting                     |
-| STT/transcript        | Recording hợp lệ, AIJob, language/provider benchmark                          | M5          | M3 về biên bản/action item                     |
-| Bedrock grounding     | Tài liệu/transcript/biên bản, citation schema, group/meeting/ACL filter       | M5          | M1 về ACL; M3 về biên bản/citation             |
-| Task proposal         | Transcript/action item, Task DTO/API, authorization/idempotency               | M5          | M3 về validate/create Task                     |
-| Group progress AI     | `GroupProgressSnapshot` tính xác định từ task/meeting                         | M5          | M3 cung cấp snapshot; M1 kiểm tra group ACL    |
+| STT/transcript        | Recording hợp lệ, AIJob, provider benchmark                                  | M5          | M3 về biên bản diễn biến                       |
+| Bedrock grounding     | Tài liệu/biên bản đã duyệt, citation schema, meeting/ACL filter              | M5          | M1 về ACL; M3 về biên bản/citation             |
 | Tool proposal         | API nghiệp vụ và authorization hoàn chỉnh                                    | M5          | M1–M3 về policy và API nghiệp vụ               |
 
 ## 5. Git và Pull Request
@@ -321,9 +319,8 @@ Không đưa token, credential, user data hoặc log nhạy cảm vào evidence.
 | Meet Add-on distribution         | Đã chốt: CampusMeet web vẫn là chính; MVP thử deployment chưa công bố; private/public Marketplace là pha phát hành riêng, không đổi audience sau publish | M1 + M4 + M5 | Spike tuần 5; quyết định publish sau MVP |
 | Recording consent/capture        | Chốt nội dung consent, nguồn micro/tab/system audio, chỉ báo, stop và retention                                                                          | M1 + M2 + M3 | Trước tuần 6                             |
 | Upload allowlist/size/scan       | Chốt file MVP; PDF/TXT/DOCX/audio trước, định dạng nâng cao sau                                                                                          | M3 + M5      | Trước tuần 6                             |
-| STT provider/ngôn ngữ            | Amazon Transcribe adapter mặc định; chốt `EXPLICIT|AUTO`, benchmark tiếng Việt chính và ít nhất một ngôn ngữ phụ trước khi khóa cấu hình                   | M4 + M5      | Đầu tuần 7                               |
+| STT provider tiếng Việt          | Amazon Transcribe mặc định; benchmark Deepgram trên cùng tập audio trước khi khóa adapter                                                                | M4 + M5      | Đầu tuần 7                               |
 | AI model/Region                  | Chọn model Bedrock hỗ trợ Region và tool/citation; model ID là env config                                                                                | M4 + M5      | Trước tuần 7                             |
-| Grounding/citation trong nhóm    | Chốt current/selected/whole-group scope, source type tài liệu/transcript/biên bản, metadata `groupId`/`meetingId`/ACL và filter trước retrieval | M5 + M3      | Trước tuần 7                             |
-| Task proposal/progress snapshot  | Chốt contract M3↔M5: proposal confirm gọi Task API; progress AI chỉ đọc snapshot cấp nhóm                                                      | M3 + M5      | Trước tuần 7                             |
-| AI mutation policy               | Chỉ `ToolProposal`; schema + auth + preview + confirm + idempotency + audit                                                                              | M1 + M3 + M4 | Trước pha AI-2                           |
+| Grounding/citation theo meeting  | Chốt citation schema, hai source type tài liệu/biên bản, metadata`groupId`/`meetingId`/ACL và filter trước retrieval                                     | M5 + M3      | Trước tuần 7                             |
+| AI mutation policy               | Chỉ`ToolProposal`; schema + auth + preview + confirm + idempotency + audit                                                                               | M1 + M3 + M4 | Trước pha AI-2                           |
 | AI retention/cost                | Chốt audio/transcript/conversation/vector TTL và quota token/phút                                                                                        | M3 + M5      | Trước deploy AI                          |
