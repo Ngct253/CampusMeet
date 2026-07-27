@@ -18,11 +18,11 @@ Kế hoạch này chuyển scaffold thành các vertical slice có thể demo tr
 
 | Thành viên | Ownership chính                   | Đầu ra bàn giao                                                                                            | Không phải ownership chính                | Phối hợp chính                                       |
 | ------------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------- |
-| M1           | Frontend foundation và dashboard  | AppShell, route guard, loading/error/empty state, dashboard cá nhân/nhóm, frontend API boundary            | Group workflow, Google OAuth, AWS deployment | M2/M3 về contract; M5 về Cognito/config               |
-| M2           | Group, membership, invitation      | Vertical slice UI/API/test cho nhóm, thành viên, lời mời                                                 | Dashboard và Google integration             | M1 về UI; M3 về authorization/repository              |
-| M3           | Meeting, minutes, task, domain/API | Meeting/minutes/decision/action item/task, validation, authorization theo`groupId`, access pattern và test | Google token, SAM deployment                 | M2 về membership; M4 về Calendar; M5 về data/runtime |
-| M4           | Google Calendar và Google Meet    | OAuth connect/disconnect, Calendar Event, conference states`PENDING/READY/FAILED`, retry không tạo trùng | Dashboard, reminder infrastructure           | M3 về meeting lifecycle; M5 về secret/permission      |
-| M5           | AWS, reminder và vận hành       | SAM/IaC, Cognito/API/Lambda boundary, Scheduler/Reminder, CloudWatch/SNS, CI/CD, cost và cleanup             | Feature UI và domain workflow               | Tất cả owner về env, metrics và deployment          |
+| M1           | Frontend foundation và dashboard  | AppShell, route guard, dashboard, AI job/citation state, panel và Document PiP fallback                         | Group workflow, Google OAuth, AWS deployment | M2/M3 về contract; M5 về Cognito/config               |
+| M2           | Group, membership, invitation và transcript UX | Vertical slice nhóm/thành viên; transcript editor, timestamp playback, confidence và speaker mapping   | Google/AWS provider integration              | M1 về UI; M3 về authorization/repository              |
+| M3           | Meeting, minutes, task, domain/API | Meeting/minutes/task, authorization theo `groupId`; attachment/AIJob/tool proposal application service         | Google token, SAM deployment                 | M2 về membership/UX; M4 về grounding; M5 về runtime  |
+| M4           | Google và AI grounding            | OAuth, Calendar/Meet artifact adapter, conference states; Bedrock prompt/citation/evaluation dataset             | Dashboard, reminder infrastructure           | M3 về lifecycle/tool policy; M5 về secret/provider    |
+| M5           | AWS, AI pipeline và vận hành      | SAM/IaC, S3 upload, Step Functions, Transcribe, Bedrock/Knowledge Base/S3 Vectors, monitoring, cost và cleanup   | Feature UI và domain workflow                | Tất cả owner về env, metrics và deployment            |
 
 Ownership là người chịu trách nhiệm chính về outcome, không có nghĩa một người phải tự làm toàn bộ code. Mọi integration phải qua API contract và Pull Request.
 
@@ -34,15 +34,18 @@ Ownership là người chịu trách nhiệm chính về outcome, không có ngh
 | 2     | Group foundation                | Group CRUD nội bộ, membership model, authorization boundary cơ bản                                   | Tạo/xem group bằng UI → API dev/local                                 |
 | 3     | Invitation và meeting nội bộ | Invitation accept/reject/expiry, meeting CRUD chưa Google                                               | Mốc MVP 1 chạy đầu-cuối và có test quyền âm                     |
 | 4     | Luồng sau họp                 | Minutes, decisions, action items, tasks, dashboard                                                       | Mốc MVP 2 chạy đầu-cuối                                             |
-| 5     | Google integration              | OAuth, Calendar Event, conference lifecycle, retry/idempotency                                           | Demo`PENDING/READY/FAILED`, không có Meet link giả                  |
-| 6     | Reminder và notification       | EventBridge one-time schedule, Reminder Lambda, in-app notification; SES nếu đủ điều kiện          | Hủy meeting không gửi reminder; notification không phụ thuộc email |
-| 7     | Gia cố                         | Cross-group authorization, lỗi Google, cancel meeting, CloudWatch logs/metrics/alarm/SNS                | Test 401/403, retry, cancel và alarm có bằng chứng                   |
-| 8     | Đóng băng                    | Fix lỗi, demo, workshop song ngữ, cleanup rehearsal                                                    | Quality gates pass, evidence đủ, cloud cleanup xác nhận              |
+| 5     | Google integration              | OAuth, Calendar Event, `googleSyncStatus`, retry/idempotency và prototype Meet artifact sync               | Demo pending/ready/retry/action-required; artifact fallback; không có Meet link giả |
+| 6     | Reminder, notification và AI data | EventBridge reminder; S3 presigned upload; Attachment/Recording/AIJob; consent và retention        | Hủy meeting không gửi reminder; binary không qua API; upload policy test |
+| 7     | AI vertical slice và vận hành | Batch STT tiếng Việt, transcript editor, Bedrock Q&A/citation, minutes/action-item draft; alarm/cost | Demo audio/tài liệu → transcript → draft → hỏi đáp; fallback thủ công |
+| 8     | Đóng băng                    | Test chéo nhóm, prompt injection, tool confirmation; fix, demo, cleanup rehearsal                      | Core MVP + AI MVP pass; evidence/cost/cleanup xác nhận                |
 
 Hai mốc MVP bắt buộc:
 
 1. Tạo nhóm → mời thành viên → tham gia nhóm → tạo cuộc họp nội bộ.
 2. Tạo cuộc họp → biên bản → task → cập nhật `DONE` → dashboard thay đổi.
+3. Upload tài liệu/audio → AIJob → transcript có timestamp/confidence → người dùng sửa/ánh xạ speaker → draft biên bản/action item → hỏi đáp có citation.
+
+Pha mở rộng sau baseline: RAG nhiều cuộc họp, agenda/form prefill, tool proposal nhiều miền, Document PiP và live transcription. Không đưa các mục này vào tuần 7-8 nếu ba mốc bắt buộc chưa ổn định.
 
 ## 4. Phụ thuộc giữa các luồng
 
@@ -56,6 +59,10 @@ Hai mốc MVP bắt buộc:
 | Minutes/task          | Completed meeting, active member rule                   | M3           | M1, M2                                |
 | Dashboard             | Meeting/task APIs và permission                        | M1           | M2, M3                                |
 | Monitoring            | API/Reminder signals, SNS subscription                  | M5           | M2–M4 định nghĩa metric hữu ích |
+| Attachment/recording  | Membership, S3 policy, consent/retention, checksum/scan | M5           | M2 về UX; M3 về contract/authorization |
+| STT/transcript        | Recording hợp lệ, AIJob, provider benchmark             | M5           | M2 transcript UX; M3 data model; M4 evaluation |
+| Bedrock grounding     | Nguồn đã duyệt, citation schema, ACL filter             | M4           | M3 application/API; M5 runtime/Knowledge Base |
+| Tool proposal         | API nghiệp vụ và authorization hoàn chỉnh               | M3           | M1 preview UX; M4 prompt/evaluation; M5 audit/metric |
 
 ## 5. Git và Pull Request
 
@@ -143,3 +150,11 @@ Không đưa token, credential, user data hoặc log nhạy cảm vào evidence.
 | Ngày khóa scope MVP            | Không thêm feature ngoài SRS sau mốc                      | Cả nhóm      | Cuối tuần 1      |
 | DynamoDB access pattern/index    | Placeholder hiện chưa phải database design hoàn chỉnh    | M3 + M5        | Trước tuần 2    |
 | CORS/domain/retention/PITR       | Chốt theo môi trường và budget                           | M5 + cả nhóm | Trước deploy dev |
+| Google artifact strategy          | Đã chốt: Calendar tạo lịch; Meet REST sync khi có; upload/capture fallback; polling AWS cho MVP | M4 + M5 | Đã chốt, kiểm tra lại khi implement |
+| Recording consent/capture         | Chốt nội dung consent, nguồn micro/tab/system audio, chỉ báo, stop và retention               | M1 + M2 + M3 | Trước tuần 6 |
+| Upload allowlist/size/scan         | Chốt file MVP; PDF/TXT/DOCX/audio trước, định dạng nâng cao sau                               | M3 + M5 | Trước tuần 6 |
+| STT provider tiếng Việt           | Amazon Transcribe mặc định; benchmark Deepgram trên cùng tập audio trước khi khóa adapter      | M4 + M5 | Đầu tuần 7 |
+| AI model/Region                   | Chọn model Bedrock hỗ trợ Region và tool/citation; model ID là env config                       | M4 + M5 | Trước tuần 7 |
+| Grounding/citation                | Chốt citation schema và test không đủ nguồn/chéo nhóm                                           | M3 + M4 | Trước tuần 7 |
+| AI mutation policy                | Chỉ `ToolProposal`; schema + auth + preview + confirm + idempotency + audit                     | M1 + M3 + M4 | Trước pha AI-2 |
+| AI retention/cost                 | Chốt audio/transcript/conversation/vector TTL và quota token/phút                               | M3 + M5 | Trước deploy AI |

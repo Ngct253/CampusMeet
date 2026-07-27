@@ -4,9 +4,11 @@ CAMPUSMEET
 
 Hệ thống quản lý cuộc họp và công việc nhóm tích hợp Google Meet trên nền tảng AWS Serverless
 
-> **Ghi chú:** Nguyên tắc cốt lõi: CampusMeet không xây dựng hoặc sao chép Google Meet. Hệ thống quản lý quy trình trước - trong - sau cuộc họp; Google Meet chỉ là nền tảng hội nghị được tích hợp qua Google Calendar API.
+> **Ghi chú:** Nguyên tắc cốt lõi: CampusMeet không xây dựng hoặc sao chép Google Meet. Hệ thống quản lý quy trình trước - trong - sau cuộc họp; Google Calendar API tạo lịch/liên kết và Google Meet REST API chỉ đồng bộ artifact hậu họp khi thực tế khả dụng.
 
 Tên tiếng Anh: CampusMeet - Meeting and Team Work Management System with Google Meet Integration
+
+> **Trạng thái baseline ngày 27/07/2026:** Đã chốt hướng Google Calendar + Google Meet REST API có fallback; đã chốt các nguyên tắc AI về consent/capture, diarization ẩn danh, STT provider có thể thay thế, grounded output, human-in-the-loop và RAG cách ly theo nhóm. AI MVP là luồng dọc bắt buộc; các năng lực live/agentic/RAG mở rộng triển khai theo pha.
 
 # Cách sử dụng tài liệu
 
@@ -18,7 +20,7 @@ Tên tiếng Anh: CampusMeet - Meeting and Team Work Management System with Goog
 
 - Mục 14 đến Mục 16 hỗ trợ phân công, theo dõi tiến độ, quản lý rủi ro và hoàn thiện workshop.
 
-> **Ghi chú:** Quy tắc thay đổi phạm vi: Không bổ sung chức năng lớn như video call riêng, chat thời gian thực, AI tóm tắt transcript hoặc lịch họp định kỳ trước khi toàn bộ chức năng bắt buộc đã được kiểm thử từ đầu đến cuối. Mọi thay đổi phải được nhóm ghi nhận về ảnh hưởng tới dữ liệu, API, chi phí, kiểm thử và tiến độ.
+> **Ghi chú:** Quy tắc thay đổi phạm vi: CampusMeet giữ một luồng AI dọc có kiểm soát gồm tài liệu/audio → transcript → biên bản/action item → hỏi đáp có trích dẫn. Video call riêng, chat thời gian thực giữa người dùng, phân tích video dài, live transcription và agent tự ghi dữ liệu không qua xác nhận không được làm trước khi luồng lõi cùng AI MVP đã được kiểm thử đầu-cuối. Mọi thay đổi phải được nhóm ghi nhận về ảnh hưởng tới dữ liệu, API, chi phí, kiểm thử và tiến độ.
 
 # Mục lục
 
@@ -68,6 +70,7 @@ CampusMeet là hệ thống quản lý cuộc họp và công việc nhóm dành
 | Thiếu quy trình sau họp | Quyết định không gắn người phụ trách hoặc hạn hoàn thành; công việc dễ bị quên. | Việc cần thực hiện trong biên bản có thể chuyển thành công việc có người phụ trách, hạn hoàn thành và trạng thái. |
 | Khó điều phối nhóm | Người quản lý không thấy cuộc họp sắp tới, việc quá hạn hay mức độ hoàn thành. | Bảng tổng quan cá nhân và nhóm hiển thị các chỉ số cần theo dõi. |
 | Tạo liên kết Meet thủ công | Người điều phối phải tự tạo sự kiện Google Calendar và gửi liên kết qua nhiều kênh. | Người tổ chức kết nối Google để CampusMeet tạo sự kiện và yêu cầu tạo liên kết hội nghị. |
+| Khó theo dõi tài liệu dài | Thành viên không có thời gian đọc toàn bộ tài liệu dài hoặc có thắc mắc trong lúc họp. | Hỗ trợ tải tài liệu và tích hợp Trợ lý AI (Chatbot dùng Document PiP) để người dùng vừa họp vừa hỏi đáp, tóm tắt tài liệu. |
 | Thiếu bằng chứng vận hành | Đồ án chỉ có giao diện CRUD nên khó thể hiện triển khai cloud đầu-cuối. | Triển khai serverless, có log, chỉ số, cảnh báo, hướng dẫn triển khai và dọn dẹp tài nguyên. |
 
 ## 1.3 Cơ sở kỹ thuật
@@ -75,6 +78,10 @@ CampusMeet là hệ thống quản lý cuộc họp và công việc nhóm dành
 Google Calendar API cho phép yêu cầu tạo dữ liệu hội nghị khi tạo sự kiện, với `conferenceData.createRequest`, `requestId` riêng cho từng sự kiện và `conferenceDataVersion = 1`. Việc tạo liên kết có thể hoàn tất bất đồng bộ, vì vậy CampusMeet cần hiển thị trạng thái rõ ràng thay vì giả định liên kết luôn có ngay. [TL1][TL2]
 
 EventBridge Scheduler phù hợp cho các thông báo nhắc lịch theo thời điểm cụ thể. Với phần giao diện tĩnh, mô hình S3 private REST origin kết hợp CloudFront và Origin Access Control (OAC) giúp phân phối nội dung an toàn hơn so với public S3 website bucket. [TL3][TL4]
+
+Google Meet REST API có thể cung cấp conference records, participant sessions, recordings và transcripts sau cuộc họp khi artifact thực sự tồn tại và tài khoản đã cấp đúng quyền. CampusMeet ưu tiên đồng bộ các artifact này khi khả dụng; nếu gói tài khoản, cài đặt quản trị, quyền OAuth hoặc ngôn ngữ không đáp ứng thì hệ thống chuyển sang upload thủ công hoặc ghi âm có sự đồng ý. Trong MVP, việc kiểm tra artifact dùng thao tác đồng bộ thủ công hoặc polling có giới hạn từ AWS; không phụ thuộc Google Workspace Events vì dịch vụ này yêu cầu Google Cloud Pub/Sub làm notification endpoint. [TL9][TL10][TL12][TL20][TL21]
+
+Phần AI dùng dịch vụ managed: S3 cho nội dung, Amazon Transcribe hoặc adapter STT đã benchmark cho tiếng Việt, Amazon Bedrock cho hỏi đáp/tool use và Bedrock Knowledge Bases kết hợp S3 Vectors cho truy xuất nhiều cuộc họp. Mọi nội dung sinh tự động là bản nháp có trích dẫn; mọi thao tác ghi do AI đề xuất phải đi qua kiểm tra quyền và xác nhận của người dùng. [TL13][TL14][TL15][TL16][TL17]
 
 # 2. Mục tiêu và tiêu chí thành công
 
@@ -90,7 +97,7 @@ CampusMeet hướng tới việc trở thành một không gian làm việc nh�
 | Thể hiện dự án AWS hoàn chỉnh | Có kiến trúc serverless, triển khai, log, chỉ số, cảnh báo, kiểm thử và dọn dẹp tài nguyên. |
 | Kiểm soát phạm vi và chi phí | Ưu tiên dịch vụ managed/serverless; không sử dụng EC2, NAT Gateway, RDS hoặc hạ tầng gọi video riêng trong MVP. |
 
-## 2.3 Tiêu chí thành công của MVP
+## 2.2 Tiêu chí thành công của MVP
 
 - Quản trị viên tạo được nhóm, thêm thành viên và lập lịch cuộc họp.
 
@@ -101,6 +108,8 @@ CampusMeet hướng tới việc trở thành một không gian làm việc nh�
 - Biên bản sau họp có thể tạo công việc, giao người phụ trách và cập nhật lên bảng tổng quan.
 
 - Nhóm trình bày được log CloudWatch, ít nhất một cảnh báo thử nghiệm, tài liệu triển khai và checklist dọn dẹp.
+
+- AI MVP xử lý được ít nhất một tài liệu hoặc audio tiếng Việt thành dữ liệu có thể tra cứu; tạo bản nháp biên bản/action item và trả lời câu hỏi trong phạm vi một cuộc họp kèm nguồn tham chiếu, nhưng không tự ghi thay đổi nghiệp vụ khi chưa được người dùng xác nhận.
 
 # 3. Phân tích nghiệp vụ: hiện trạng và quy trình mục tiêu
 
@@ -173,15 +182,18 @@ CampusMeet chỉ có hai vai trò nghiệp vụ chính: Thành viên và Quản 
 | Mức ưu tiên | Hạng mục | Quyết định |
 | --- | --- | --- |
 | Bắt buộc | Xác thực, nhóm/thành viên, quản lý cuộc họp, trạng thái tích hợp Calendar/Meet, nhắc lịch, biên bản, công việc, bảng tổng quan, log/cảnh báo/dọn dẹp. | Phải có để gọi là MVP. |
-| Nên có | Lời mời qua email/liên kết, đồng bộ khi sửa/hủy lịch, nhật ký thao tác, lịch theo tháng/tuần, demo email bằng SES. | Thực hiện khi các luồng bắt buộc đã ổn định. |
-| Có thể có | Lịch định kỳ, đính kèm tệp bằng S3 presigned URL, email tổng hợp hằng ngày, tích hợp Discord/Slack, dữ liệu hậu họp từ Meet API. | Chỉ làm sau tuần 6 và không làm chậm MVP. |
-| Không làm trong MVP | Video/audio call riêng, chat thời gian thực, chia sẻ màn hình, WebRTC/TURN, AI tóm tắt transcript, điểm danh tự động. | Loại khỏi phạm vi 8 tuần. |
+| Bắt buộc cho AI MVP | Upload an toàn vào S3; batch transcription tiếng Việt; timestamp/confidence/speaker label; chỉnh sửa transcript; hỏi đáp một cuộc họp có trích dẫn; sinh bản nháp biên bản/action item; xác nhận trước khi ghi dữ liệu. | Là luồng AI dọc dùng để demo giá trị sản phẩm; phải có fallback thủ công khi STT/Bedrock lỗi. |
+| Nên có | Lời mời qua email/liên kết, đồng bộ khi sửa/hủy lịch, nhật ký thao tác, lịch theo tháng/tuần, demo email bằng SES; agenda do AI đề xuất; form cuộc họp do AI điền sẵn; Document PiP có fallback; đồng bộ artifact Google Meet khi khả dụng. | Thực hiện khi các luồng bắt buộc đã ổn định. |
+| Có thể có | RAG trên nhiều cuộc họp, agentic tools theo allowlist, live transcription, lịch định kỳ, tích hợp Discord/Slack, đọc hình ảnh/tài liệu nâng cao. | Thuộc pha AI mở rộng; vẫn phải dùng phân quyền, trích dẫn và human-in-the-loop. |
+| Không làm trong MVP | Video/audio call riêng, chat thời gian thực giữa các user, WebRTC/TURN, tự ghi âm khi chưa có thao tác đồng ý, tự đoán danh tính speaker, AI đọc video dài, đánh giá cá nhân từ dữ liệu Meet, hoặc để AI ghi dữ liệu mà không xác nhận. | Loại khỏi baseline 8 tuần; có thể nghiên cứu sau khi đánh giá bảo mật, chi phí và quyền riêng tư. |
 
 ## 5.2 Giả định
 
 - Mỗi cuộc họp có một người tổ chức là người cấp quyền OAuth để sự kiện được tạo trong Google Calendar của họ.
 
 - Chính sách tài khoản Google/Google Workspace có thể ảnh hưởng tới khả năng tạo hoặc hiển thị dữ liệu hội nghị; hệ thống phải hiển thị trạng thái thay vì cam kết liên kết luôn trả về ngay.
+
+- Standard use của Google Meet REST API không phát sinh phí API bổ sung trong quota tại thời điểm chốt tài liệu; recording/transcript chỉ có khi gói tài khoản, cài đặt và quyền thực tế cho phép. Google Meet transcript tích hợp chưa hỗ trợ tiếng Việt, vì vậy AI MVP vẫn cần adapter STT riêng. Chính sách giá và quota phải được kiểm tra lại trước mỗi lần demo/deploy. [TL11][TL12][TL21]
 
 - MVP được minh họa với dữ liệu nhỏ: khoảng 3 đến 5 nhóm, 10 đến 30 thành viên và 20 đến 50 cuộc họp.
 
@@ -196,6 +208,9 @@ CampusMeet chỉ có hai vai trò nghiệp vụ chính: Thành viên và Quản 
 | 08 tuần / 05 thành viên | Phải ưu tiên các luồng cốt lõi; chức năng nâng cao không được chặn MVP. |
 | Mục tiêu serverless và kiểm soát chi phí | Không dùng EC2, NAT Gateway, RDS, ALB, EKS/Kubernetes trong MVP. |
 | Tích hợp Google phụ thuộc bên thứ ba | Cần mô phỏng adapter, cơ chế thử lại, trải nghiệm lỗi rõ ràng và kiểm thử OAuth thất bại. |
+| Artifact Google phụ thuộc gói và quyền | Không cam kết luôn có recording/transcript; phải có fallback upload/recording được đồng ý và nút đồng bộ lại. |
+| Audio, tài liệu và AI có dữ liệu nhạy cảm | Phải có consent, mã hóa, giới hạn truy cập theo nhóm, retention/xóa, kiểm tra file và chống prompt injection. |
+| AI/STT có độ chính xác và chi phí biến đổi | Benchmark tiếng Việt; đặt budget/quota; xử lý bất đồng bộ; luôn cho phép sửa thủ công và fallback không AI. |
 | SES sandbox theo Region | Thông báo trong ứng dụng là bắt buộc; email là kênh bổ sung khi demo. |
 | Workshop yêu cầu log, metric, alert và cleanup | Giám sát, IaC và kiểm soát chi phí là một phần của yêu cầu, không phải phần phụ. |
 
@@ -213,7 +228,7 @@ Các yêu cầu dưới đây là nền tảng triển khai. Các yêu cầu B�
 | FR-06 | Bắt buộc | Kiểm tra dữ liệu | Từ chối thời gian bắt đầu trong quá khứ và người tham dự không thuộc nhóm. |
 | FR-07 | Bắt buộc | Kết nối Google | Người tổ chức có thể kết nối/ngắt kết nối tài khoản Google qua OAuth; token không hiển thị ở trình duyệt. |
 | FR-08 | Bắt buộc | Tích hợp Calendar | Khi tạo cuộc họp có người tổ chức đã kết nối Google, hệ thống tạo Google Calendar event và gửi yêu cầu `conferenceData.createRequest` với `requestId` duy nhất. |
-| FR-09 | Bắt buộc | Trạng thái đồng bộ | Lưu `googleEventId`, `integrationStatus` (`PENDING/READY/FAILED`), số lần thử lại và thông báo lỗi an toàn. |
+| FR-09 | Bắt buộc | Trạng thái đồng bộ | Lưu `googleEventId`, `googleSyncStatus` (`NOT_REQUESTED/PENDING/READY/FAILED_RETRYABLE/ACTION_REQUIRED`), số lần thử lại và thông báo lỗi an toàn. |
 | FR-10 | Bắt buộc | Liên kết Meet | Chỉ hiển thị liên kết Google Meet cho thành viên của nhóm khi trạng thái đồng bộ là `READY`. |
 | FR-11 | Bắt buộc | Cập nhật/hủy lịch | Sửa hoặc hủy cuộc họp phải cập nhật dữ liệu nội bộ; nếu đã đồng bộ Google event thì hệ thống thử đồng bộ thay đổi và lưu kết quả. |
 | FR-12 | Bắt buộc | Nhắc lịch | Quản trị viên cấu hình tối đa 3 mốc nhắc; hệ thống tạo lịch EventBridge Scheduler hợp lệ cho từng mốc. |
@@ -229,6 +244,18 @@ Các yêu cầu dưới đây là nền tảng triển khai. Các yêu cầu B�
 | FR-22 | Bắt buộc | Giám sát | API Lambda và Reminder Lambda ghi log có cấu trúc cùng các metric cần thiết vào CloudWatch. |
 | FR-23 | Bắt buộc | Cảnh báo | Có ít nhất một CloudWatch Alarm gửi thông báo SNS cho người phụ trách khi kiểm thử. |
 | FR-24 | Bắt buộc | Dọn dẹp | Repository có lệnh IaC destroy hoặc checklist dọn dẹp, đồng thời xác nhận tài nguyên demo đã được kiểm tra/xóa. |
+| FR-25 | Bắt buộc AI MVP | Tệp đính kèm | Thành viên được phép lấy S3 presigned URL để upload file thuộc allowlist; backend xác nhận MIME, kích thước, checksum và trạng thái kiểm tra an toàn trước khi đưa file vào AI. Upload được thực hiện ở trang cuộc họp hoặc trong khung Chatbot. |
+| FR-26 | Bắt buộc AI MVP | Công việc AI bất đồng bộ | Mỗi yêu cầu parse tài liệu, transcription hoặc sinh nội dung tạo một `AIJob` có trạng thái `QUEUED/PROCESSING/COMPLETED/FAILED/CANCELLED`; API không chờ xử lý file/audio dài trong một request đồng bộ. |
+| FR-27 | Bắt buộc AI MVP | Ghi âm có đồng ý | Chỉ bắt đầu capture sau thao tác rõ ràng của người dùng; giao diện luôn hiển thị đang ghi và nguồn capture. Hệ thống không cam kết thu được toàn bộ âm thanh Google Meet nếu người dùng chỉ cấp microphone. |
+| FR-28 | Bắt buộc AI MVP | STT tiếng Việt | Audio được upload trực tiếp vào S3 và xử lý batch qua `SpeechToTextProvider`, ưu tiên Amazon Transcribe `vi-VN`; có thể thay bằng Deepgram sau benchmark. Kết quả gồm text, timestamp, confidence và speaker label ẩn danh. |
+| FR-29 | Bắt buộc AI MVP | Hiệu chỉnh transcript | Người có quyền được nghe lại theo timestamp, sửa nội dung và ánh xạ `Speaker 0/1/...` sang thành viên. Hệ thống không tự đoán danh tính speaker và lưu lịch sử phiên bản chỉnh sửa. |
+| FR-30 | Bắt buộc AI MVP | Hỏi đáp có căn cứ | Amazon Bedrock trả lời dựa trên tài liệu, transcript và biên bản mà người dùng được phép xem; câu trả lời phải có citation tới file, meeting hoặc transcript segment và phải nói rõ khi không đủ bằng chứng. |
+| FR-31 | Bắt buộc AI MVP | Biên bản và action item | AI sinh bản nháp tóm tắt, quyết định và action item từ nguồn đã chọn. Người có quyền ghi biên bản phải duyệt/chỉnh sửa trước khi lưu hoặc chuyển action item thành task. |
+| FR-32 | Nên có | Agenda thông minh | AI đề xuất agenda hoặc điền sẵn form cuộc họp từ mô tả ngắn; không tự tạo Calendar event khi chưa xác nhận. |
+| FR-33 | Nên có | Agentic proposal | Bedrock tool use chỉ được chọn tool trong allowlist và tạo đề xuất có cấu trúc. Nội dung tài liệu/transcript được xem là dữ liệu không tin cậy và không được phép tự kích hoạt tool. |
+| FR-34 | Nên có | Xác nhận hành động AI | Backend kiểm tra schema, membership/role, idempotency và chính sách nghiệp vụ; frontend hiển thị preview; chỉ sau khi người dùng xác nhận mới gọi API nghiệp vụ chuẩn và ghi audit log. |
+| FR-35 | Có thể có | RAG nhiều cuộc họp | Truy xuất tri thức theo `groupId`, `meetingId` và ACL bằng Bedrock Knowledge Bases/S3 Vectors; trả kết quả kèm link nguồn và tuyệt đối không lấy dữ liệu nhóm khác. |
+| FR-36 | Có thể có | Phân tích tiến độ | AI có thể diễn giải số liệu task được backend tính xác định; không dùng participant/transcript của Google Meet để chấm điểm hoặc xếp hạng con người, và không tự bịa số liệu. |
 
 ## 6.1 Yêu cầu tích hợp Google Calendar / Google Meet
 
@@ -239,7 +266,10 @@ Các yêu cầu dưới đây là nền tảng triển khai. Các yêu cầu B�
 | INT-03 | Mỗi sự kiện dùng `conferenceDataVersion = 1` và `requestId` riêng khi yêu cầu tạo dữ liệu hội nghị. |
 | INT-04 | Khi trạng thái còn chờ, hệ thống kiểm tra hoặc thử lại có giới hạn; không tạo event mới chỉ để thử lại một yêu cầu đang chờ. |
 | INT-05 | Khi sửa/hủy, hệ thống phân biệt lỗi có thể thử lại và lỗi không thể thử lại; giao diện hiển thị rõ dữ liệu nội bộ đã lưu nhưng đồng bộ Google đang chờ hoặc thất bại. |
-| INT-06 | Dữ liệu participants/recording/transcript từ Google Meet chỉ là phần mở rộng sau cuộc họp, chỉ dùng khi quyền và dữ liệu thực tế đáp ứng. |
+| INT-06 | Sau cuộc họp, Meet Artifact Adapter dùng `googleSpaceName`/`conferenceRecordName` để lấy participants, recordings và transcripts khi artifact tồn tại và OAuth scope cho phép; không dùng meeting code làm định danh dài hạn. [TL9][TL10] |
+| INT-07 | Khi artifact Google không có, chưa sẵn sàng, hết quyền hoặc không hỗ trợ tiếng Việt, giao diện cho phép upload thủ công hoặc dùng recording được đồng ý; lỗi này không làm mất biên bản/task nội bộ. |
+| INT-08 | MVP dùng nút đồng bộ hoặc polling có giới hạn từ EventBridge sau giờ kết thúc. Google Workspace Events/Pub/Sub chỉ là lựa chọn hậu MVP vì bổ sung phụ thuộc Google Cloud. [TL20] |
+| INT-09 | OAuth dùng scope tối thiểu; scope Drive/Meet hạn chế chỉ được yêu cầu khi người dùng bật đồng bộ artifact, đồng thời phải hiển thị rõ dữ liệu nào CampusMeet sẽ đọc/lưu. |
 
 # 7. Mô tả các Use Case chính
 
@@ -333,6 +363,22 @@ Các use Case sử dụng dưới đây mô tả các luồng nghiệp vụ quan
 | Ngoại lệ / lỗi | Nếu email SNS chưa xác nhận, nhóm ghi nhận trạng thái chờ và vẫn trình bày trạng thái alarm trên CloudWatch. |
 | Kết quả | Có ảnh chụp alarm, log, tình huống kiểm thử và ghi chú dọn dẹp tài nguyên. |
 
+### 7.9 Tương tác với Trợ lý AI (Hỏi đáp, Sinh Biên bản & Đề xuất Task)
+
+| Thuộc tính | Nội dung |
+| --- | --- |
+| Người thực hiện | Quản trị viên nhóm / Thành viên |
+| Mục tiêu | Hỏi đáp tài liệu/transcript có nguồn, tạo bản nháp biên bản/action item và hỗ trợ thao tác bằng ngôn ngữ tự nhiên mà không bỏ qua quyền hoặc sự xác nhận của người dùng. |
+| Điều kiện trước | • Người dùng là thành viên đang hoạt động của nhóm.<br>• Có ít nhất một nguồn đã xử lý thành công: tài liệu, transcript hoặc biên bản.<br>• Nguồn và conversation đều mang `groupId`/ACL. |
+| Luồng hỏi đáp | 1. Mở Chatbot trong trang hoặc Document PiP nếu trình duyệt hỗ trợ.<br>2. Chọn phạm vi một cuộc họp hoặc toàn nhóm.<br>3. Có thể upload file qua presigned URL.<br>4. Hệ thống truy xuất nguồn trong đúng phạm vi quyền.<br>5. Bedrock trả lời kèm citation; người dùng mở citation để kiểm tra. |
+| Luồng ghi âm/transcript | 1. Người dùng bấm Ghi âm và xác nhận nguồn capture/consent.<br>2. Audio upload trực tiếp lên S3.<br>3. AI job chạy STT bất đồng bộ và tạo segment có timestamp/confidence/speaker label.<br>4. Người có quyền nghe lại, sửa text và ánh xạ speaker trước khi dùng làm nguồn chính thức. |
+| Luồng sau họp | 1. Người có quyền bấm Tạo bản nháp biên bản.<br>2. AI sinh tóm tắt, quyết định và action item cùng citation.<br>3. Người dùng duyệt/chỉnh sửa.<br>4. Chỉ action item được xác nhận mới được chuyển thành task. |
+| Luồng hành động | 1. Người dùng yêu cầu tạo nhóm/cuộc họp/task hoặc cập nhật task.<br>2. Bedrock chọn tool trong allowlist và trả `ToolProposal`.<br>3. Backend kiểm tra schema, quyền và quy tắc nghiệp vụ.<br>4. Frontend hiển thị form preview.<br>5. Người dùng xác nhận; backend gọi API chuẩn và ghi audit log. |
+| Luồng truy xuất (RAG) | 1. Người dùng hỏi về các cuộc họp cũ trong một nhóm.<br>2. Knowledge Base lọc theo `groupId`/ACL và tìm đoạn liên quan.<br>3. AI trả lời kèm link tới meeting/file/transcript segment; nếu không đủ nguồn thì trả lời không xác định. |
+| Luồng phân tích | Backend tính số liệu task theo quy tắc xác định; AI chỉ diễn giải kết quả. Không dùng Meet participant/transcript để tự động chấm điểm hoặc xếp hạng thành viên. |
+| Ngoại lệ / lỗi | Khi upload/STT/Bedrock/ingestion lỗi, `AIJob` chuyển sang `FAILED` với mã an toàn, có retry giới hạn hoặc fallback nhập/sửa thủ công. Document PiP không hỗ trợ thì dùng panel trong trang. |
+| Kết quả | Nội dung AI có thể kiểm chứng, không ghi dữ liệu trái phép và không được coi là chính xác cho tới khi người dùng có quyền duyệt. |
+
 # 8. User Story
 
 Nội dung được diễn đạt thành các đoạn nghiệp vụ hoàn chỉnh để cả nhóm dễ hiểu người dùng cần gì, vì sao cần và hệ thống phải hỗ trợ ra sao. Các yêu cầu chi tiết đã được thể hiện ở Mục 6 và các luồng thực hiện ở Mục 7.
@@ -377,10 +423,18 @@ Người phụ trách vận hành cần kiểm tra log, metric và cảnh báo �
 | BR-10 | Các thao tác có tác dụng phụ phải dùng idempotency key hoặc cơ chế tương đương để thao tác thử lại không tạo kết quả trùng. [TL5] |
 | BR-11 | Không ghi access token, refresh token, mật khẩu, authorization code hoặc dữ liệu cá nhân thô vào log ứng dụng. |
 | BR-12 | Cuộc họp đã hủy hoặc hoàn thành vẫn giữ lịch sử nhật ký; MVP không xóa cứng các bản ghi nghiệp vụ. |
+| BR-13 | Recording chỉ bắt đầu sau thao tác đồng ý rõ ràng; giao diện luôn hiển thị trạng thái và nguồn capture. Người không đồng ý có thể rời cuộc họp hoặc không dùng tính năng recording. |
+| BR-14 | STT/diarization chỉ tạo speaker label ẩn danh. Chỉ ánh xạ sang thành viên sau khi người có quyền xác nhận; LLM không được tự đoán danh tính từ giọng nói hoặc ngữ cảnh. |
+| BR-15 | AI output là bản nháp. Câu trả lời và nội dung sinh phải giữ citation; khi không đủ bằng chứng phải trả lời không xác định thay vì bịa. |
+| BR-16 | Tool use không bỏ qua API nghiệp vụ: mọi đề xuất ghi dữ liệu phải qua schema validation, kiểm tra quyền, xác nhận, idempotency và audit log. Nội dung tài liệu/transcript không được phép trực tiếp kích hoạt tool. [TL15] |
+| BR-17 | Mọi ingestion/retrieval phải mang `groupId` và ACL. Query RAG phải lọc quyền trước khi lấy đoạn nguồn; không chỉ lọc sau khi model đã nhận dữ liệu. |
+| BR-18 | Tệp upload phải dùng presigned URL, allowlist MIME/đuôi file, giới hạn kích thước, checksum và trạng thái kiểm tra an toàn; file chưa đạt không được đưa vào parser/model. |
+| BR-19 | Người dùng có quyền có thể sửa transcript; mỗi lần sửa lưu người sửa, thời điểm và phiên bản. Audio gốc và transcript áp dụng retention/xóa theo chính sách nhóm. |
+| BR-20 | Phân tích tiến độ chỉ dùng số liệu task/meeting do backend tính xác định. Không dùng dữ liệu Google Meet để tự động chấm điểm, suy diễn thái độ hoặc xếp hạng người tham dự. [TL9] |
 
 ## 9.2 Vòng đời trạng thái
 
-> **Ghi chú:** Vòng đời cuộc họp: `DRAFT` → `SCHEDULED` → `INTEGRATION_PENDING` → `READY` → `COMPLETED`<br>Từ các trạng thái trước khi hoàn thành, cuộc họp có thể chuyển sang `CANCELLED`.<br>Khi đồng bộ Google gặp lỗi có thể thử lại: `INTEGRATION_PENDING` → `FAILED_RETRYABLE` → `READY` hoặc `FAILED_ACTION_REQUIRED`.<br><br>Vòng đời công việc: `TODO` ↔ `DOING` → `DONE`; công việc hoàn thành có thể được mở lại và chuyển về `DOING`.<br>Vòng đời lời mời: `PENDING` → `ACCEPTED \| DECLINED \| EXPIRED \| REVOKED`.<br>Vòng đời nhắc lịch: `SCHEDULED` → `PROCESSING` → `SENT \| FAILED \| CANCELLED`.
+> **Ghi chú:** Vòng đời cuộc họp và trạng thái tích hợp là hai trường độc lập.<br>Vòng đời cuộc họp: `DRAFT` → `SCHEDULED` → `COMPLETED`; trước khi hoàn thành có thể chuyển sang `CANCELLED`.<br>Trạng thái Google: `NOT_REQUESTED` → `PENDING` → `READY \| FAILED_RETRYABLE \| ACTION_REQUIRED`.<br>Trạng thái Google artifact: `NOT_REQUESTED` → `POLLING` → `AVAILABLE \| UNAVAILABLE \| FAILED`.<br>Vòng đời AI job: `QUEUED` → `PROCESSING` → `COMPLETED \| FAILED \| CANCELLED`.<br>Vòng đời công việc: `TODO` ↔ `DOING` → `DONE`; công việc hoàn thành có thể được mở lại và chuyển về `DOING`.<br>Vòng đời lời mời: `PENDING` → `ACCEPTED \| DECLINED \| EXPIRED \| REVOKED`.<br>Vòng đời nhắc lịch: `SCHEDULED` → `PROCESSING` → `SENT \| FAILED \| CANCELLED`.
 
 ## 9.3 Mô hình dữ liệu logic
 
@@ -390,12 +444,20 @@ Người phụ trách vận hành cần kiểm tra log, metric và cảnh báo �
 | Nhóm | `groupId`, tên, mô tả, người tạo, thời điểm tạo | Có nhiều thành viên, cuộc họp, công việc và nhật ký. |
 | Quyền thành viên | `groupId`, `userId`, vai trò, trạng thái, thời điểm tham gia | Liên kết giữa người dùng và nhóm; là cơ sở phân quyền. |
 | Lời mời | `invitationId`, `groupId`, email, tokenHash, thời hạn, trạng thái | Thuộc nhóm; có thể tạo quyền thành viên sau khi chấp nhận. |
-| Cuộc họp | `meetingId`, `groupId`, người tổ chức, tiêu đề, agenda, thời gian, trạng thái, `googleEventId`, `meetUrlRef` | Có người tham dự, nhắc lịch, một biên bản và nhiều công việc. |
+| Cuộc họp | `meetingId`, `groupId`, người tổ chức, tiêu đề, agenda, thời gian, `meetingStatus`, `googleSyncStatus`, `googleEventId`, `googleSpaceName`, `conferenceRecordName`, `meetUrlRef` | Có người tham dự, nhắc lịch, một biên bản, nhiều công việc và artifact. |
 | Nhắc lịch | `reminderId`, `meetingId`, mốc nhắc, thời điểm chạy, trạng thái | Thuộc một cuộc họp. |
 | Biên bản | `minutesId`, `meetingId`, tóm tắt, thảo luận, quyết định, người tạo | Một biên bản cho một cuộc họp; là nguồn của công việc. |
 | Công việc | `taskId`, `groupId`, nguồn cuộc họp/biên bản, tiêu đề, người phụ trách, hạn, ưu tiên, trạng thái | Thuộc nhóm; có thể tham chiếu cuộc họp/biên bản. |
 | Thông báo | `notificationId`, `userId`, loại, đối tượng, nội dung, thời điểm đã đọc | Thuộc người dùng. |
 | Nhật ký | `auditId`, `groupId`, người thao tác, hành động, đối tượng, thời điểm | Thuộc nhóm; chỉ lưu dữ liệu an toàn. |
+| Tệp đính kèm | `attachmentId`, `groupId`, `meetingId`, `s3Key`, MIME, kích thước, checksum, trạng thái scan/ingestion, người tải | Metadata thuộc DynamoDB; nội dung nằm trong S3 private. |
+| Recording | `recordingId`, `groupId`, `meetingId`, nguồn (`GOOGLE/UPLOAD/CAPTURE`), `s3Key` hoặc Google ref, trạng thái, thời lượng, retention | Có nhiều consent record và có thể sinh một transcript. |
+| Recording consent | `recordingId`, `userId`, quyết định, thời điểm, phiên bản thông báo | Là bằng chứng thao tác đồng ý/từ chối, không phải nhận diện sinh trắc học. |
+| Transcript | `transcriptId`, `groupId`, `meetingId`, provider, ngôn ngữ, trạng thái, phiên bản | Có nhiều segment và là nguồn cho AI. |
+| Transcript segment | `transcriptId`, `segmentId`, start/end, text, confidence, speakerLabel, `speakerUserId` tùy chọn, người sửa | Cho phép nghe lại, chỉnh sửa và citation đến đoạn cụ thể. |
+| AI job | `aiJobId`, `groupId`, loại, trạng thái, input refs, output ref, model/provider, token/chi phí, lỗi an toàn | Theo dõi parse, STT, ingestion và generation bất đồng bộ. |
+| Hội thoại AI | `conversationId`, `groupId`, `meetingId` tùy chọn, người dùng, phạm vi | Có message và citation; không lưu prompt nhạy cảm vào log. |
+| Tool proposal | `proposalId`, `groupId`, người yêu cầu, tool, tham số, trạng thái, thời hạn, xác nhận | Chỉ thực thi một lần sau kiểm tra quyền và xác nhận. |
 
 ## 9.4 Thiết kế DynamoDB đề xuất
 
@@ -410,14 +472,22 @@ Trong 8 tuần, nhóm nên dùng nhiều bảng theo miền nghiệp vụ thay v
 | Notifications | `notificationId` | Chỉ mục theo `userId#createdAt`. |
 | Invitations | `invitationId` | Chỉ mục theo `tokenHash` và `groupId#status`. |
 | AuditLogs | `auditId` | Chỉ mục theo `groupId#createdAt`. |
+| Attachments | `attachmentId` | Chỉ mục theo `meetingId#createdAt` và `groupId#status`; S3 giữ nội dung. |
+| Recordings | `recordingId` | Chỉ mục theo `meetingId#createdAt`; lưu nguồn, consent/retention và artifact ref. |
+| Transcripts | `transcriptId` + `segmentId` | Query segment theo transcript/timestamp; GSI theo `meetingId#version`. |
+| AIJobs | `aiJobId` | Chỉ mục theo `groupId#createdAt` và `status#updatedAt`; TTL cho job tạm nếu phù hợp. |
+| AIConversations | `conversationId` + `messageId` | Query hội thoại theo người dùng/phạm vi; citation tham chiếu nguồn ổn định. |
+| ToolProposals | `proposalId` | Chỉ mục theo `userId#status`; conditional write bảo đảm xác nhận/thực thi một lần. |
+
+Nội dung RAG không lưu trong DynamoDB. Tài liệu/transcript chuẩn hóa được đồng bộ vào Bedrock Knowledge Bases; vector và metadata quyền nằm trong S3 Vectors. Mọi vector phải mang tối thiểu `groupId`, `meetingId`, `sourceType` và `sourceId`. [TL16][TL17]
 
 # 10. Kiến trúc giải pháp AWS và lý do lựa chọn
 
 ## 10.1 Kiến trúc đề xuất
 
-CampusMeet sử dụng kiến trúc serverless và dịch vụ managed để giảm vận hành, giảm chi phí cố định và phù hợp thời gian 8 tuần. Sơ đồ kiến trúc chính thức cần vẽ rõ khung AWS Cloud, AWS Region, lớp global/edge và các hệ thống bên ngoài AWS. Không đưa Lambda vào VPC chỉ để có VPC: MVP không có tài nguyên private bắt buộc, trong khi NAT Gateway làm tăng chi phí và độ phức tạp.
+CampusMeet sử dụng kiến trúc serverless và dịch vụ managed để giảm vận hành, giảm chi phí cố định và phù hợp thời gian 8 tuần. Phần AI chạy bất đồng bộ, không tải audio/tài liệu lớn qua API Gateway và không giữ Lambda chờ STT/ingestion hoàn tất. Sơ đồ kiến trúc chính thức cần vẽ rõ khung AWS Cloud, AWS Region, lớp global/edge và các hệ thống bên ngoài AWS. Không đưa Lambda vào VPC chỉ để có VPC: MVP không có tài nguyên private bắt buộc, trong khi NAT Gateway làm tăng chi phí và độ phức tạp.
 
-> **Ghi chú:** Bên ngoài AWS Cloud: Người dùng/Browser, Google OAuth + Google Calendar API + Google Meet, người nhận email và người phụ trách nhận cảnh báo.<br><br>Lớp global/edge: CloudFront.<br><br>Trong AWS Region: S3 private static assets, Cognito User Pool, API Gateway, Lambda API, DynamoDB, EventBridge Scheduler, Reminder Lambda, SES, CloudWatch, SNS và Secrets Manager hoặc Systems Manager Parameter Store.
+> **Ghi chú:** Bên ngoài AWS Cloud: Người dùng/Browser, Google OAuth + Google Calendar API + Google Meet REST API, người nhận email và người phụ trách nhận cảnh báo. Deepgram chỉ xuất hiện nếu benchmark chọn provider này thay Amazon Transcribe.<br><br>Lớp global/edge: CloudFront.<br><br>Trong AWS Region: S3 private static assets, S3 user-content, Cognito User Pool, API Gateway, Lambda API, DynamoDB, EventBridge Scheduler, Reminder Lambda, Step Functions, AI Worker Lambda, Amazon Transcribe, Amazon Bedrock, Bedrock Knowledge Bases, S3 Vectors, SES, CloudWatch, SNS và Secrets Manager hoặc Systems Manager Parameter Store.
 
 ## 10.2 Luồng kiến trúc cần đánh số trên sơ đồ
 
@@ -439,6 +509,16 @@ CampusMeet sử dụng kiến trúc serverless và dịch vụ managed để gi�
 | 14 | API Lambda và Reminder Lambda gửi log có cấu trúc cùng metric đến CloudWatch. |
 | 15 | CloudWatch Alarm vượt ngưỡng gửi SNS tới người phụ trách. |
 | 16 | Nhóm dùng IaC để triển khai/dọn dẹp và dùng bằng chứng CloudWatch để kiểm thử vận hành. |
+| 17 | Sau khi kiểm tra quyền và metadata, API Lambda sinh S3 presigned URL; Browser upload tài liệu/audio trực tiếp vào S3 user-content kèm checksum, không đi qua API Gateway/Lambda payload. |
+| 18 | Browser xác nhận upload; backend kiểm tra allowlist/kích thước/trạng thái an toàn rồi tạo `AIJob`. |
+| 19 | Step Functions điều phối parse/STT/ingestion bất đồng bộ; Amazon Transcribe `vi-VN` là provider mặc định, Deepgram là adapter thay thế sau benchmark. |
+| 20 | STT trả transcript segment có timestamp, confidence và speaker label ẩn danh; backend lưu metadata/segment và version vào DynamoDB, audio vẫn ở S3 private. |
+| 21 | Tài liệu/transcript đã duyệt được đồng bộ vào Bedrock Knowledge Bases; embedding/vector cùng metadata `groupId`/ACL nằm trong S3 Vectors. |
+| 22 | Câu hỏi AI đi qua Lambda kiểm tra quyền; Knowledge Base truy xuất nguồn có filter; Bedrock sinh câu trả lời/biên bản/action item kèm citation. |
+| 23 | Với tool use, Bedrock chỉ trả `ToolProposal`; backend kiểm tra schema/quyền và frontend hiển thị preview. Sau xác nhận, API nghiệp vụ chuẩn mới thực thi và ghi audit log. |
+| 24 | Sau giờ họp hoặc khi người dùng yêu cầu, Google Artifact Adapter dùng Meet REST API để kiểm tra conference record/recording/transcript; nếu không có thì hiển thị fallback upload/capture. |
+| 25 | AI job, STT, Bedrock, ingestion và tool execution gửi log/metric không chứa nội dung nhạy cảm vào CloudWatch; lỗi/chi phí vượt ngưỡng kích hoạt cảnh báo. |
+| 26 | Document PiP chỉ là lớp trải nghiệm phía Browser; nếu không hỗ trợ hoặc không có user gesture, Chatbot tiếp tục hoạt động trong panel của trang. [TL18] |
 
 ## 10.3 Dịch vụ và lý do lựa chọn
 
@@ -453,15 +533,22 @@ CampusMeet sử dụng kiến trúc serverless và dịch vụ managed để gi�
 | SES | Gửi email nhắc lịch tùy chọn. | SES sandbox giới hạn email gửi/nhận đã xác minh theo Region. [TL7] |
 | CloudWatch + SNS | Log, metric, cảnh báo và thông báo vận hành. | Phải demo được ít nhất một cảnh báo. |
 | Secrets Manager / SSM | Lưu Google OAuth client secret và cấu hình nhạy cảm. | Chỉ Lambda role cần thiết được đọc secret. |
+| S3 user-content | Lưu tài liệu, audio và artifact người dùng bằng presigned upload. | Bucket private, mã hóa, CORS hẹp, lifecycle/retention và tách khỏi bucket frontend. |
+| Step Functions + AI Worker | Điều phối parse, STT, Bedrock và ingestion dài hạn. | Không chờ trong API request; có trạng thái job, timeout, retry giới hạn và nhánh thất bại. |
+| Amazon Transcribe | STT batch/streaming và speaker diarization; hỗ trợ `vi-VN`. [TL13][TL14] | Dùng batch trong AI MVP; benchmark với audio tiếng Việt thật trước khi chốt provider. |
+| Amazon Bedrock | Hỏi đáp, sinh nội dung và tool use qua model cấu hình theo môi trường. [TL15] | Không hard-code tên model trong SRS; output là bản nháp và tool chỉ là đề xuất. |
+| Bedrock Knowledge Bases + S3 Vectors | RAG trên tài liệu/transcript với metadata lọc quyền và citation. [TL16][TL17] | Chỉ ingest nguồn đã duyệt; filter `groupId`/ACL trước retrieval. |
 | AWS CDK hoặc AWS SAM | Triển khai hạ tầng bằng mã, tái lập và dọn dẹp được. | Nhóm chọn duy nhất một công cụ. |
 
 ## 10.4 Trình tự tích hợp Google
 
 - Kết nối Google: Trình duyệt → CampusMeet API → Google OAuth consent → callback → API kiểm tra state/PKCE (nếu áp dụng) → lưu token phía máy chủ → trả về trạng thái đã kết nối. Token refresh không được trả về trình duyệt.
 
-- Tạo cuộc họp: Quản trị viên → API lưu cuộc họp nội bộ → API gọi Google Calendar tạo event và `conferenceData.createRequest` → lưu trạng thái `PENDING/READY/FAILED` → tạo/cập nhật lịch nhắc.
+- Tạo cuộc họp: Quản trị viên → API lưu cuộc họp nội bộ → API gọi Google Calendar tạo event và `conferenceData.createRequest` → lưu `googleSyncStatus` → tạo/cập nhật lịch nhắc.
 
 - Thử lại đồng bộ: Chỉ kiểm tra event đã biết hoặc thử lại có giới hạn; không tạo event mới một cách mù quáng để tránh trùng event/liên kết.
+
+- Đồng bộ artifact sau họp: Người dùng bấm đồng bộ hoặc EventBridge kích hoạt polling có giới hạn → adapter tìm conference record theo meeting space/event đã biết → lấy metadata participant/recording/transcript khi được phép → lưu reference hoặc đồng bộ nội dung theo consent/retention. Nếu artifact không tồn tại, hệ thống ghi `UNAVAILABLE` và cung cấp upload/capture; không coi đây là lỗi dữ liệu nội bộ. [TL9][TL10]
 
 > **Ghi chú:** Lý do thiết kế: việc tạo dữ liệu hội nghị của Google Calendar có thể bất đồng bộ. Hành vi đúng của sản phẩm là có trạng thái hiển thị rõ, có thử lại có giới hạn và có nút Thử lại; không tạo liên kết giả và không lặp lại thao tác tạo event một cách không kiểm soát. [TL1][TL2]
 
@@ -496,17 +583,35 @@ CampusMeet sử dụng kiến trúc serverless và dịch vụ managed để gi�
 | POST | /notifications/{id}/read | Đã xác thực | Đánh dấu đã đọc. |
 | POST | /integrations/google/connect | Đã xác thực | Bắt đầu Google OAuth. |
 | DELETE | /integrations/google | Đã xác thực | Ngắt kết nối Google. |
+| POST | /meetings/{meetingId}/google-artifacts/sync | Quản trị viên / Người tổ chức | Bắt đầu kiểm tra Meet conference artifacts theo cơ chế idempotent. |
+| POST | /meetings/{meetingId}/attachments/upload-url | Thành viên có quyền | Tạo presigned upload sau khi kiểm tra metadata file. |
+| POST | /meetings/{meetingId}/attachments/{attachmentId}/complete | Người tải | Xác nhận upload/checksum và tạo job parse/ingestion. |
+| GET | /meetings/{meetingId}/attachments | Thành viên | Liệt kê file và trạng thái scan/ingestion trong cuộc họp. |
+| POST | /meetings/{meetingId}/recordings | Người có quyền ghi | Khởi tạo recording/upload với consent và source metadata. |
+| POST | /meetings/{meetingId}/transcriptions | Người có quyền ghi | Tạo batch STT job từ recording đã hợp lệ. |
+| GET | /meetings/{meetingId}/transcripts | Thành viên | Lấy transcript/version được phép xem. |
+| PATCH | /transcripts/{transcriptId}/segments/{segmentId} | Người có quyền ghi | Sửa text hoặc ánh xạ speaker; lưu version/audit. |
+| POST | /meetings/{meetingId}/ai/chat | Thành viên | Hỏi đáp trong phạm vi meeting, trả citation. |
+| POST | /meetings/{meetingId}/ai/minutes-draft | Người có quyền ghi | Sinh bản nháp biên bản/action item, không tự lưu chính thức. |
+| POST | /groups/{groupId}/ai/search | Thành viên | RAG nhiều cuộc họp với filter quyền/citation. |
+| POST | /groups/{groupId}/ai/tool-proposals | Thành viên | Tạo đề xuất tool trong allowlist. |
+| POST | /ai/tool-proposals/{proposalId}/confirm | Người tạo có quyền | Kiểm tra lại quyền và thực thi đề xuất một lần. |
+| POST | /ai/tool-proposals/{proposalId}/cancel | Người tạo | Hủy đề xuất chưa thực thi. |
+| GET | /ai/jobs/{aiJobId} | Thành viên có quyền nguồn | Lấy trạng thái/progress/lỗi an toàn của job bất đồng bộ. |
 
 ## 11.2 Hợp đồng phản hồi lỗi
 
-Ví dụ phản hồi khi lịch đã lưu nội bộ nhưng Google Meet đang được tạo:
+Ví dụ phản hồi thành công bất đồng bộ `202 Accepted` khi lịch đã lưu nội bộ nhưng Google Meet đang được tạo:
 
 ```json
 {
-  "code": "GOOGLE_SYNC_PENDING",
-  "message": "Lịch đã được lưu. Google Meet đang được tạo; hãy thử lại sau.",
-  "requestId": "req_01...",
-  "details": { "meetingId": "...", "retryAllowed": true }
+  "success": true,
+  "data": {
+    "meetingId": "...",
+    "googleSyncStatus": "PENDING",
+    "message": "Lịch đã được lưu. Google Meet đang được tạo."
+  },
+  "requestId": "req_01..."
 }
 ```
 
@@ -517,7 +622,10 @@ Ví dụ phản hồi khi lịch đã lưu nội bộ nhưng Google Meet đang �
 | 403 | Không có quyền | `FORBIDDEN_GROUP_ACCESS` | Không tiết lộ thêm dữ liệu nhạy cảm. |
 | 404 | Không tìm thấy | `MEETING_NOT_FOUND` | Hiển thị trạng thái không tìm thấy. |
 | 409 | Xung đột | `IDEMPOTENCY_CONFLICT` | Trả kết quả thao tác gốc khi có thể. |
+| 413/415 | File không hợp lệ | `FILE_TOO_LARGE/UNSUPPORTED_MEDIA_TYPE` | Không cấp URL hoặc không đưa file vào pipeline. |
 | 424/502 | Lỗi tích hợp | `GOOGLE_SYNC_FAILED_RETRYABLE` | Hiển thị nút thử lại; dữ liệu nội bộ vẫn giữ. |
+| 422 | AI không đủ căn cứ | `INSUFFICIENT_GROUNDED_CONTEXT` | Không bịa câu trả lời; đề nghị chọn/thêm nguồn. |
+| 429 | Giới hạn dịch vụ | `AI_RATE_LIMITED` | Chuyển job sang retry có giới hạn hoặc yêu cầu thử lại sau. |
 | 500 | Lỗi nội bộ | `INTERNAL_ERROR` | Hiển thị thông báo chung và lưu `requestId` vào log. |
 
 ## 11.3 Bảo mật và quyền riêng tư
@@ -527,11 +635,17 @@ Ví dụ phản hồi khi lịch đã lưu nội bộ nhưng Google Meet đang �
 | Xác thực | Dùng Cognito User Pool; kiểm tra JWT tại API Gateway và kiểm tra danh tính trong logic backend. [TL6] |
 | Phân quyền | Bắt buộc kiểm tra quyền thành viên theo nhóm ở mỗi yêu cầu nghiệp vụ; không tin chỉ `groupId` do trình duyệt gửi. |
 | Secret và token | Google client secret, access token và refresh token chỉ được lưu phía máy chủ, mã hóa khi lưu và không xuất hiện trong Git/log. |
-| Tối thiểu hóa dữ liệu | Chỉ lưu hồ sơ cần thiết, metadata cuộc họp, biên bản và công việc; không thu âm, video hoặc đánh giá người tham dự trong MVP. |
+| Tối thiểu hóa dữ liệu | Chỉ lưu nguồn AI mà nhóm đã chọn; recording/audio cần consent, mục đích, retention và quyền xóa rõ. Không dùng dữ liệu Meet để đánh giá con người. |
 | An toàn đầu vào | Kiểm tra schema phía máy chủ; làm sạch Markdown/rich text trước khi hiển thị; giới hạn độ dài dữ liệu. |
 | Giới hạn tần suất | Áp dụng rate guard cho lời mời, OAuth callback, tạo cuộc họp và thử lại đồng bộ. |
 | Lưu trữ giao diện | S3 private REST origin + CloudFront OAC; chỉ dùng HTTPS; không public bucket ngoài CloudFront principal được cho phép. |
 | Nhật ký thao tác | Chỉ lưu metadata an toàn; loại trừ OAuth code, token, secret và mật khẩu. |
+| Upload và media | Presigned URL thời hạn ngắn; allowlist MIME/đuôi; giới hạn dung lượng; checksum; scan/quarantine; bucket user-content private, mã hóa và có lifecycle riêng. |
+| Consent và retention | Lưu phiên bản thông báo consent, người thao tác, thời điểm, nguồn capture và thời hạn lưu; ngừng/xóa theo quyền và chính sách nhóm. |
+| Bảo mật AI | Xem file/transcript là dữ liệu không tin cậy; chống prompt injection; không cho nội dung nguồn thay đổi system instruction hoặc tự kích hoạt tool. |
+| Cách ly RAG | `groupId`/ACL được kiểm tra trước retrieval và gắn vào metadata vector; có test truy vấn chéo nhóm. |
+| Tool use | Tool allowlist, JSON schema chặt, quyền tối thiểu, preview/xác nhận, idempotency và audit. Model không nhận credential và không gọi database trực tiếp. [TL15] |
+| Model/provider | Model ID và STT provider là cấu hình theo môi trường; không hard-code `Claude 3`/Deepgram trong nghiệp vụ. Có thể đổi provider sau benchmark mà không đổi contract miền. |
 
 ## 11.4 Độ tin cậy
 
@@ -544,6 +658,10 @@ Ví dụ phản hồi khi lịch đã lưu nội bộ nhưng Google Meet đang �
 - Giao diện phải phân biệt rõ: lịch đã lưu nội bộ, đang chờ đồng bộ Google, đồng bộ thất bại có thể thử lại và lỗi cần người dùng xử lý.
 
 - Reminder Lambda kiểm tra lại trạng thái cuộc họp trước khi gửi thông báo, kể cả khi một schedule cũ vẫn kích hoạt sau khi đã hủy.
+
+- AI pipeline lưu trạng thái bền vững, không chờ Lambda/API đồng bộ; retry chỉ áp dụng cho lỗi retryable, có giới hạn và không tạo trùng transcript/biên bản/tool execution.
+
+- Khi Google artifact, STT, Bedrock hoặc Knowledge Base không khả dụng, dữ liệu cuộc họp lõi vẫn sử dụng được; người dùng có thể nhập biên bản, action item và transcript thủ công.
 
 # 12. Yêu cầu phi chức năng
 
@@ -559,6 +677,12 @@ Ví dụ phản hồi khi lịch đã lưu nội bộ nhưng Google Meet đang �
 | NFR-08 | Chi phí | Tránh compute chạy liên tục và NAT; gắn nhãn tài nguyên; dùng Budget/Cost alert khi tài khoản cho phép; xóa môi trường không phải production. |
 | NFR-09 | Khả năng triển khai lại | Môi trường local có thể mô phỏng Google adapter; hạ tầng tái lập bằng một công cụ IaC duy nhất. |
 | NFR-10 | Khả năng tiếp cận | Luồng cốt lõi dùng được bằng bàn phím, lỗi hiển thị rõ, có label ngữ nghĩa, độ tương phản phù hợp và giao diện responsive. |
+| NFR-11 | Độ chính xác AI | Không cam kết chính xác tuyệt đối. Bộ dữ liệu demo tiếng Việt phải đo transcription/citation và ghi nhận lỗi; transcript có confidence thấp phải được đánh dấu để người dùng kiểm tra. |
+| NFR-12 | Grounding | 100% câu trả lời có khẳng định từ nguồn nội bộ phải trả ít nhất một citation hợp lệ hoặc trạng thái không đủ căn cứ; citation mở được đúng nguồn/segment mà người dùng có quyền. |
+| NFR-13 | Độ trễ AI | API tạo upload URL/tool proposal p95 dưới 1,5 giây với dữ liệu demo; job file/audio là bất đồng bộ và phải hiển thị progress/status, không đặt SLA hoàn tất cứng phụ thuộc provider. |
+| NFR-14 | Chi phí AI | Ghi nhận token, số phút STT và chi phí ước tính theo `AIJob`; có quota theo môi trường/người dùng và cảnh báo khi vượt ngưỡng demo. |
+| NFR-15 | Tương thích | Document PiP là progressive enhancement; luồng AI đầy đủ vẫn dùng được trong panel trên trang và bằng bàn phím khi trình duyệt không hỗ trợ PiP. [TL18] |
+| NFR-16 | Quyền riêng tư media | Recording phải có chỉ báo đang hoạt động, consent và retention; không log nội dung audio/transcript/prompt. Xóa object, index/vector và reference liên quan theo quy trình có thể kiểm chứng. |
 
 # 13. Kiểm thử, giám sát và dọn dẹp tài nguyên
 
@@ -590,6 +714,16 @@ Ví dụ phản hồi khi lịch đã lưu nội bộ nhưng Google Meet đang �
 | TC-10 | Cảnh báo | Lambda lỗi có chủ đích hoặc custom metric | Có bằng chứng CloudWatch Alarm và SNS. |
 | TC-11 | Idempotency | Gửi lại yêu cầu tạo cuộc họp cùng key | Không tạo cuộc họp/event/schedule trùng. |
 | TC-12 | Dọn dẹp | Chạy destroy hoặc checklist | Không còn tài nguyên hoạt động ngoài dự kiến. |
+| TC-13 | Google artifact | Recording/transcript tồn tại và OAuth đủ quyền | Đồng bộ reference/nội dung đúng meeting; lưu trạng thái `AVAILABLE` và không tạo bản trùng. |
+| TC-14 | Google artifact fallback | Gói tài khoản hoặc quyền không cung cấp artifact | Trạng thái `UNAVAILABLE/ACTION_REQUIRED`; dữ liệu nội bộ không mất; có upload/capture fallback. |
+| TC-15 | Upload | Upload MIME/kích thước/checksum không hợp lệ | File bị từ chối/quarantine; không tạo ingestion/STT job. |
+| TC-16 | Recording consent | Yêu cầu capture khi chưa xác nhận | Không bắt đầu recording; không có object audio; giao diện nêu rõ yêu cầu consent/nguồn capture. |
+| TC-17 | STT/diarization | Audio tiếng Việt có nhiều speaker | Tạo segment có timestamp/confidence và speaker label ẩn danh; không tự gán tên thành viên. |
+| TC-18 | Transcript edit | Người có quyền sửa text và ánh xạ speaker | Tạo version/audit; citation mới trỏ đúng segment; người không quyền nhận 403. |
+| TC-19 | AI grounding | Hỏi câu có và không có bằng chứng | Câu có nguồn trả citation hợp lệ; câu thiếu nguồn trả không xác định, không bịa. |
+| TC-20 | RAG authorization | Thành viên nhóm A cố hỏi tài liệu nhóm B | Không retrieve/chuyển đoạn nguồn nhóm B cho model; trả 403 hoặc không có kết quả. |
+| TC-21 | Agentic safety | Prompt/tài liệu yêu cầu tự tạo hoặc xóa dữ liệu | Chỉ tạo proposal nếu user có quyền; không mutation trước xác nhận; prompt injection trong file không kích hoạt tool. |
+| TC-22 | AI retry/idempotency | Gửi lại transcription/generation/confirm cùng key | Không tạo transcript, minutes draft, task hoặc tool execution trùng. |
 
 ## 13.3 Thiết kế giám sát
 
@@ -599,6 +733,10 @@ Ví dụ phản hồi khi lịch đã lưu nội bộ nhưng Google Meet đang �
 | Sức khỏe Lambda | Lambda | Errors, Duration p95, Throttles | Errors vượt ngưỡng → SNS; kiểm tra `requestId`. |
 | Đồng bộ Google | API Lambda custom metric | GoogleSyncSuccess, GoogleSyncPending, GoogleSyncFailure | Failure vượt ngưỡng → SNS hoặc tạo issue. |
 | Nhắc lịch | Reminder Lambda | ReminderSent, ReminderSkippedCancelled, ReminderEmailFailure | Theo dõi xu hướng lỗi email; kiểm tra SES/sandbox. |
+| AI job | Step Functions / AI Worker | AIJobQueued, AIJobCompleted, AIJobFailed, Duration theo loại | Failure/timeout tăng → SNS; tra theo `aiJobId/requestId`, không log prompt/nội dung. |
+| STT | Amazon Transcribe/adapter | Phút audio, TranscriptionFailure, segment confidence thấp | Theo dõi quota/chi phí và benchmark tiếng Việt; chuyển fallback thủ công khi lỗi. |
+| Bedrock/RAG | Bedrock/Knowledge Base | InvocationError, token usage, RetrievalEmpty, CitationMissing | Cảnh báo chi phí hoặc citation thiếu; kiểm tra ingestion/ACL. |
+| Tool use | API/Audit | ProposalCreated, ProposalRejected, ToolExecuted, ToolExecutionDenied | Tăng bất thường → khóa/rate-limit tool; điều tra authorization và prompt injection. |
 | Bảo mật | Structured logs / audit | Số 403, tần suất retry bất thường | Tăng đột biến → xem rate guard/quyền. |
 | Chi phí | AWS Billing/Budgets nếu cho phép | Chi phí tháng / dự báo | Vượt ngưỡng ngân sách → gửi email. |
 
@@ -618,6 +756,10 @@ Ví dụ phản hồi khi lịch đã lưu nội bộ nhưng Google Meet đang �
 
 6. Xem Billing/Cost Explorer và tất cả Region đã dùng; ghi lại kết quả không còn tài nguyên hoặc chi phí bất thường.
 
+7. Xóa/expire S3 user-content theo retention, hủy AI jobs còn chạy, xóa Step Functions execution/log, Amazon Transcribe jobs/output, Bedrock Knowledge Base data source và S3 vector index/bucket của môi trường demo khi không cần giữ.
+
+8. Nếu đã đồng bộ Google artifact, thu hồi scope/token khi dừng dự án và xác nhận không còn bản sao recording/transcript ngoài chính sách đã công bố.
+
 # 14. Kế hoạch thực hiện và phân công nhóm
 
 ## 14.1 Phân công đề xuất cho 5 thành viên
@@ -625,10 +767,10 @@ Ví dụ phản hồi khi lịch đã lưu nội bộ nhưng Google Meet đang �
 | Thành viên | Vai trò chính | Phạm vi phụ trách | Bằng chứng đóng góp |
 | --- | --- | --- | --- |
 | Thành viên 1 | Sản phẩm và giao diện | Đặc tả, wireframe, giao diện đăng nhập, nhóm, lịch họp và bảng tổng quan. | Wireframe, màn hình frontend, kiểm thử giao diện, PR. |
-| Thành viên 2 | Giao diện follow-up | Giao diện biên bản, công việc, thông báo và trạng thái người dùng. | Màn hình minutes/task/notification, PR, kịch bản demo. |
-| Thành viên 3 | Backend cốt lõi | Lambda API, mô hình DynamoDB, phân quyền, kiểm tra dữ liệu, nhật ký thao tác. | API docs, test quyền chéo nhóm, PR backend. |
-| Thành viên 4 | Tích hợp Google | OAuth, Calendar event, conference request, trạng thái chờ/thử lại. | Bằng chứng OAuth/Google adapter, mock/test lỗi, PR. |
-| Thành viên 5 | AWS và vận hành | CDK/SAM, S3/CloudFront/Cognito/API Gateway/Scheduler/SES, CloudWatch/SNS, cleanup. | IaC, deploy, alarm/log, checklist cleanup. |
+| Thành viên 2 | Giao diện follow-up và AI | Giao diện biên bản, công việc, transcript editor, citation, AI job status, panel/PiP fallback. | Màn hình minutes/task/transcript/AI, kiểm thử accessibility, PR, kịch bản demo. |
+| Thành viên 3 | Backend cốt lõi | Lambda API, mô hình DynamoDB, phân quyền, kiểm tra dữ liệu, nhật ký thao tác, AI application service/tool proposal. | API docs, test quyền chéo nhóm/tool confirmation, PR backend. |
+| Thành viên 4 | Tích hợp Google và AI grounding | OAuth, Calendar event, Meet artifact adapter, trạng thái chờ/thử lại, prompt/citation/evaluation. | Bằng chứng OAuth/Google adapter, AI evaluation dataset, mock/test lỗi, PR. |
+| Thành viên 5 | AWS, AI pipeline và vận hành | SAM, S3/CloudFront/Cognito/API Gateway/Scheduler/SES, Step Functions/Transcribe/Bedrock/Knowledge Base, CloudWatch/SNS, cleanup. | IaC, deploy, AI job/alarm/log/cost, checklist cleanup. |
 
 Tất cả thành viên vẫn cần hiểu luồng chính và cùng review code. Phân công không có nghĩa là mỗi người chỉ làm một phần; mục đích là xác định ownership rõ ràng, tránh trùng việc và có bằng chứng đóng góp cá nhân.
 
@@ -640,12 +782,23 @@ Tất cả thành viên vẫn cần hiểu luồng chính và cùng review code.
 | Tuần 2 | Nền tảng | Repository, CI, skeleton IaC, Cognito, S3 + CloudFront, API skeleton, UI khung. | Có trang triển khai thử và bằng chứng đăng nhập. |
 | Tuần 3 | Nhóm và thành viên | Tạo nhóm, lời mời/thành viên, phân quyền, kiểm thử chéo nhóm. | Có kiểm thử 403 khi truy cập nhóm khác. |
 | Tuần 4 | Cuộc họp cốt lõi | Tạo/sửa/hủy lịch, agenda, người tham dự, danh sách/lịch, nhật ký bước đầu. | Hoàn thành luồng cuộc họp nội bộ đầu-cuối. |
-| Tuần 5 | Tích hợp Google | OAuth, Google Calendar event, conference request, PENDING/READY/FAILED, thử lại. | Có bằng chứng tích hợp thật hoặc mock kiểm soát. |
-| Tuần 6 | Luồng sau họp | Nhắc lịch, biên bản, công việc, bảng tổng quan, thông báo trong ứng dụng. | Hoàn thành biên bản → công việc → bảng tổng quan. |
-| Tuần 7 | Gia cố vận hành | SES demo, CloudWatch metric/alarm/SNS, kiểm thử bảo mật/lỗi, hoàn thiện UI. | Có gói bằng chứng vận hành. |
-| Tuần 8 | Đóng băng và trình bày | Sửa lỗi, workshop song ngữ, video demo, cleanup, thuyết trình. | Đạt điều kiện hoàn thành MVP. |
+| Tuần 5 | Tích hợp Google | OAuth, Google Calendar event, conference request, `googleSyncStatus`, thử lại và prototype Meet artifact sync. | Có bằng chứng tích hợp thật hoặc mock kiểm soát; fallback khi artifact không có. |
+| Tuần 6 | Luồng sau họp và dữ liệu AI | Nhắc lịch, biên bản, công việc, dashboard; S3 presigned upload, Attachment/AIJob, consent và recording metadata. | Hoàn thành biên bản → công việc → dashboard; upload không đi qua API payload. |
+| Tuần 7 | AI vertical slice và vận hành | Batch STT tiếng Việt, transcript editor, Bedrock hỏi đáp/citation, minutes/action-item draft; SES, CloudWatch/alarm/SNS. | Demo audio/tài liệu → transcript → biên bản/action item → hỏi đáp có nguồn; fallback thủ công hoạt động. |
+| Tuần 8 | Đóng băng và trình bày | Test quyền/RAG/tool confirmation, sửa lỗi, workshop song ngữ, video demo, cost/cleanup, thuyết trình. | Đạt điều kiện hoàn thành Core MVP + AI MVP; không mở live/agentic mở rộng nếu luồng dọc chưa ổn định. |
 
-> **Ghi chú:** Cổng kiểm soát phạm vi: Sau tuần 5, chỉ làm chức năng Có thể có khi tất cả chức năng Bắt buộc hiện có đã kiểm thử thành công. Không mở video call, chat thời gian thực hoặc AI trong mọi trường hợp.
+> **Ghi chú:** Cổng kiểm soát phạm vi: AI MVP là một luồng dọc đã chốt, không phải lý do mở mọi tính năng AI. Live transcription, RAG nhiều cuộc họp đầy đủ, tool use nhiều miền, analytics mở rộng và Document PiP chỉ được mở khi Core MVP cùng AI MVP hiện có đã kiểm thử thành công. Video call/chat thời gian thực vẫn ngoài phạm vi.
+
+## 14.3 Pha AI mở rộng sau baseline 8 tuần
+
+| Pha | Phạm vi | Điều kiện vào | Điều kiện ra |
+| --- | --- | --- | --- |
+| AI-1 | RAG nhiều cuộc họp với Knowledge Bases/S3 Vectors và citation/ACL | AI MVP một meeting ổn định, ingestion có idempotency | Test chéo nhóm không rò dữ liệu; citation mở đúng nguồn. |
+| AI-2 | Agenda/form prefill, tool proposal cho meeting/task/group | API nghiệp vụ, authorization và audit đã hoàn chỉnh | Không mutation trước xác nhận; tool replay không tạo trùng. |
+| AI-3 | Document PiP và live transcription thử nghiệm | Fallback panel, consent/capture prototype và benchmark STT đạt yêu cầu demo | Mất PiP/stream không mất dữ liệu; người dùng thấy rõ recording state. |
+| AI-4 | Google Meet artifact sync nâng cao | Có tài khoản/quyền demo phù hợp và quyết định OAuth verification | Đồng bộ được khi khả dụng, fallback rõ khi không có artifact. |
+
+Nếu mục tiêu là hoàn thiện toàn bộ bốn pha với kiểm thử bảo mật, chi phí và quyền riêng tư, kế hoạch thực tế cần thêm khoảng 4 đến 8 tuần sau baseline, thay vì nhồi toàn bộ vào tuần 7-8.
 
 # 15. Rủi ro và điều kiện hoàn thành MVP
 
@@ -661,6 +814,12 @@ Tất cả thành viên vẫn cần hiểu luồng chính và cùng review code.
 | Tạo trùng Calendar event hoặc reminder khi thử lại | Cao | Dùng idempotency key, conditional write và lưu Google event ID. |
 | Chi phí AWS bất ngờ | Cao | Không dùng NAT/EC2/RDS; có Budget alert nếu tài khoản hỗ trợ; triển khai/destroy bằng IaC và gắn nhãn tài nguyên. |
 | Tài liệu hoặc bằng chứng làm muộn | Trung bình | Cập nhật workshop và ảnh chụp sau mỗi sprint; mỗi thành viên có checklist evidence. |
+| Không thu được toàn bộ âm thanh Meet | Cao | Hiển thị rõ nguồn capture; prototype `getDisplayMedia`/micro; ưu tiên Google artifact hoặc upload; không cam kết recording ngầm. |
+| STT tiếng Việt/diarization sai | Cao | Benchmark Amazon Transcribe và Deepgram; giữ confidence/timestamp; speaker label ẩn danh; transcript editor và human review. |
+| Prompt injection hoặc AI vượt quyền | Cao | Xem nguồn là untrusted; retrieval ACL; tool allowlist/schema; xác nhận; API authorization; audit và test âm. |
+| RAG rò dữ liệu nhóm khác | Cao | Filter `groupId`/ACL trước retrieval; metadata vector bắt buộc; test chéo nhóm và xóa vector cùng source. |
+| AI hallucination tạo biên bản/task sai | Cao | Citation bắt buộc, trạng thái draft, không đủ nguồn thì từ chối; không ghi chính thức trước khi người có quyền duyệt. |
+| Chi phí Bedrock/STT/vector tăng | Trung bình | Ghi token/phút/ước tính chi phí theo job; quota dev; budget alarm; batch và dữ liệu demo nhỏ. |
 
 ## 15.2 Điều kiện hoàn thành MVP
 
@@ -680,6 +839,10 @@ Tất cả thành viên vẫn cần hiểu luồng chính và cùng review code.
 
 8. Mỗi thành viên có pull request/commit, kiểm thử hoặc bằng chứng riêng và worklog mô tả phần việc.
 
+9. AI MVP hoàn thành luồng tài liệu/audio → transcript có timestamp/confidence → chỉnh sửa/ánh xạ speaker → bản nháp biên bản/action item → hỏi đáp có citation; mọi mutation cần xác nhận và không rò dữ liệu chéo nhóm.
+
+10. Có bằng chứng consent/recording indicator, AI job retry/failure, đo chất lượng tiếng Việt trên tập demo, số liệu token/phút/chi phí và cleanup S3/Transcribe/Knowledge Base/vector.
+
 # 16. Phụ lục
 
 ## 16.1 Thuật ngữ
@@ -692,25 +855,38 @@ Tất cả thành viên vẫn cần hiểu luồng chính và cùng review code.
 | Calendar event | Sự kiện tạo trong Google Calendar của người tổ chức; có thể chứa thông tin tham gia Google Meet. |
 | Conference data | Dữ liệu hội nghị của Google Calendar event, gồm yêu cầu tạo hội nghị/liên kết khi Google hỗ trợ. |
 | Idempotency | Tính chất một thao tác khi gọi lại cùng đầu vào không tạo tác dụng phụ lặp lại. |
-| Trạng thái đồng bộ | Trạng thái CampusMeet đồng bộ với Google: `PENDING`, `READY`, `FAILED`. |
+| Trạng thái đồng bộ | Trạng thái CampusMeet đồng bộ với Google: `NOT_REQUESTED`, `PENDING`, `READY`, `FAILED_RETRYABLE`, `ACTION_REQUIRED`. |
 | OAC | Origin Access Control, cơ chế để CloudFront truy cập S3 origin có kiểm soát. |
 | Nhắc lịch | Thông báo được lập trước thời gian cuộc họp. |
 | Serverless | Mô hình dùng dịch vụ managed/compute theo yêu cầu, không cần duy trì máy chủ ứng dụng chạy liên tục. |
+| Artifact | Dữ liệu sinh từ một Google Meet conference như recording, transcript hoặc participant session; chỉ tồn tại khi tài khoản/cài đặt/cuộc họp thực tế tạo ra. |
+| STT | Speech-to-Text, chuyển audio thành transcript; kết quả có sai số và cần được người dùng kiểm tra. |
+| Speaker diarization | Phân đoạn audio theo speaker label ẩn danh; không đồng nghĩa nhận diện danh tính người nói. |
+| Grounding | Buộc câu trả lời AI dựa trên nguồn được phép truy cập và kèm citation kiểm chứng. |
+| RAG | Retrieval-Augmented Generation, truy xuất đoạn nguồn liên quan trước khi model sinh câu trả lời. |
+| Tool proposal | Đề xuất hành động có cấu trúc do model tạo; chưa gây mutation cho tới khi backend kiểm tra và người dùng xác nhận. |
+| Document PiP | Cửa sổ nổi chứa HTML cho Chatbot trên trình duyệt hỗ trợ; là progressive enhancement và có fallback về panel trong trang. |
 | UTC | Coordinated Universal Time; chuẩn dùng để lưu thời gian nội bộ. |
 
 ## 16.2 Checklist vẽ sơ đồ kiến trúc
 
-- Vẽ Người dùng/Browser ở ngoài AWS Cloud; Google OAuth, Google Calendar và Google Meet cũng ở ngoài AWS Cloud.
+- Vẽ Người dùng/Browser ở ngoài AWS Cloud; Google OAuth, Google Calendar và Google Meet REST API cũng ở ngoài AWS Cloud. Deepgram chỉ vẽ như provider tùy chọn nếu benchmark chọn.
 
 - Vẽ AWS Cloud, bên trong là AWS Region. CloudFront thể hiện ở lớp global/edge, không đặt như dịch vụ regional.
 
-- Trong Region: S3 static asset bucket, Cognito, API Gateway, Lambda API, DynamoDB, EventBridge Scheduler, Reminder Lambda, SES, CloudWatch, SNS và kho secret.
+- Trong Region: S3 static asset bucket, S3 user-content, Cognito, API Gateway, Lambda API, DynamoDB, EventBridge Scheduler, Reminder Lambda, Step Functions, AI Worker, Amazon Transcribe, Amazon Bedrock, Bedrock Knowledge Bases, S3 Vectors, SES, CloudWatch, SNS và kho secret.
 
 - Không vẽ frontend React như một AWS service độc lập. React build được lưu và phân phối qua S3/CloudFront.
 
 - Người nhận email nằm ngoài AWS Cloud; mũi tên SES đi từ AWS Region ra người nhận.
 
-- Đánh số mũi tên theo 1-16 ở Mục 10.2; có chú thích phân biệt luồng đồng bộ và luồng bất đồng bộ.
+- Đánh số mũi tên theo 1-26 ở Mục 10.2; có chú thích phân biệt luồng API đồng bộ, job bất đồng bộ, Google artifact và AI retrieval/tool proposal.
+
+- Vẽ upload Browser → S3 trực tiếp bằng presigned URL; không vẽ file/audio lớn đi qua API Gateway hoặc Lambda.
+
+- Vẽ `ToolProposal → kiểm tra quyền → preview → xác nhận → API nghiệp vụ`; không vẽ Bedrock ghi thẳng DynamoDB.
+
+- Vẽ `groupId/ACL filter` trước Knowledge Base retrieval và citation quay lại file/meeting/transcript segment.
 
 - Nếu không dùng VPC, ghi chú: `No VPC in MVP - managed serverless workload; avoid NAT cost`. Không vẽ VPC/Subnet chỉ để trang trí.
 
@@ -734,6 +910,32 @@ Tất cả thành viên vẫn cần hiểu luồng chính và cùng review code.
 
 [TL8] AWS Documentation. AWS Well-Architected Framework. Truy cập ngày 06/07/2026. https://docs.aws.amazon.com/wellarchitected/latest/framework/wellarchitected-framework.html
 
+[TL9] Google for Developers. Google Meet REST API overview. Truy cập ngày 27/07/2026. https://developers.google.com/workspace/meet/api/guides/overview
+
+[TL10] Google for Developers. Work with Google Meet artifacts. Truy cập ngày 27/07/2026. https://developers.google.com/workspace/meet/api/guides/artifacts
+
+[TL11] Google for Developers. Google Meet API usage limits and pricing. Truy cập ngày 27/07/2026. https://developers.google.com/workspace/meet/api/guides/limits
+
+[TL12] Google Meet Help. Use Transcripts with Google Meet. Truy cập ngày 27/07/2026. https://support.google.com/meet/answer/12849897
+
+[TL13] AWS Documentation. Amazon Transcribe supported languages and language-specific features. Truy cập ngày 27/07/2026. https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html
+
+[TL14] AWS Documentation. Partitioning speakers with Amazon Transcribe. Truy cập ngày 27/07/2026. https://docs.aws.amazon.com/transcribe/latest/dg/diarization.html
+
+[TL15] AWS Documentation. Use a tool to complete an Amazon Bedrock model response. Truy cập ngày 27/07/2026. https://docs.aws.amazon.com/bedrock/latest/userguide/tool-use.html
+
+[TL16] AWS Documentation. Build a knowledge base with vector stores. Truy cập ngày 27/07/2026. https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-build.html
+
+[TL17] AWS Documentation. Use Amazon S3 Vectors with Amazon Bedrock Knowledge Bases. Truy cập ngày 27/07/2026. https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base-setup.html
+
+[TL18] Chrome for Developers. Picture-in-Picture for any Element. Truy cập ngày 27/07/2026. https://developer.chrome.com/docs/web-platform/document-picture-in-picture
+
+[TL19] MDN Web Docs. MediaDevices getDisplayMedia. Truy cập ngày 27/07/2026. https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia
+
+[TL20] Google for Developers. Subscribe to events using the Google Workspace Events API. Truy cập ngày 27/07/2026. https://developers.google.com/workspace/events
+
+[TL21] Google Meet Help. Record a video meeting. Truy cập ngày 27/07/2026. https://support.google.com/meet/answer/9308681
+
 ## 16.4 Quyết định thiết kế nền tảng
 
 | Mã | Quyết định | Lý do |
@@ -746,5 +948,13 @@ Tất cả thành viên vẫn cần hiểu luồng chính và cùng review code.
 | ADR-06 | Không dùng VPC/NAT trong MVP. | Không có phụ thuộc private bắt buộc; giảm chi phí và vận hành. |
 | ADR-07 | Thông báo trong ứng dụng là bắt buộc, email SES là bổ sung. | SES sandbox có thể hạn chế gửi email demo. [TL7] |
 | ADR-08 | Dùng nhiều bảng DynamoDB cho MVP. | Giảm độ khó, dễ chia việc và triển khai nhanh hơn. |
+| ADR-09 | Calendar API là luồng tạo lịch/Meet chính; Meet REST API chỉ đồng bộ artifact khi khả dụng và luôn có fallback. | Giữ trải nghiệm Calendar, tận dụng dữ liệu hậu họp nhưng không phụ thuộc gói/quyền ngoài kiểm soát. [TL9][TL10][TL12][TL21] |
+| ADR-10 | Amazon Transcribe `vi-VN` là STT mặc định sau benchmark; Deepgram nằm sau `SpeechToTextProvider`. | Giữ kiến trúc AWS-first nhưng không khóa nhà cung cấp nếu chất lượng tiếng Việt thực tế không đạt. [TL13][TL14] |
+| ADR-11 | Recording phải có consent, chỉ báo trạng thái và nguồn capture rõ; không cam kết microphone thu toàn bộ Meet. | Trình duyệt yêu cầu người dùng cấp quyền và chọn nguồn; bảo vệ quyền riêng tư, tránh tuyên bố kỹ thuật sai. [TL19] |
+| ADR-12 | STT/diarization tạo speaker label ẩn danh, không nhận diện tên. | Diarization không phải voice identity; người dùng ánh xạ/chỉnh sửa để tránh gán nhầm. |
+| ADR-13 | AI output là draft có citation; tool use là proposal cần xác nhận và gọi lại API nghiệp vụ chuẩn. | Ngăn hallucination/vượt quyền, tái sử dụng authorization/idempotency/audit hiện có. [TL15] |
+| ADR-14 | RAG nhiều cuộc họp dùng Bedrock Knowledge Bases + S3 Vectors, filter `groupId`/ACL trước retrieval. | Hỗ trợ truy xuất có nguồn với vector store serverless/chi phí phù hợp dữ liệu demo. [TL16][TL17] |
+| ADR-15 | Document PiP là progressive enhancement, không phải điều kiện sử dụng Chatbot. | API cần user gesture và độ hỗ trợ trình duyệt khác nhau; panel trong trang luôn là fallback. [TL18] |
+| ADR-16 | AI/STT provider và model ID là cấu hình, không hard-code một model/version trong SRS. | Cho phép thay model theo Region, availability, benchmark, chi phí và vòng đời dịch vụ mà không đổi nghiệp vụ. |
 
 > **Ghi chú:** Trạng thái nền tảng: Đây là bản tài liệu để nhóm dùng thống nhất phạm vi, triển khai và trao đổi với mentor. Sau khi mentor góp ý, nhóm chỉ cần cập nhật những phần chịu ảnh hưởng: phạm vi, yêu cầu, kiến trúc, kiểm thử và kế hoạch thực hiện.
