@@ -1,12 +1,17 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: CampusMeet target infrastructure skeleton - no resources are deployed by this repository.
+Description: CampusMeet target application stack. DynamoDB tables are managed by the generated data-foundation stack.
 
 Parameters:
   Environment:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+  DataTablePrefix:
+    Type: String
+    Default: campusmeet-dev
+    AllowedPattern: '^[a-z0-9-]+$'
+    Description: Prefix of the existing CampusMeet DynamoDB tables, for example campusmeet-dev.
   DomainName:
     Type: String
     Default: example.invalid
@@ -26,7 +31,8 @@ Globals:
     Environment:
       Variables:
         ENVIRONMENT: !Ref Environment
-    Tags: &SamTags
+        TABLE_PREFIX: !Ref DataTablePrefix
+    Tags:
       Project: CampusMeet
       Environment: !Ref Environment
       ManagedBy: IaC
@@ -43,7 +49,7 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
-      Tags: &ResourceTags
+      Tags:
         - { Key: Project, Value: CampusMeet }
         - { Key: Environment, Value: !Ref Environment }
         - { Key: ManagedBy, Value: IaC }
@@ -80,7 +86,10 @@ Resources:
         CustomErrorResponses:
           - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html }
           - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html }
-      Tags: *ResourceTags
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
 
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -114,7 +123,10 @@ Resources:
             JwtConfiguration:
               issuer: !Sub 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPool}'
               audience: [!Ref UserPoolClient]
-      Tags: *SamTags
+      Tags:
+        Project: CampusMeet
+        Environment: !Ref Environment
+        ManagedBy: IaC
 
   ApiLambdaRole:
     Type: AWS::IAM::Role
@@ -123,53 +135,82 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          [
-            {
-              Effect: Allow,
-              Principal: { Service: lambda.amazonaws.com },
-              Action: 'sts:AssumeRole',
-            },
-          ]
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
       ManagedPolicyArns:
-        [!Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
         - PolicyName: CampusMeetApiDataAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:Query]
-                Resource:
-                  - !GetAtt GroupsTable.Arn
-                  - !GetAtt MeetingsTable.Arn
-                  - !GetAtt TasksTable.Arn
-                  - !GetAtt NotificationsTable.Arn
-              - Effect: Allow
+              - Sid: CampusMeetTableItemAccess
+                Effect: Allow
                 Action:
-                  [scheduler:CreateSchedule, scheduler:UpdateSchedule, scheduler:DeleteSchedule]
+                  - dynamodb:DescribeTable
+                  - dynamodb:DescribeTimeToLive
+                  - dynamodb:DescribeContinuousBackups
+                  - dynamodb:ListTagsOfResource
+                  - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:ConditionCheckItem
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-*/index/*'
+              - Sid: CampusMeetSchedules
+                Effect: Allow
+                Action:
+                  - scheduler:CreateSchedule
+                  - scheduler:UpdateSchedule
+                  - scheduler:DeleteSchedule
                 Resource: !Sub 'arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/campusmeet-*'
-              - Effect: Allow
+              - Sid: PassReminderRole
+                Effect: Allow
                 Action: iam:PassRole
                 Resource: !GetAtt SchedulerExecutionRole.Arn
-      Tags: *ResourceTags
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
 
   ApiFunction:
     Type: AWS::Serverless::Function
     Metadata:
-      {
-        BuildMethod: esbuild,
-        BuildProperties: { EntryPoints: [src/index.ts], Target: es2022, Minify: false },
-      }
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints: [src/index.ts]
+        Target: es2022
+        Minify: false
     Properties:
       CodeUri: ../services/api
       Handler: src/index.handler
       Role: !GetAtt ApiLambdaRole.Arn
       Environment:
         Variables:
-          GROUPS_TABLE: !Ref GroupsTable
-          MEETINGS_TABLE: !Ref MeetingsTable
-          TASKS_TABLE: !Ref TasksTable
-          NOTIFICATIONS_TABLE: !Ref NotificationsTable
+          USERS_TABLE: !Sub '${DataTablePrefix}-users'
+          GROUPS_TABLE: !Sub '${DataTablePrefix}-groups'
+          MEMBERSHIPS_TABLE: !Sub '${DataTablePrefix}-memberships'
+          INVITATIONS_TABLE: !Sub '${DataTablePrefix}-invitations'
+          MEETINGS_TABLE: !Sub '${DataTablePrefix}-meetings'
+          REMINDERS_TABLE: !Sub '${DataTablePrefix}-reminders'
+          MINUTES_TABLE: !Sub '${DataTablePrefix}-minutes'
+          TASKS_TABLE: !Sub '${DataTablePrefix}-tasks'
+          NOTIFICATIONS_TABLE: !Sub '${DataTablePrefix}-notifications'
+          AUDIT_LOGS_TABLE: !Sub '${DataTablePrefix}-audit-logs'
+          ATTACHMENTS_TABLE: !Sub '${DataTablePrefix}-attachments'
+          RECORDINGS_TABLE: !Sub '${DataTablePrefix}-recordings'
+          RECORDING_CONSENTS_TABLE: !Sub '${DataTablePrefix}-recording-consents'
+          TRANSCRIPTS_TABLE: !Sub '${DataTablePrefix}-transcripts'
+          AI_JOBS_TABLE: !Sub '${DataTablePrefix}-ai-jobs'
+          AI_CONVERSATIONS_TABLE: !Sub '${DataTablePrefix}-ai-conversations'
+          TOOL_PROPOSALS_TABLE: !Sub '${DataTablePrefix}-tool-proposals'
           GOOGLE_SECRET_REFERENCE: !Ref GoogleSecretReference
       Events:
         Health:
@@ -186,7 +227,10 @@ Resources:
             Path: '/{proxy+}'
             Method: ANY
             Auth: { Authorizer: CognitoAuthorizer }
-      Tags: *SamTags
+      Tags:
+        Project: CampusMeet
+        Environment: !Ref Environment
+        ManagedBy: IaC
 
   ReminderLambdaRole:
     Type: AWS::IAM::Role
@@ -195,45 +239,59 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          [
-            {
-              Effect: Allow,
-              Principal: { Service: lambda.amazonaws.com },
-              Action: 'sts:AssumeRole',
-            },
-          ]
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
       ManagedPolicyArns:
-        [!Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
         - PolicyName: ReminderDelivery
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - {
-                  Effect: Allow,
-                  Action: [dynamodb:GetItem, dynamodb:PutItem],
-                  Resource: [!GetAtt MeetingsTable.Arn, !GetAtt NotificationsTable.Arn],
-                }
-              - { Effect: Allow, Action: [ses:SendEmail], Resource: '*' } # TODO(M5): scope after SES identities are known.
-      Tags: *ResourceTags
+              - Sid: ReminderDataAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meetings'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-reminders'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-reminders/index/*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-notifications'
+              - Sid: SendReminderEmail
+                Effect: Allow
+                Action: ses:SendEmail
+                Resource: '*' # TODO(M5): scope after SES identities are known.
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
 
   ReminderFunction:
     Type: AWS::Serverless::Function
     Metadata:
-      {
-        BuildMethod: esbuild,
-        BuildProperties: { EntryPoints: [src/index.ts], Target: es2022, Minify: false },
-      }
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints: [src/index.ts]
+        Target: es2022
+        Minify: false
     Properties:
       CodeUri: ../services/api
       Handler: src/index.reminderHandler
       Role: !GetAtt ReminderLambdaRole.Arn
       Environment:
         Variables:
-          MEETINGS_TABLE: !Ref MeetingsTable
-          NOTIFICATIONS_TABLE: !Ref NotificationsTable
+          MEETINGS_TABLE: !Sub '${DataTablePrefix}-meetings'
+          REMINDERS_TABLE: !Sub '${DataTablePrefix}-reminders'
+          NOTIFICATIONS_TABLE: !Sub '${DataTablePrefix}-notifications'
           SES_CONFIGURATION_SET: !Ref SesConfigurationSet
-      Tags: *SamTags
+      Tags:
+        Project: CampusMeet
+        Environment: !Ref Environment
+        ManagedBy: IaC
 
   SchedulerExecutionRole:
     Type: AWS::IAM::Role
@@ -242,26 +300,21 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          [
-            {
-              Effect: Allow,
-              Principal: { Service: scheduler.amazonaws.com },
-              Action: 'sts:AssumeRole',
-            },
-          ]
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: InvokeReminderOnly
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              [
-                {
-                  Effect: Allow,
-                  Action: lambda:InvokeFunction,
-                  Resource: !GetAtt ReminderFunction.Arn,
-                },
-              ]
-      Tags: *ResourceTags
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ReminderFunction.Arn
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
 
   DeploymentRole:
     Type: AWS::IAM::Role
@@ -271,19 +324,21 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
-          [
-            {
-              Effect: Allow,
-              Principal: { Service: !Sub 'cloudformation.${AWS::URLSuffix}' },
-              Action: 'sts:AssumeRole',
-            },
-          ]
+          - Effect: Allow
+            Principal: { Service: !Sub 'cloudformation.${AWS::URLSuffix}' }
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: ReadStackOnly
           PolicyDocument:
             Version: '2012-10-17'
-            Statement: [{ Effect: Allow, Action: [cloudformation:DescribeStacks], Resource: '*' }]
-      Tags: *ResourceTags
+            Statement:
+              - Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: '*'
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
 
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -300,7 +355,10 @@ Resources:
           RequireNumbers: true
           RequireSymbols: true
       DeletionProtection: INACTIVE # TODO(M5): enable for production after cleanup policy is agreed.
-      UserPoolTags: *SamTags
+      UserPoolTags:
+        Project: CampusMeet
+        Environment: !Ref Environment
+        ManagedBy: IaC
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
@@ -311,24 +369,6 @@ Resources:
       ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
       PreventUserExistenceErrors: ENABLED
 
-  GroupsTable:
-    Type: AWS::DynamoDB::Table
-    Properties: &TableProperties
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
-      KeySchema: [{ AttributeName: id, KeyType: HASH }]
-      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false }
-      Tags: *ResourceTags
-  MeetingsTable:
-    Type: AWS::DynamoDB::Table
-    Properties: *TableProperties
-  TasksTable:
-    Type: AWS::DynamoDB::Table
-    Properties: *TableProperties
-  NotificationsTable:
-    Type: AWS::DynamoDB::Table
-    Properties: *TableProperties
-
   SesConfigurationSet:
     Type: AWS::SES::ConfigurationSet
     Properties: { Name: !Sub 'campusmeet-${Environment}' }
@@ -336,17 +376,31 @@ Resources:
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      { LogGroupName: !Sub '/aws/lambda/${ApiFunction}', RetentionInDays: 14, Tags: *ResourceTags }
+      LogGroupName: !Sub '/aws/lambda/${ApiFunction}'
+      RetentionInDays: 14
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+
   ReminderLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      { LogGroupName: !Sub '/aws/lambda/${ReminderFunction}', RetentionInDays: 14, Tags: *ResourceTags }
+      LogGroupName: !Sub '/aws/lambda/${ReminderFunction}'
+      RetentionInDays: 14
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
 
   AlarmTopic:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub 'campusmeet-${Environment}-alarms'
-      Tags: *ResourceTags
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
 
   ApiErrorAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -355,7 +409,9 @@ Resources:
       AlarmDescription: TODO(M5) Tune threshold from observed demo traffic.
       Namespace: AWS/Lambda
       MetricName: Errors
-      Dimensions: [{ Name: FunctionName, Value: !Ref ApiFunction }]
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ApiFunction
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -363,13 +419,17 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlarmTopic]
-      Tags: *ResourceTags
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
 
 Outputs:
   FrontendBucketName: { Value: !Ref FrontendBucket }
   CloudFrontDomainName: { Value: !GetAtt FrontendDistribution.DomainName }
   ApiUrl:
-    { Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Environment}' }
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Environment}'
   UserPoolId: { Value: !Ref UserPool }
   UserPoolClientId: { Value: !Ref UserPoolClient }
+  DataTablePrefix: { Value: !Ref DataTablePrefix }
   ConfiguredDomainPlaceholder: { Value: !Ref DomainName }
