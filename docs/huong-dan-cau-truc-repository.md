@@ -1,139 +1,205 @@
 # Hướng dẫn cấu trúc repository CampusMeet
 
-Tài liệu này trả lời hai câu hỏi: “file này dùng để làm gì?” và “tôi nên bắt đầu code ở đâu?”. Trước khi sửa contract hoặc infrastructure, đọc thêm [SRS](CampusMeet-SRS.md), [kiến trúc](architecture.md) và [API contract](api-contract.md).
+Tài liệu này trả lời “file này dùng để làm gì?” và “tôi nên bắt đầu code ở đâu?”. Trước khi sửa contract hoặc infrastructure, đọc [SRS](CampusMeet-SRS.md), [kiến trúc](architecture.md), [API contract](api-contract.md) và [DynamoDB data model v2](dynamodb-data-model.md).
 
-## 1. Nguyên tắc đọc repository
+## 1. Nguyên tắc
 
-- `apps/` chứa ứng dụng frontend.
-- `services/` chứa backend/Lambda.
-- `packages/shared/` chứa type, enum, DTO và constant dùng chung.
-- `infra/` chứa hạ tầng AWS bằng code.
-- `docs/` chứa yêu cầu và quy ước làm việc.
-- Không đặt business logic lớn trong `packages/shared/`; logic thuộc domain/application của backend.
-- Không đặt AWS credential, Google token, OAuth secret hoặc dữ liệu người dùng thật ở bất kỳ folder nào.
+- `apps/` chứa frontend/client surfaces.
+- `services/` chứa backend/Lambda/worker.
+- `packages/shared/` chứa type, enum và DTO dùng chung.
+- `infra/` chứa AWS IaC.
+- `scripts/` chứa helper audit/verification; script destructive phải explicit và review.
+- `docs/` chứa yêu cầu, quyết định kiến trúc và runbook.
+- Không đặt credential, OAuth token, presigned URL còn hiệu lực hoặc dữ liệu người dùng thật trong repo.
 
 ## 2. Bản đồ thư mục gốc
 
-| Đường dẫn            | Dùng để làm gì                             | Ai thường sửa                          | Không nên đặt ở đây                      |
-| -------------------- | ------------------------------------------ | -------------------------------------- | ---------------------------------------- |
-| `apps/`              | Các ứng dụng giao diện                     | M1 và owner feature                    | Lambda handler, IAM policy               |
-| `services/`          | API/Lambda và xử lý server                 | M2–M5 theo module                      | React component, browser secret          |
-| `packages/`          | Contract TypeScript dùng chung             | M3 phối hợp mọi owner                  | Database call, UI, business workflow lớn |
-| `infra/`             | AWS SAM source of truth                    | M5                                     | Code React hoặc credential thật          |
-| `docs/`              | SRS, kiến trúc, contract và hướng dẫn nhóm | Tất cả; owner liên quan review         | File tạm, báo cáo lặp ý                  |
-| `.github/`           | CI quality gates                           | M5                                     | AWS key hoặc deploy chưa review          |
-| `package.json`       | npm workspaces và root scripts             | M1/M3/M5 khi cần                       | Script deploy tự động không được duyệt   |
-| `package-lock.json`  | Phiên bản dependency tái lập               | npm tạo; commit cùng dependency change | Chỉnh tay                                |
-| `tsconfig.base.json` | TypeScript strict defaults                 | M1/M3                                  | Config riêng không áp dụng toàn repo     |
-| `eslint.config.js`   | Quy tắc lint chung                         | M1/M3                                  | Rule chỉ để che lỗi module cụ thể        |
-| `README.md`          | Điểm bắt đầu duy nhất                      | Tất cả qua PR                          | Chi tiết module dài hoặc nhật ký tạm     |
-| `CONTRIBUTING.md`    | Quy tắc đóng góp ngắn                      | Tất cả qua PR                          | Lặp toàn bộ kế hoạch 8 tuần              |
+| Đường dẫn | Vai trò | Owner thường gặp |
+| --- | --- | --- |
+| `apps/web/` | React/Vite web và route Meet Add-on dùng chung assets | M1/M4/M5 theo feature |
+| `services/api/` | API Lambda, application/domain/repository/integration | M1–M5 theo module |
+| `services/ai-worker/` | AI worker khi M5 implement | M5 |
+| `packages/shared/` | Shared DTO/types/enums/constants | Owner contract + reviewer liên quan |
+| `infra/` | Auth stack, data stack, application stack và M5 infra | Infra owner/M5 |
+| `scripts/` | Validation, audit, local/bootstrap helpers | Infra owner |
+| `docs/` | SRS, architecture, API/data contract, runbook | Tất cả qua PR |
+| `.github/` | CI quality gates | Infra/maintainer |
 
-## 3. Frontend: `apps/web/src`
+## 3. Frontend — `apps/web/src`
 
-| Đường dẫn     | Vai trò                                                               |
-| ------------- | --------------------------------------------------------------------- |
-| `app/`        | Composition root: QueryClient và RouterProvider                       |
-| `components/` | Component dùng chung như page header, states, badge và page wrapper   |
-| `config/`     | Public build-time configuration; `VITE_*` tuyệt đối không chứa secret |
-| `features/`   | Code chia theo feature/ownership để giảm conflict                     |
-| `layouts/`    | AppShell, sidebar, topbar và bố cục dùng chung                        |
-| `lib/`        | Boundary kỹ thuật như `apiClient`, không chứa feature workflow        |
-| `mocks/`      | Mock data có nhãn rõ để render scaffold                               |
-| `pages/`      | Public pages và NotFound; protected feature pages không đặt ở đây     |
-| `routes/`     | Router chung và mapping URL → page                                    |
-| `styles/`     | Global CSS hiện tại                                                   |
-| `test/`       | Test setup dùng chung                                                 |
-| `main.tsx`    | Browser entry point, mount React app                                  |
+| Đường dẫn | Trách nhiệm |
+| --- | --- |
+| `app/` | Composition root, providers |
+| `components/` | Component dùng chung |
+| `config/` | Public build-time config; `VITE_*` không chứa secret |
+| `features/` | UI/service theo feature |
+| `layouts/` | App shell/sidebar/topbar |
+| `lib/` | API client và technical boundary nhỏ |
+| `mocks/` | Mock có nhãn rõ, không giả làm production data |
+| `routes/` | Route mapping và protection |
+| `test/` | Test setup |
 
-### Các feature hiện có
+Feature ownership:
 
-| Feature         | Mục đích và file nên đặt                                                          | Owner chính    | Không đặt ở đây                               |
-| --------------- | --------------------------------------------------------------------------------- | -------------- | --------------------------------------------- |
-| `auth`          | Sign-in/sign-up state, Cognito client boundary và route guard khi được triển khai | M1 phối hợp M5 | Cognito IAM/config hoặc token server-side     |
-| `dashboard`     | Dashboard pages, query/service và presentation state                              | M1             | Group/meeting business rules                  |
-| `groups`        | Group, membership, invitation pages/services                                      | M2             | Dashboard tổng hợp hoặc Google OAuth          |
-| `meetings`      | Meeting pages/services và UI trạng thái integration                               | M3 phối hợp M4 | Google token hoặc Calendar SDK call trực tiếp |
-| `minutes`       | Minutes, decisions, action items UI/service                                       | M3             | Repository/DynamoDB call                      |
-| `tasks`         | Task pages/services và status UI                                                  | M3             | Quy tắc quyền chỉ chạy ở client               |
-| `notifications` | In-app notification pages/services                                                | M3 phối hợp M5 | SES send call từ browser                      |
-| `integrations`  | UI connect/disconnect và trạng thái Google                                        | M4             | OAuth secret/access token                     |
-| `settings`      | Profile, timezone và integration settings page                                    | M1 phối hợp M4 | Authentication source of truth                |
+| Feature | Phạm vi |
+| --- | --- |
+| `auth` | Cognito sign-up/sign-in/confirm/reset/logout |
+| `groups` | Group, membership, invitation |
+| `meetings` | Meeting, attendee, agenda, Google status |
+| `minutes` | Minutes/decision/action-item UI |
+| `tasks` | Task và dashboard |
+| `notifications` | In-app notifications |
+| `integrations` | Google connect/disconnect/status |
+| `attachments` | Upload state và file list |
+| `transcripts` | Live status, editor, timestamp/citation UI |
+| `ai` | Chat, RAG scope, draft/proposal/citation UI |
 
-Quy tắc frontend:
+Frontend không gọi DynamoDB, S3 credential API, Transcribe hoặc Bedrock bằng credential dài hạn. Luồng dữ liệu nghiệp vụ:
 
-- Page theo feature đặt trong `features/<feature>/pages/`.
-- Feature service hiện trả mock phải giữ `isMock: true` hoặc nhãn mock tương đương.
-- Component dùng cho từ hai feature trở lên mới chuyển vào `components/`.
-- Frontend không tự quyết định authorization; backend phải kiểm tra lại membership/role.
+```text
+React → API Gateway → Lambda → repository/service
+```
 
-## 4. Backend: `services/api/src`
+## 4. Backend — `services/api/src`
 
-| Đường dẫn       | Trách nhiệm                                                        | Không nên chứa                                |
-| --------------- | ------------------------------------------------------------------ | --------------------------------------------- |
-| `handlers/`     | Nhận API Gateway event, parse transport input và trả HTTP response | Business logic lớn, query DynamoDB trực tiếp  |
-| `application/`  | Điều phối use case sau khi validation/auth đã hoàn thiện           | AWS SDK details hoặc HTTP response formatting |
-| `domain/`       | Rule, validation và port/interface độc lập hạ tầng                 | API Gateway event, React hoặc AWS credential  |
-| `repositories/` | Adapter đọc/ghi DynamoDB theo interface domain                     | HTTP routing hoặc Google call                 |
-| `integrations/` | Adapter Google Calendar, EventBridge Scheduler, SES                | UI hoặc database ownership rule               |
-| `middleware/`   | Authentication, authorization, request context và lỗi chung        | Feature-specific workflow                     |
-| `utils/`        | Logger, request ID, response/error helpers nhỏ                     | Domain logic hoặc “god helper”                |
-| `index.ts`      | Lambda entry point và route dispatch                               | CRUD implementation                           |
+| Đường dẫn | Trách nhiệm | Không đặt ở đây |
+| --- | --- | --- |
+| `handlers/` | Parse transport/request và trả HTTP response | DynamoDB query trực tiếp, business workflow lớn |
+| `application/` | Điều phối use case, transaction boundary, idempotency | API Gateway formatting, SDK chi tiết |
+| `domain/` | Rule/validation/ports độc lập AWS | HTTP event, React, credential |
+| `repositories/` | DynamoDB adapters theo port | Routing, Google API call |
+| `integrations/` | Google, Scheduler, SES, S3, Step Functions adapters | UI, membership rule |
+| `middleware/` | Authn/authz/request context/error boundary | Feature workflow |
+| `utils/` | Helper nhỏ, logger, response | God helper/business logic |
+| `index.ts` | Lambda entry point và route dispatch | CRUD implementation |
 
-Handler chỉ nhận request/trả response. Domain chứa rule/validation. Repository là lớp đọc/ghi DynamoDB. Integration là lớp gọi hệ thống ngoài như Google Calendar, EventBridge Scheduler và SES. Middleware chịu trách nhiệm authentication, authorization theo `groupId`, request ID và error boundary.
+Handler → application service → domain port → repository/integration adapter.
 
-Shared DTO phải import từ `@campusmeet/shared`, không được copy lại trong backend. Hiện các adapter ném `NotImplementedError` có chủ đích; đừng thay bằng dữ liệu giả trông như production.
+Repository không được suy ra quyền chỉ từ `groupId` client gửi. Application/middleware phải dùng Cognito claims và membership lookup.
 
-## 5. Shared package: `packages/shared/src`
+## 5. DynamoDB repository ownership
 
-| Đường dẫn    | Nội dung                                      |
-| ------------ | --------------------------------------------- |
-| `types/`     | Entity/data shape dùng xuyên frontend/backend |
-| `enums/`     | Trạng thái và role thống nhất                 |
-| `dto/`       | Request/response contract qua API boundary    |
-| `constants/` | Constant thật sự dùng chung, ổn định          |
-| `index.ts`   | Public exports của package                    |
+Physical tables:
 
-Không đặt repository, AWS SDK, React component hoặc workflow nghiệp vụ trong shared package.
+```text
+identity
+collaboration
+meeting-data
+task-data
+ai-work
+```
 
-Khi thay đổi API request/response:
+Chi tiết key/access pattern nằm duy nhất tại [DynamoDB data model v2](dynamodb-data-model.md).
 
-1. Sửa DTO trong shared.
-2. Cập nhật backend.
-3. Cập nhật frontend.
-4. Cập nhật `docs/api-contract.md`.
-5. Thêm hoặc sửa test.
+Mapping repository:
 
-## 6. Hạ tầng: `infra/`
+| Repository/module | Bảng |
+| --- | --- |
+| User/profile/integration/notification | `identity` |
+| Group/membership/invitation/audit | `collaboration` |
+| Meeting/minutes/reminder/attachment/recording/consent/live/transcript | `meeting-data` |
+| Task/dashboard task queries | `task-data` |
+| AIJob/KnowledgeSource/conversation/citation/proposal/idempotency | `ai-work` |
 
-| File                      | Vai trò                                                                   |
-| ------------------------- | ------------------------------------------------------------------------- |
-| `template.yaml`           | Source of truth cho AWS resource mục tiêu, role, policy, tags và outputs  |
-| `parameters.example.json` | Giá trị placeholder an toàn để thảo luận cấu hình; không chứa secret thật |
+Không tạo file repository theo quy tắc “mỗi entity phải có bảng riêng”. Có thể tách repository theo domain nhưng nhiều repository dùng cùng physical table/client.
 
-IAM policy hiện được đặt cạnh role trong `template.yaml` để dễ review; chưa cần tách managed policy riêng. Chỉ tách khi có nhiều consumer thật.
+## 6. Shared package
 
-Không sửa IAM policy, Lambda role, CloudFront, Cognito hoặc deletion/retention setting khi chưa trao đổi với M5. Infrastructure phải thay đổi qua IaC, không tạo resource trùng bằng AWS Console. Các thao tác ngoài IaC chỉ dành cho xác minh bắt buộc như SES identity, SNS email confirmation hoặc cấu hình Google OAuth bên Google Cloud.
+| Đường dẫn | Nội dung |
+| --- | --- |
+| `types/` | Entity/data shape xuyên frontend/backend |
+| `enums/` | State/role/status |
+| `dto/` | Request/response contract |
+| `constants/` | Constant ổn định dùng chung |
+| `index.ts` | Public exports |
 
-## 7. Tôi phụ trách phần này, tôi bắt đầu ở đâu?
+Khi thay đổi API contract:
 
-| Tôi phụ trách                           | Folder/file cần đọc trước                            | Folder/file thường sửa                                            | Cần phối hợp với                                |
-| --------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------- |
-| M1 — frontend foundation/dashboard      | README, router, AppShell, dashboard pages            | `apps/web/src/app`, `layouts`, `components`, `features/dashboard` | M2/M3 về API; M5 về auth/deploy config          |
-| M2 — group/membership/invitation        | SRS, shared types/DTO, API contract                  | `features/groups`, group handlers/application/repository          | M1 về UI; M3 về auth boundary                   |
-| M3 — meeting/minutes/task/domain/API    | SRS rules, ports, shared DTO, handlers               | meeting/minutes/task features và `services/api/src`               | M2 về membership; M4/M5 về adapters             |
-| M4 — Google OAuth/Calendar/Meet         | SRS integration states, integration port, meeting UI | `features/integrations`, `services/api/src/integrations`          | M3 về meeting lifecycle; M5 về secret reference |
-| M5 — SAM/deployment/reminder/monitoring | architecture, AWS guide, SAM template                | `infra`, reminder handler/integration, `.github`                  | M1–M4 về runtime/config/metrics                 |
+1. sửa shared DTO/type;
+2. cập nhật backend;
+3. cập nhật frontend;
+4. cập nhật `docs/api-contract.md`;
+5. cập nhật data model nếu access pattern/key thay đổi;
+6. thêm test.
 
-Ownership là trách nhiệm về outcome, không có nghĩa owner tự viết toàn bộ code. Integration phải đi qua shared contract và Pull Request.
+## 7. M5 boundary
 
-## 8. File không nên tự sửa
+M5 source flow:
 
-- `infra/template.yaml` và IAM roles/policies.
+```text
+consent
+→ live session hoặc presigned upload
+→ final transcript/source
+→ AIJob/Step Functions
+→ normalize/ingest
+→ Bedrock retrieval/generation
+→ citation/proposal
+```
+
+- Binary/audio: S3 user-content.
+- Transcript metadata/segment: `meeting-data`.
+- AI control metadata: `ai-work`.
+- Normalized source: S3.
+- Vector: Knowledge Bases/S3 Vectors.
+- Logs: CloudWatch, không chứa content nhạy cảm.
+
+`services/ai-worker/` chỉ được tạo khi contract/provider boundary đã chốt; không để API Lambda giữ request dài chờ STT/ingestion.
+
+## 8. Infrastructure — `infra/`
+
+| File | Vai trò |
+| --- | --- |
+| `auth-integration.yaml` | Auth integration stack tối thiểu |
+| `data-foundation.yaml` | Source of truth cho 5 bảng DynamoDB |
+| `template.yaml` | Application target stack, tham chiếu data tables qua prefix |
+| `parameters.example.json` | Placeholder an toàn, không chứa secret |
+
+Quy tắc:
+
+- Data stack deploy trước application stack.
+- `template.yaml` không tạo lại DynamoDB tables.
+- Mọi thay đổi table/GSI/TTL/deletion protection qua IaC và PR.
+- Không tạo schema bằng Console.
+- Review change set trước execute.
+- `DeletionPolicy: Retain` không có nghĩa resource miễn phí sau khi stack bị xóa.
+
+## 9. Scripts
+
+| Script | Tính chất |
+| --- | --- |
+| `audit-legacy-data-foundation.ps1` | Read-only audit 17 bảng cũ |
+| `verify-data-foundation.ps1` | Read-only verify 5 bảng v2 |
+
+Không biến audit script thành delete script. Cleanup legacy phải có danh sách rõ ràng, backup/evidence và reviewer thứ hai.
+
+## 10. Local, test và AWS dev
+
+- Unit test: in-memory repository.
+- Local integration: DynamoDB Local cùng 5-table/key contract.
+- AWS dev: integration/smoke test chung.
+- Mỗi thành viên dùng IAM identity riêng.
+- Test data có `createdBy` và prefix ID feature/member.
+- Không dùng production data hoặc dữ liệu cá nhân thật.
+
+## 11. Bắt đầu theo vai trò
+
+| Owner | Đọc trước | Thường sửa |
+| --- | --- | --- |
+| Auth/frontend | README, auth guide, router | `apps/web/src/features/auth`, config/routes |
+| Group/member | SRS, API contract, data model collaboration | groups feature, application, collaboration repository |
+| Meeting/task | SRS, data model meeting/task | meetings/minutes/tasks handlers/services/repos |
+| Google | integration states, API contract | integrations adapter/UI |
+| M5 AI | M5 plan, data model meeting/ai-work | attachment/transcript/AI modules, worker, M5 infra |
+| Infra | architecture, AWS runbook, data model | `infra/`, `scripts/`, CI |
+
+## 12. File cần phối hợp trước khi sửa
+
+- `infra/*.yaml` và IAM policies.
+- `docs/dynamodb-data-model.md`.
 - `packages/shared/src/dto/`.
-- `apps/web/src/routes/router.tsx`.
-- API error format trong `services/api/src/utils/response.ts`.
-- Cognito configuration.
-- `.github/workflows/ci.yml`.
+- router chung.
+- API error format.
+- Cognito config.
+- CI workflow.
 
-Chỉ sửa khi đã thông báo owner liên quan và có issue/PR mô tả ảnh hưởng. Với contract hoặc infrastructure, PR phải chỉ rõ migration/compatibility, test và rollback/cleanup impact.
+PR thay đổi contract/infrastructure phải mô tả compatibility, migration, test, cost và rollback/cleanup impact.
