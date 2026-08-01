@@ -6,7 +6,7 @@ import {
   signIn,
   signUp,
 } from 'aws-amplify/auth';
-import { useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import {
@@ -14,7 +14,6 @@ import {
   forgotPasswordNeutralMessage,
   mapAuthError,
   normalizeEmail,
-  resendCodeNeutralMessage,
   validateConfirmation,
   validateConfirmationCode,
   validateEmail,
@@ -24,6 +23,25 @@ import {
 } from '../lib/auth-errors';
 
 const pendingEmailKey = 'campusmeet:pendingEmail';
+const confirmationDestinationKey = 'campusmeet:confirmationDestination';
+const resendAvailableAtKey = 'campusmeet:resendAvailableAt';
+const resendCooldownSeconds = 60;
+
+function rememberConfirmationDelivery(destination?: string) {
+  if (destination) sessionStorage.setItem(confirmationDestinationKey, destination);
+  else sessionStorage.removeItem(confirmationDestinationKey);
+  sessionStorage.setItem(resendAvailableAtKey, String(Date.now() + resendCooldownSeconds * 1000));
+}
+
+function clearConfirmationDelivery() {
+  sessionStorage.removeItem(confirmationDestinationKey);
+  sessionStorage.removeItem(resendAvailableAtKey);
+}
+
+function remainingResendSeconds() {
+  const availableAt = Number(sessionStorage.getItem(resendAvailableAtKey) ?? 0);
+  return Math.max(0, Math.ceil((availableAt - Date.now()) / 1000));
+}
 
 function destination() {
   const saved = sessionStorage.getItem('campusmeet:returnTo');
@@ -400,6 +418,7 @@ export function SignUpPage() {
         });
       } else if (result.nextStep.signUpStep === 'CONFIRM_SIGN_UP') {
         sessionStorage.setItem(pendingEmailKey, username);
+        rememberConfirmationDelivery(result.nextStep.codeDeliveryDetails?.destination);
         navigate('/confirm-sign-up');
       } else {
         showError('Tài khoản cần thêm một bước xác thực chưa được hỗ trợ.');
@@ -468,8 +487,12 @@ export function ConfirmSignUpPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState(() => sessionStorage.getItem(pendingEmailKey) ?? '');
   const [code, setCode] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [action, setAction] = useState<'confirm' | 'resend' | null>(null);
   const [notice, setNotice] = useState('');
+  const [deliveryDestination, setDeliveryDestination] = useState(
+    () => sessionStorage.getItem(confirmationDestinationKey) ?? '',
+  );
+  const [resendSeconds, setResendSeconds] = useState(remainingResendSeconds);
   const {
     error,
     errorRef,
@@ -480,6 +503,16 @@ export function ConfirmSignUpPage() {
     clearField,
     clearError,
   } = useFormError();
+
+  useEffect(() => {
+    if (resendSeconds <= 0) return;
+    const timer = window.setTimeout(
+      () => setResendSeconds((current) => Math.max(0, current - 1)),
+      1000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [resendSeconds]);
+
   if (auth.status === 'authenticated') return <AuthenticatedRedirect />;
   const configured = auth.status !== 'configuration-error';
 
@@ -498,10 +531,11 @@ export function ConfirmSignUpPage() {
     )
       return;
     if (!configured) return showError(accountUnavailableMessage);
-    setSubmitting(true);
+    setAction('confirm');
     try {
       await confirmSignUp({ username, confirmationCode: code.trim() });
       sessionStorage.removeItem(pendingEmailKey);
+      clearConfirmationDelivery();
       navigate('/sign-in', {
         replace: true,
         state: { message: 'Tài khoản đã được xác nhận. Bạn có thể đăng nhập.' },
@@ -512,7 +546,7 @@ export function ConfirmSignUpPage() {
         code: 'confirmation-code',
       });
     } finally {
-      setSubmitting(false);
+      setAction(null);
     }
   }
 
@@ -521,26 +555,40 @@ export function ConfirmSignUpPage() {
     const username = normalizeEmail(email);
     if (showFieldErrors({ email: validateEmail(email) }, { email: 'confirm-email' })) return;
     if (!configured) return showError(accountUnavailableMessage);
-    setSubmitting(true);
+    setAction('resend');
     try {
-      await resendSignUpCode({ username });
-      setNotice(resendCodeNeutralMessage);
+      const delivery = await resendSignUpCode({ username });
+      sessionStorage.setItem(pendingEmailKey, username);
+      rememberConfirmationDelivery(delivery.destination);
+      setDeliveryDestination(delivery.destination ?? username);
+      setResendSeconds(resendCooldownSeconds);
+      setNotice(`Đã gửi mã mới đến ${delivery.destination ?? username}.`);
     } catch (cause) {
       const mapped = mapAuthError(cause, 'resend-code');
-      if (mapped.neutral) setNotice(mapped.message);
-      else showMappedError(cause, 'resend-code', { email: 'confirm-email' });
+      if (mapped.neutral) {
+        rememberConfirmationDelivery();
+        setResendSeconds(resendCooldownSeconds);
+        setNotice(mapped.message);
+      } else showMappedError(cause, 'resend-code', { email: 'confirm-email' });
     } finally {
-      setSubmitting(false);
+      setAction(null);
     }
   }
 
   return (
     <AuthPage title={'Xác nhận tài khoản'}>
-      {notice && (
-        <p className={'auth-success'} aria-live={'polite'}>
-          {notice}
-        </p>
-      )}
+      <div className={'auth-code-status'} role={'status'} aria-live={'polite'}>
+        <strong>
+          {notice ||
+            (deliveryDestination
+              ? `Mã 6 số đã được gửi đến ${deliveryDestination}.`
+              : 'Nhập mã 6 số đã được gửi đến email đăng ký.')}
+        </strong>
+        <span>
+          Mã có hiệu lực 24 giờ kể từ lần gửi gần nhất. Nếu chưa thấy email, hãy kiểm tra Spam và
+          Quảng cáo.
+        </span>
+      </div>
       <form className={'auth-form'} onSubmit={(event) => void submit(event)} noValidate>
         <Field
           label={'Email'}
@@ -550,6 +598,10 @@ export function ConfirmSignUpPage() {
           value={email}
           onChange={(value) => {
             setEmail(value);
+            setNotice('');
+            setDeliveryDestination('');
+            setResendSeconds(0);
+            clearConfirmationDelivery();
             clearField('email');
           }}
           errors={fieldErrors.email}
@@ -566,16 +618,20 @@ export function ConfirmSignUpPage() {
           errors={fieldErrors.code}
         />
         <ErrorMessage error={error} errorRef={errorRef} />
-        <button type={'submit'} disabled={submitting}>
-          Xác nhận
+        <button type={'submit'} disabled={action !== null}>
+          {action === 'confirm' ? 'Đang xác nhận...' : 'Xác nhận'}
         </button>
         <button
           className={'button-secondary'}
           type={'button'}
           onClick={() => void resend()}
-          disabled={submitting}
+          disabled={action !== null || resendSeconds > 0}
         >
-          Gửi lại mã
+          {action === 'resend'
+            ? 'Đang gửi mã...'
+            : resendSeconds > 0
+              ? `Gửi lại sau ${resendSeconds} giây`
+              : 'Gửi lại mã'}
         </button>
       </form>
     </AuthPage>

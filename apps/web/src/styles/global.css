@@ -124,6 +124,25 @@ button:disabled {
   background: #e7ecff;
   color: #2947aa;
 }
+.button-secondary:disabled {
+  opacity: 1;
+  background: #edf0f7;
+  color: #4f5d73;
+  cursor: not-allowed;
+}
+.auth-code-status {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 0.65rem;
+  background: #eef3ff;
+  color: #244182;
+  font-size: 0.9rem;
+}
+.auth-code-status span {
+  color: #425477;
+}
 .auth-field-error {
   color: #a51f2d;
   font-size: 0.875rem;
