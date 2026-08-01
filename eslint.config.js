@@ -5,7 +5,9 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['**/.aws-sam/**', '**/dist/**', '**/coverage/**', 'node_modules/**'] },
+  {
+    ignores: ['**/.agents/**', '**/.aws-sam/**', '**/dist/**', '**/coverage/**', 'node_modules/**'],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

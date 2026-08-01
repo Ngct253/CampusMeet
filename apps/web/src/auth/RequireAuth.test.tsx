@@ -36,7 +36,7 @@ describe('RequireAuth', () => {
 
   it('authenticated vẫn render AppShell', () => {
     renderGuard('/app/dashboard', 'authenticated');
-    expect(screen.getByText('Chế độ dữ liệu mô phỏng')).toBeInTheDocument();
+    expect(screen.getByText('Không gian cá nhân')).toBeInTheDocument();
   });
 
   it('từ chối URL quay lại ngoài /app', () => {

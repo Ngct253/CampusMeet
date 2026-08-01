@@ -1,16 +1,16 @@
 # Runbook triển khai lại CampusMeet: IAM, 5 bảng và đăng nhập
 
-Tài liệu này là luồng duy nhất để dựng môi trường AWS dev dùng chung từ đầu: tạo quyền cho thành viên, deploy 5 bảng DynamoDB, deploy Cognito/API đăng nhập, cấu hình frontend và kiểm tra đăng ký/đăng nhập. Không coi template tồn tại hoặc build thành công là bằng chứng đã deploy.
+Tài liệu này là luồng duy nhất để dựng môi trường AWS dev dùng chung từ đầu: tạo quyền cho thành viên, deploy 5 bảng DynamoDB, deploy Cognito/API M1, cấu hình frontend và kiểm tra đăng ký/đăng nhập. Không coi template tồn tại hoặc build thành công là bằng chứng đã deploy.
 
 ## 1. Kết quả sau khi hoàn thành
 
-| Thành phần         | Kết quả cần có                                                                  |
-| ------------------ | ------------------------------------------------------------------------------- |
-| Thành viên AWS     | Mỗi người dùng IAM user riêng và đăng nhập CLI bằng `aws login`                 |
-| DynamoDB           | Đúng 5 bảng `campusmeet-dev-*`, `PAY_PER_REQUEST`, TTL/GSI đúng contract        |
-| Đăng nhập ứng dụng | Cognito User Pool, web client, Lambda `/health`, `/me` và HTTP API đã hoạt động |
-| Frontend local     | `apps/web/.env` lấy đúng ba output CloudFormation                               |
-| Kiểm tra cuối      | Đăng ký, nhận mã, xác nhận, đăng nhập, mở `/app` và đăng xuất thành công        |
+| Thành phần     | Kết quả cần có                                                                 |
+| -------------- | ------------------------------------------------------------------------------ |
+| Thành viên AWS | Mỗi người dùng IAM user riêng và đăng nhập CLI bằng `aws login`                |
+| DynamoDB       | Đúng 5 bảng `campusmeet-dev-*`, `PAY_PER_REQUEST`, TTL/GSI đúng contract       |
+| API M1         | Cognito, Lambda và HTTP API cho hồ sơ, nhóm, lời mời và thông báo đã hoạt động |
+| Frontend local | `apps/web/.env` lấy đúng ba output CloudFormation                              |
+| Kiểm tra cuối  | Đăng ký, nhận mã, xác nhận, đăng nhập, mở `/app` và đăng xuất thành công       |
 
 Source of truth data model: [Mô hình dữ liệu DynamoDB](dynamodb-data-model.md).
 
@@ -20,7 +20,7 @@ CampusMeet tách stack để giảm blast radius:
 
 | Template                      | Vai trò                                                                                               |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `infra/auth-integration.yaml` | Cognito + API/Lambda tối thiểu để xác minh auth                                                       |
+| `infra/auth-integration.yaml` | Cognito + API/Lambda cho toàn bộ vertical slice M1                                                    |
 | `infra/data-foundation.yaml`  | 5 bảng DynamoDB dùng chung                                                                            |
 | `infra/template.yaml`         | Application stack: frontend/API/reminder/Cognito và hạ tầng AI; tham chiếu bảng qua `DataTablePrefix` |
 
@@ -126,7 +126,7 @@ campusmeet-dev-ai-work
 ```powershell
 sam deploy `
   --template-file infra/data-foundation.yaml `
-  --stack-name campusmeet-dev-data-v2 `
+  --stack-name campusmeet-dev-data `
   --resolve-s3 `
   --parameter-overrides `
     Environment=dev `
@@ -157,7 +157,7 @@ Có thể execute change set trong CloudFormation Console sau review, hoặc ch�
 ```powershell
 sam deploy `
   --template-file infra/data-foundation.yaml `
-  --stack-name campusmeet-dev-data-v2 `
+  --stack-name campusmeet-dev-data `
   --resolve-s3 `
   --parameter-overrides `
     Environment=dev `
@@ -191,7 +191,7 @@ Script kiểm tra:
 
 ```powershell
 aws cloudformation describe-stacks `
-  --stack-name campusmeet-dev-data-v2 `
+  --stack-name campusmeet-dev-data `
   --query "Stacks[0].Outputs" `
   --region ap-southeast-1
 ```
@@ -221,7 +221,7 @@ sam deploy `
   --stack-name campusmeet-dev-auth `
   --resolve-s3 `
   --capabilities CAPABILITY_IAM `
-  --parameter-overrides AllowedOrigin=http://localhost:5173 `
+  --parameter-overrides AllowedOrigin=http://localhost:5173 DataTablePrefix=campusmeet-dev `
   --no-execute-changeset `
   --region ap-southeast-1
 ```
@@ -239,6 +239,36 @@ aws cloudformation describe-stacks `
 ```
 
 Kết quả phải có `UserPoolId`, `UserPoolClientId` và `ApiUrl`. Không dùng User Pool ARN, Lambda URL hoặc CloudFormation stack ID thay cho các giá trị này.
+
+### 9.1. Cập nhật AWS của M1 ngày 01/08/2026
+
+Stack `campusmeet-dev-auth` tại `ap-southeast-1` đã được cập nhật tại chỗ. CloudFormation chỉ sửa Lambda `AuthIntegrationFunction` và HTTP API hiện có, không tạo bảng, Cognito User Pool, IAM role hoặc tài nguyên thay thế mới.
+
+Các route M1 hiện nằm trong Lambda này:
+
+- hồ sơ: `/me`;
+- nhóm, thành viên và lời mời do quản trị viên tạo: `/groups/*`;
+- hộp thư lời mời: `GET /invitations`;
+- phản hồi trong ứng dụng: `POST /invitations/by-id/:invitationId/accept|decline`;
+- liên kết mời dự phòng: `/invitations/:token/*`;
+- thông báo: `/notifications/*`.
+
+Notification lời mời mở đúng `/app/invitations?invitationId=<invitationId>`; token thô không nằm trong notification. Khi đọc dữ liệu notification cũ, API cũng suy ra URL từ ID để không thể dùng notification cũ chấp nhận một lời mời mới. Source of truth là `infra/auth-integration.yaml`, `services/api/src/auth-integration.ts` và [API contract](api-contract.md).
+
+Khi người nhận chấp nhận hoặc từ chối lời mời, Lambda tự đánh dấu notification `invitation-<invitationId>` là đã đọc. Đây là thay đổi mã trong Lambda hiện có, không cần thêm bảng, index, route API hoặc IAM permission.
+
+API từ chối xóa mọi membership có vai trò `GROUP_ADMIN`; giao diện chỉ hiện thao tác xóa cho `MEMBER`. Hai thay đổi trên chỉ cập nhật Lambda/API hiện có, không tạo tài nguyên AWS, bảng, index hay quyền IAM mới.
+
+### 9.2. Chuyển sang AWS account khác
+
+Tài nguyên không tự chuyển giữa hai account. Deployment owner thực hiện theo thứ tự:
+
+1. Kiểm tra Account ID và Region của profile mới bằng `aws sts get-caller-identity` và `aws configure get region`.
+2. Deploy stack 5 bảng với tên `campusmeet-dev-data`, sau đó verify đủ 5 bảng.
+3. Deploy `campusmeet-dev-auth` từ source hiện tại với `DataTablePrefix=campusmeet-dev`; bước này dựng lại toàn bộ route M1 ở trên.
+4. Lấy `UserPoolId`, `UserPoolClientId`, `ApiUrl` mới và cập nhật `apps/web/.env` trên máy của từng thành viên.
+5. Cognito user và dữ liệu DynamoDB của account cũ không tự xuất hiện ở account mới. Với môi trường dev chưa cần giữ dữ liệu, người dùng đăng ký lại; nếu cần giữ dữ liệu phải chốt phương án export/import trước khi xóa.
+6. Chỉ dọn tài nguyên account cũ sau khi đăng ký, nhóm và lời mời hoạt động trên account mới. Bảng có `DeletionPolicy: Retain` vẫn có thể phát sinh chi phí sau khi xóa stack và phải được kiểm tra riêng.
 
 ## 10. Cấu hình frontend cho cả nhóm
 

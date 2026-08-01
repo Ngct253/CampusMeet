@@ -1,11 +1,15 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Minimal CampusMeet authentication integration-test stack.
+Description: CampusMeet shared M1 stack for Cognito, profile, group, invitation and notification APIs.
 
 Parameters:
   AllowedOrigin:
     Type: String
     Default: http://localhost:5173
+  DataTablePrefix:
+    Type: String
+    Default: campusmeet-dev
+    AllowedPattern: '^[a-z0-9-]+$'
 
 Resources:
   UserPool:
@@ -38,8 +42,8 @@ Resources:
     Properties:
       StageName: '$default'
       CorsConfiguration:
-        AllowMethods: [GET, OPTIONS]
-        AllowHeaders: [authorization, content-type]
+        AllowMethods: [GET, POST, PATCH, DELETE, OPTIONS]
+        AllowHeaders: [authorization, content-type, x-request-id, idempotency-key]
         AllowOrigins: [!Ref AllowedOrigin]
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
@@ -67,24 +71,52 @@ Resources:
               - Effect: Allow
                 Action: [logs:CreateLogStream, logs:PutLogEvents]
                 Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-api:*'
+        - PolicyName: CampusMeetM1Data
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadWriteM1Tables
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:Query
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:ConditionCheckItem
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity/index/*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-collaboration'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-collaboration/index/*'
+              - Sid: ReadVerifiedCognitoEmail
+                Effect: Allow
+                Action: cognito-idp:AdminGetUser
+                Resource: !GetAtt UserPool.Arn
 
   AuthIntegrationFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
-        EntryPoints: [auth-integration.ts]
+        EntryPoints: [services/api/src/auth-integration.ts]
         Target: es2022
         Minify: false
     Properties:
       FunctionName: !Sub '${AWS::StackName}-api'
-      CodeUri: ../services/api/src
-      Handler: auth-integration.handler
+      CodeUri: ..
+      Handler: services/api/src/auth-integration.handler
       Runtime: nodejs22.x
       Architectures: [arm64]
       Timeout: 10
       MemorySize: 128
       Role: !GetAtt AuthIntegrationFunctionRole.Arn
+      Environment:
+        Variables:
+          IDENTITY_TABLE: !Sub '${DataTablePrefix}-identity'
+          COLLABORATION_TABLE: !Sub '${DataTablePrefix}-collaboration'
+          USER_POOL_ID: !Ref UserPool
       Events:
         Health:
           Type: HttpApi
@@ -93,13 +125,20 @@ Resources:
             Path: /health
             Method: GET
             Auth: { Authorizer: NONE }
-        Me:
+        Proxy:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
-            Path: /me
-            Method: GET
+            Path: '/{proxy+}'
+            Method: ANY
             Auth: { Authorizer: CognitoAuthorizer }
+        Preflight:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: '/{proxy+}'
+            Method: OPTIONS
+            Auth: { Authorizer: NONE }
 
   AuthIntegrationLogGroup:
     Type: AWS::Logs::LogGroup
@@ -111,3 +150,5 @@ Outputs:
   UserPoolId: { Value: !Ref UserPool }
   UserPoolClientId: { Value: !Ref UserPoolClient }
   ApiUrl: { Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}' }
+  IdentityTableName: { Value: !Sub '${DataTablePrefix}-identity' }
+  CollaborationTableName: { Value: !Sub '${DataTablePrefix}-collaboration' }

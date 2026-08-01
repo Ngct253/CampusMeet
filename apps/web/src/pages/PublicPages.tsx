@@ -21,6 +21,7 @@ import {
   type AuthField,
   type AuthOperation,
 } from '../lib/auth-errors';
+import '../styles/auth.css';
 
 const pendingEmailKey = 'campusmeet:pendingEmail';
 const confirmationDestinationKey = 'campusmeet:confirmationDestination';
@@ -53,9 +54,14 @@ function AuthPage({ title, children }: { title: string; children: ReactNode }) {
   return (
     <main className={'auth-page'}>
       <section className={'auth-panel'} aria-labelledby={'auth-title'}>
-        <Link className={'brand auth-brand'} to={'/'}>
-          CampusMeet
-        </Link>
+        <div className={'auth-panel-header'}>
+          <Link className={'brand auth-brand'} to={'/'}>
+            CampusMeet
+          </Link>
+          <Link className={'auth-home-link'} to={'/'}>
+            Trang chủ
+          </Link>
+        </div>
         <h1 id={'auth-title'}>{title}</h1>
         {children}
       </section>

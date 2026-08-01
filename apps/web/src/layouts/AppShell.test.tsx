@@ -11,7 +11,7 @@ vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({
 }) }));
 
 describe('AppShell', () => {
-  it('renders navigation and mock mode banner', () => {
+  it('renders authenticated navigation without a simulation banner', () => {
     render(
       <MemoryRouter initialEntries={['/app']}>
         <Routes>
@@ -21,7 +21,8 @@ describe('AppShell', () => {
         </Routes>
       </MemoryRouter>,
     );
-    expect(screen.getByText('Chế độ dữ liệu mô phỏng')).toBeInTheDocument();
+    expect(screen.getByText('Không gian cá nhân')).toBeInTheDocument();
+    expect(screen.queryByText(/mô phỏng/i)).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Điều hướng chính' })).toBeInTheDocument();
   });
 });

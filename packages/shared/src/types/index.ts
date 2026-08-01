@@ -17,12 +17,27 @@ export interface User {
   timezone: string;
   avatarUrl?: string;
 }
+export interface UserProfile extends User {
+  emailNotificationsEnabled: boolean;
+}
 export interface Group {
   id: string;
   name: string;
   description?: string;
   createdBy: string;
   createdAt: ISODateTime;
+}
+export interface GroupSummary extends Group {
+  role: GroupRole;
+  joinedAt: ISODateTime;
+}
+export interface GroupMember {
+  membership: Membership;
+  user?: Pick<User, 'id' | 'email' | 'displayName'>;
+}
+export interface GroupDetails {
+  group: GroupSummary;
+  members: GroupMember[];
 }
 export interface Membership {
   id: string;
@@ -38,6 +53,10 @@ export interface Invitation {
   email: string;
   status: InvitationStatus;
   expiresAt: ISODateTime;
+}
+export interface InvitationDetails extends Invitation {
+  groupName: string;
+  createdAt: ISODateTime;
 }
 export interface MeetingAttendee {
   userId: string;
@@ -97,6 +116,7 @@ export interface Notification {
   title: string;
   read: boolean;
   createdAt: ISODateTime;
+  actionUrl?: string;
 }
 export interface AuditLog {
   id: string;

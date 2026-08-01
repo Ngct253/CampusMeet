@@ -1,7 +1,10 @@
-import { mockNotifications } from '../../mocks/data';
-export const getMockNotifications = async () => ({
-  success: true as const,
-  isMock: true as const,
-  requestId: 'mock-request',
-  data: mockNotifications,
-});
+import type { ApiSuccessResponse, Notification } from '@campusmeet/shared';
+import { apiClient } from '../../lib/api-client';
+
+export async function getNotifications(): Promise<Notification[]> {
+  return (await apiClient.request<ApiSuccessResponse<Notification[]>>('/notifications')).data;
+}
+
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  await apiClient.request(`/notifications/${notificationId}/read`, { method: 'POST' });
+}

@@ -1,0 +1,193 @@
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 17rem minmax(0, 1fr);
+  background: #f6f8fc;
+}
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 1.5rem 1.1rem;
+  color: white;
+  background: linear-gradient(180deg, #14203a 0%, #101a30 100%);
+}
+.brand {
+  min-height: 3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 0.55rem;
+  font-size: 1.32rem;
+  font-weight: 800;
+  text-decoration: none;
+  letter-spacing: -0.02em;
+}
+.brand-mark {
+  width: 2.35rem;
+  height: 2.35rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.75rem;
+  color: white;
+  background: linear-gradient(135deg, #6280ed, #3157d5);
+  box-shadow: 0 8px 20px rgb(49 87 213 / 35%);
+}
+.sidebar-label {
+  margin: 2.5rem 0.7rem 0.65rem;
+  color: #8390ac;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.sidebar nav {
+  display: grid;
+  gap: 0.35rem;
+}
+.sidebar nav a {
+  min-height: 3.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.75rem;
+  color: #cbd5eb;
+  font-weight: 650;
+  text-decoration: none;
+  transition:
+    color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease;
+}
+.sidebar nav a:hover {
+  color: white;
+  background: rgb(255 255 255 / 7%);
+}
+.sidebar nav a.active {
+  color: white;
+  background: linear-gradient(135deg, #3d63dd, #3157d5);
+  box-shadow: 0 10px 24px rgb(29 61 171 / 32%);
+}
+.nav-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.app-main {
+  min-width: 0;
+}
+.app-main main {
+  min-height: calc(100vh - 4.75rem);
+  padding: clamp(1.5rem, 4vw, 3.5rem);
+  background: radial-gradient(circle at 80% 0%, rgb(224 231 255 / 65%), transparent 28rem), #f6f8fc;
+}
+.topbar {
+  height: 4.75rem;
+  padding: 0 clamp(1rem, 3vw, 2rem);
+  background: rgb(255 255 255 / 92%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--color-border);
+  backdrop-filter: blur(12px);
+}
+.topbar-context {
+  display: grid;
+  color: var(--color-text);
+}
+.topbar-context strong {
+  font-size: 0.95rem;
+}
+.topbar-context span {
+  color: var(--color-muted);
+  font-size: 0.78rem;
+}
+.topbar-user {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.user-avatar {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+  font-weight: 800;
+}
+.user-identity {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #33415c;
+  font-size: 0.9rem;
+}
+.topbar-user button {
+  min-height: 2.5rem;
+  padding: 0.45rem 0.8rem;
+}
+@media (max-width: 800px) {
+  .app-shell {
+    display: block;
+  }
+  .sidebar {
+    position: static;
+    height: auto;
+    padding: 1rem;
+  }
+  .sidebar-label {
+    display: none;
+  }
+  .sidebar nav {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(4.5rem, 1fr);
+    margin-top: 1rem;
+    overflow-x: auto;
+  }
+  .sidebar nav a {
+    min-width: 4.5rem;
+    justify-content: center;
+    padding: 0.65rem;
+    font-size: 0;
+  }
+  .sidebar nav a .nav-icon {
+    width: 1.4rem;
+    height: 1.4rem;
+  }
+  .topbar {
+    padding: 0 1rem;
+  }
+  .topbar-context span {
+    display: none;
+  }
+  .user-identity {
+    max-width: 9rem;
+  }
+  .app-main main {
+    padding: 1.5rem 1rem 2.5rem;
+  }
+}
+@media (max-width: 480px) {
+  .topbar-context {
+    display: none;
+  }
+  .topbar-user {
+    width: 100%;
+  }
+  .user-identity {
+    flex: 1;
+  }
+}

@@ -172,6 +172,10 @@ Resources:
                 Effect: Allow
                 Action: iam:PassRole
                 Resource: !GetAtt SchedulerExecutionRole.Arn
+              - Sid: ReadAuthenticatedUserProfile
+                Effect: Allow
+                Action: cognito-idp:AdminGetUser
+                Resource: !GetAtt UserPool.Arn
       Tags: *ResourceTags
 
   ApiFunction:
@@ -193,6 +197,7 @@ Resources:
           MEETING_DATA_TABLE: !Sub '${DataTablePrefix}-meeting-data'
           TASK_DATA_TABLE: !Sub '${DataTablePrefix}-task-data'
           AI_WORK_TABLE: !Sub '${DataTablePrefix}-ai-work'
+          USER_POOL_ID: !Ref UserPool
           GOOGLE_SECRET_REFERENCE: !Ref GoogleSecretReference
       Events:
         Health:

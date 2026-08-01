@@ -145,7 +145,7 @@ Kỳ vọng `/health` trả `200`; `/me` không có token trả `401`. Frontend 
 | `apps/web/src/auth/AuthProvider.tsx`   | Trạng thái phiên và đăng xuất                          |
 | `apps/web/src/auth/RequireAuth.tsx`    | Bảo vệ route                                           |
 | `apps/web/src/pages/PublicPages.tsx`   | Đăng ký, xác nhận, đăng nhập và quên mật khẩu          |
-| `services/api/src/auth-integration.ts` | `/health` và `/me` cho stack auth                      |
+| `services/api/src/auth-integration.ts` | Route hồ sơ, nhóm, lời mời và thông báo của M1         |
 
 ## 8. Lỗi thường gặp
 

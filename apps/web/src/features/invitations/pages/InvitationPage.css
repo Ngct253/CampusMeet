@@ -1,0 +1,48 @@
+.invitation-card {
+  max-width: 38rem;
+}
+.invitation-card h2 {
+  margin-bottom: 0;
+}
+.invitation-inbox {
+  display: grid;
+  gap: 0.9rem;
+}
+.invitation-inbox-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+}
+.invitation-inbox-card h2 {
+  margin: 0;
+}
+.invitation-inbox-card p {
+  margin: 0.4rem 0 0;
+  color: var(--color-muted);
+}
+.invitation-empty {
+  min-height: 14rem;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.75rem;
+  text-align: center;
+}
+.invitation-empty p {
+  margin: 0;
+}
+.invitation-skeleton {
+  display: grid;
+  gap: 0.9rem;
+}
+.invitation-skeleton span {
+  min-height: 7rem;
+  border-radius: var(--radius-md);
+}
+@media (max-width: 640px) {
+  .invitation-inbox-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

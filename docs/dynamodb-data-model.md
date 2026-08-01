@@ -76,10 +76,10 @@ Thu gọn bảng không làm mất entity. Nó chỉ đặt các item thường 
 
 | Entity             | PK                  | SK                                          | Index                                                                            |
 | ------------------ | ------------------- | ------------------------------------------- | -------------------------------------------------------------------------------- |
-| User profile       | `USER#<userId>`     | `PROFILE`                                   | `GSI1PK=COGNITO#<sub>`, `GSI1SK=USER#<userId>`                                   |
+| User profile       | `USER#<userId>`     | `PROFILE`                                   | `GSI1PK=COGNITO#<sub>`, `GSI1SK=USER#<userId>`; `GSI2PK=EMAIL#<normalizedEmail>`, `GSI2SK=USER#<userId>` |
 | User preference    | `USER#<userId>`     | `PREFERENCE`                                | Không cần                                                                        |
 | Google integration | `USER#<userId>`     | `INTEGRATION#GOOGLE`                        | Có thể dùng sparse index theo trạng thái nếu cần                                 |
-| Notification       | `USER#<userId>`     | `NOTIFICATION#<createdAt>#<notificationId>` | Khi unread: `GSI2PK=USER#<userId>#UNREAD`, `GSI2SK=<createdAt>#<notificationId>` |
+| Notification       | `USER#<userId>`     | `NOTIFICATION#<createdAt>#<notificationId>` | `GSI1PK=NOTIFICATION#<id>`, `GSI1SK=USER#<userId>`; khi unread dùng `GSI2PK=USER#<userId>#UNREAD` |
 | OAuth state        | `OAUTH#<stateHash>` | `STATE`                                     | TTL bắt buộc                                                                     |
 
 Google access/refresh token không đặt trực tiếp trong item nếu chưa có lớp mã hóa application phù hợp. Item nên giữ secret reference hoặc ciphertext đã mã hóa; browser không nhận refresh token.
@@ -100,7 +100,7 @@ Google access/refresh token không đặt trực tiếp trong item nếu chưa c
 | ----------- | ----------------- | ----------------------------- | ------------------------------------------------------------ |
 | Group       | `GROUP#<groupId>` | `META`                        | Không cần chỉ mục creator vì creator đồng thời là membership |
 | Membership  | `GROUP#<groupId>` | `MEMBER#<userId>`             | `GSI1PK=USER#<userId>`, `GSI1SK=GROUP#<joinedAt>#<groupId>`  |
-| Invitation  | `GROUP#<groupId>` | `INVITE#<invitationId>`       | `GSI2PK=TOKEN#<tokenHash>`, `GSI2SK=INVITE#<invitationId>`   |
+| Invitation  | `GROUP#<groupId>` | `INVITE#<invitationId>`       | `GSI1PK=EMAIL#<normalizedEmail>` để tra lời mời; `GSI2PK=TOKEN#<tokenHash>` để phản hồi bằng token |
 | Audit event | `GROUP#<groupId>` | `AUDIT#<createdAt>#<auditId>` | Không cần                                                    |
 
 ### 5.2 Access patterns

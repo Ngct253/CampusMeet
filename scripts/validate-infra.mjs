@@ -91,4 +91,7 @@ for (const invalidAction of ['dynamodb:TransactGetItems', 'dynamodb:TransactWrit
   );
 }
 
+assert.equal(appTemplate.includes('USER_POOL_ID: !Ref UserPool'), true, 'API must receive the Cognito User Pool id.');
+assert.equal(appTemplate.includes('cognito-idp:AdminGetUser'), true, 'API role must be able to read verified Cognito attributes.');
+
 console.log('Infrastructure contract validation passed: five-table DynamoDB model.');
