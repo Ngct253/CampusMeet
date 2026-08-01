@@ -72,7 +72,7 @@ npm run dev
 
 ## Cấu hình Cognito frontend
 
-Một thành viên deploy auth stack; các thành viên khác chỉ nhận ba output public trong `apps/web/.env.local`:
+Một thành viên deploy auth stack; các thành viên khác chỉ nhận ba output public trong `apps/web/.env`:
 
 ```dotenv
 VITE_COGNITO_USER_POOL_ID=<UserPoolId>
@@ -80,7 +80,7 @@ VITE_COGNITO_USER_POOL_CLIENT_ID=<UserPoolClientId>
 VITE_API_BASE_URL=<ApiUrl>
 ```
 
-Không commit `.env.local`, token, password hoặc AWS credential.
+Không commit `.env`, token, password hoặc AWS credential.
 
 Validate/build auth:
 

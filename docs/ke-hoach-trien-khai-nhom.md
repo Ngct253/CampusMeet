@@ -345,6 +345,6 @@ Một feature chỉ hoàn thành khi có:
 - Branch từ `main` mới nhất.
 - Không để branch dài chứa nhiều chức năng độc lập.
 - PR mô tả mục tiêu, contract, data access pattern, test, migration và rollback.
-- Không commit `.env.local`, token, access key, secret hoặc dữ liệu thật.
+- Không commit `.env`, token, access key, secret hoặc dữ liệu thật.
 - Không merge khi CI đỏ hoặc physical schema khác `docs/dynamodb-data-model.md`.
 - Mọi thay đổi table/GSI phải sửa đồng thời IaC, validation script và migration/runbook.
