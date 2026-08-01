@@ -248,7 +248,7 @@ User kết nối Google
 - Chỉ hiển thị Meet URL khi `READY`.
 - Retry dùng idempotency/request ID; không tạo event mới mù quáng.
 - Google artifact không có là kết quả hợp lệ, không làm mất meeting/minutes/task nội bộ.
-- Upload khóa ở 10 file/meeting, 50 MB/file; tài liệu TXT/PDF/DOCX, audio MP3/WAV/WebM/M4A và tối đa 60 phút. Complete handler kiểm tra `HeadObject`; worker kiểm tra extension, MIME và magic bytes trước khi chuyển `READY`.
+- Upload khóa ở 10 file/meeting, 50 MB/file; tài liệu TXT/Markdown/CSV/TSV/JSON/NDJSON/HTML/XHTML/XML/YAML/iCalendar, PDF, DOCX/PPTX/XLSX và ODT/ODP/ODS; audio MP3/WAV/WebM/M4A và tối đa 60 phút. Complete handler kiểm tra `HeadObject`; worker kiểm tra extension, MIME và signature/cấu trúc file khi áp dụng trước khi chuyển `READY`.
 - Upload chưa hoàn tất expire sau 1 ngày; raw audio giữ 7 ngày và có thể bị xóa sớm theo quyền.
 - Add-on là client surface trong Google Meet, không phải mục điều hướng của CampusMeet dashboard.
 - Add-on không bỏ qua Cognito, membership, role hoặc audit. M1 chỉ bàn giao auth/session và authorization helper; M4 sở hữu route, SDK, manifest, mapping và deployment Add-on.

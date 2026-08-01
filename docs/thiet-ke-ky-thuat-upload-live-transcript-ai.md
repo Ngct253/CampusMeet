@@ -100,7 +100,9 @@ Browser getDisplayMedia/tab audio
 8. Object chưa xác minh giữ trạng thái `VALIDATING` và không được đưa vào STT/ingestion.
 9. S3 bật Block Public Access, encryption, lifecycle và CORS chỉ cho origin đã chốt; không dùng wildcard production.
 
-Mỗi meeting nhận tối đa 10 file, mỗi file tối đa 50 MB. Tài liệu hỗ trợ TXT/PDF/DOCX; audio hỗ trợ MP3/WAV/WebM/M4A và tối đa 60 phút. Chỉ file qua kiểm tra extension, MIME, magic bytes, size và checksum mới chuyển `READY`.
+Mỗi meeting nhận tối đa 10 file, mỗi file tối đa 50 MB. Tài liệu hỗ trợ TXT/Markdown/CSV/TSV/JSON/NDJSON/HTML/XHTML/XML/YAML/iCalendar, PDF, DOCX/PPTX/XLSX và ODT/ODP/ODS; audio hỗ trợ MP3/WAV/WebM/M4A và tối đa 60 phút. Chỉ file qua kiểm tra extension, MIME, signature/cấu trúc khi áp dụng, size và checksum mới chuyển `READY`.
+
+Các file text phải giải mã được theo MIME đã khai báo; JSON/NDJSON phải parse hợp lệ. PDF phải có signature PDF. DOCX/PPTX/XLSX và ODF phải là ZIP hợp lệ và chứa cấu trúc nội bộ tương ứng; không chỉ tin extension hoặc MIME do browser gửi. Normalized text bị giới hạn 5.000.000 ký tự trước khi ghi vào prefix Knowledge Base.
 
 ## 3. Xử lý AI bất đồng bộ
 
@@ -390,7 +392,7 @@ Luồng AI chỉ hoàn thành khi:
 | Trình duyệt/nguồn capture       | Chrome desktop; người dùng chủ động chọn tab Google Meet có audio và cấp microphone; không tự capture hoặc tự fallback nguồn.                |
 | STT                             | Chỉ Amazon Transcribe; `languageCode` explicit, frontend mặc định `vi-VN`, PCM 16-bit mono 16 kHz; không `AUTO` hoặc Deepgram.               |
 | Region                          | Dev mặc định `ap-southeast-1`; model generation/embedding vẫn lấy từ environment.                                                             |
-| File allowlist                  | TXT/PDF/DOCX và MP3/WAV/WebM/M4A; tối đa 10 file/meeting, 50 MB/file và audio 60 phút.                                                        |
+| File allowlist                  | TXT/Markdown/CSV/TSV/JSON/NDJSON/HTML/XHTML/XML/YAML/iCalendar, PDF, DOCX/PPTX/XLSX, ODT/ODP/ODS và MP3/WAV/WebM/M4A; tối đa 10 file/meeting, 50 MB/file và audio 60 phút. |
 | Retention                       | Upload chưa hoàn tất 1 ngày; raw audio 7 ngày; AIJob/conversation 30 ngày; source/vector đến khi source hoặc meeting bị xóa.                 |
 | Model config                    | Generation model, embedding model/dimension là environment config; không hard-code model version vào domain.                                 |
 | Chunking/citation               | Baseline 300 token, overlap 20%; giữ mapping segment/timestamp; citation dùng URI CampusMeet, không lộ S3 key.                                |

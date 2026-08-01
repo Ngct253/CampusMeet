@@ -256,6 +256,38 @@ export const aiRequestPayloadSchema = z.discriminatedUnion('operation', [
 ]);
 export type AIRequestPayload = z.infer<typeof aiRequestPayloadSchema>;
 
+export const supportedDocumentContentTypes = [
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'text/tab-separated-values',
+  'text/html',
+  'text/calendar',
+  'text/xml',
+  'text/yaml',
+  'text/x-yaml',
+  'application/json',
+  'application/x-ndjson',
+  'application/ndjson',
+  'application/xml',
+  'application/xhtml+xml',
+  'application/yaml',
+  'application/x-yaml',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.oasis.opendocument.text',
+  'application/vnd.oasis.opendocument.presentation',
+  'application/vnd.oasis.opendocument.spreadsheet',
+] as const;
+
+export const documentContentTypeSchema = z
+  .string()
+  .transform((contentType) => contentType.split(';', 1)[0]!.trim().toLowerCase())
+  .pipe(z.enum(supportedDocumentContentTypes));
+export type DocumentContentType = z.infer<typeof documentContentTypeSchema>;
+
 export const knowledgeIngestionPayloadSchema = z.object({
   operation: z.literal('INGEST_SOURCE'),
   actorId: z.string().min(1),
@@ -266,11 +298,7 @@ export const knowledgeIngestionPayloadSchema = z.object({
   sourceVersion: z.number().int().positive(),
   approved: z.literal(true),
   inputObjectKey: z.string().min(1),
-  contentType: z.enum([
-    'text/plain',
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  ]),
+  contentType: documentContentTypeSchema,
 });
 export type KnowledgeIngestionPayload = z.infer<typeof knowledgeIngestionPayloadSchema>;
 

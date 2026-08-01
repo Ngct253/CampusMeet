@@ -49,7 +49,7 @@ CampusMeet web và CampusMeet Meet Add-on là hai client surface của cùng h�
 ## Quy ước contract cho AI và artifact
 
 - API nghiệp vụ không nhận binary audio/tài liệu. API chỉ cấp presigned URL; Browser upload trực tiếp vào S3 user-content và gọi complete với checksum.
-- Mỗi meeting nhận tối đa 10 file. Mỗi file tối đa 50 MB; tài liệu hỗ trợ TXT/PDF/DOCX, audio hỗ trợ MP3/WAV/WebM/M4A và audio tối đa 60 phút. Complete handler phải kiểm tra lại size/checksum bằng `HeadObject`; worker tiếp tục kiểm tra extension, MIME và magic bytes trước khi chuyển attachment sang `READY`.
+- Mỗi meeting nhận tối đa 10 file. Mỗi file tối đa 50 MB; tài liệu hỗ trợ TXT/Markdown/CSV/TSV/JSON/NDJSON/HTML/XHTML/XML/YAML/iCalendar, PDF, DOCX/PPTX/XLSX và ODT/ODP/ODS; audio hỗ trợ MP3/WAV/WebM/M4A và audio tối đa 60 phút. Complete handler phải kiểm tra lại size/checksum bằng `HeadObject`; worker tiếp tục kiểm tra extension, MIME và signature/cấu trúc file khi áp dụng trước khi chuyển attachment sang `READY`.
 - Parse, STT, ingestion và generation trả `202 Accepted` cùng `aiJobId`. Client theo dõi bằng `GET /ai/jobs/:id`; không giữ request mở chờ file dài.
 - `MeetingChatRequest` gồm `question`, `conversationId?` và `intent=QUESTION_ANSWER|LATE_JOIN_SUMMARY`; `meetingId` lấy từ path. Current-meeting chat dùng tài liệu `READY`, approved sources và các live segment final đọc trực tiếp từ transcript repository, không chờ Knowledge Base ingestion. Citation live transcript phải ghi `Speaker N`, timestamp và trạng thái chưa duyệt.
 - `GroupKnowledgeQuery` gồm `question`, `scope=SELECTED_MEETINGS|WHOLE_GROUP`, `meetingIds?` và `conversationId?`. `SELECTED_MEETINGS` bắt buộc có danh sách; `WHOLE_GROUP` không nhận meeting ngoài path group. Backend kiểm tra mọi meeting thuộc cùng `groupId` rồi áp filter group/meeting-set/ACL trước retrieval.
@@ -119,7 +119,7 @@ Nghiệp vụ chưa triển khai:
 | Authorization  | Chốt helper membership/admin dùng chung theo `groupId`                                                                                                              |
 | Idempotency    | Mọi mutation bất đồng bộ nhận `Idempotency-Key`; lưu record theo actor + operation + resource                                                                        |
 | Pagination     | Chốt cursor format cho list endpoints                                                                                                                               |
-| Upload policy  | 10 file/meeting, 50 MB/file; TXT/PDF/DOCX và MP3/WAV/WebM/M4A; audio tối đa 60 phút; checksum + magic-byte validation                                              |
+| Upload policy  | 10 file/meeting, 50 MB/file; TXT/Markdown/CSV/TSV/JSON/NDJSON/HTML/XHTML/XML/YAML/iCalendar, PDF, DOCX/PPTX/XLSX, ODT/ODP/ODS và MP3/WAV/WebM/M4A; audio tối đa 60 phút; checksum + signature/cấu trúc validation khi áp dụng |
 | Consent        | Organizer hoặc Group Admin được start recording/live STT sau consent; raw audio giữ 7 ngày và cho phép xóa sớm theo quyền                                         |
 | STT provider   | Chỉ Amazon Transcribe trong MVP; `languageCode` explicit, frontend mặc định `vi-VN`, không `AUTO` hoặc Deepgram                                                    |
 | AI job         | Chốt state transition, timeout, retry, DLQ/failure handling và token/phút/cost metadata                                                                             |
