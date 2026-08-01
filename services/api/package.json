@@ -7,7 +7,8 @@
     "@aws-sdk/client-dynamodb": "^3.1101.0",
     "@aws-sdk/client-sfn": "^3.1101.0",
     "@aws-sdk/lib-dynamodb": "^3.1101.0",
-    "@campusmeet/shared": "0.1.0"
+    "@campusmeet/shared": "0.1.0",
+    "esbuild": "0.25.12"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",

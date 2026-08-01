@@ -110,7 +110,7 @@ describe('AI request service', () => {
   });
 
   it('requires Group Admin before progress analysis', async () => {
-    const { access, service } = setup();
+    const { access, jobs, service } = setup();
 
     await service.requestProgressAnalysis({
       actorId: 'admin-1',
@@ -121,5 +121,43 @@ describe('AI request service', () => {
     });
 
     expect(access.requireGroupAdmin).toHaveBeenCalledWith('admin-1', 'group-1');
+    expect(jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupId: 'group-1',
+        type: 'PROGRESS_ANALYSIS',
+        payload: expect.objectContaining({ operation: 'PROGRESS_ANALYSIS' }),
+      }),
+    );
   });
+
+  it.each([
+    ['minutes draft', 'requestMinutesDraft', 'GENERATE_MINUTES', 'MINUTES_DRAFT'],
+    ['task proposals', 'requestTaskProposals', 'GENERATE_TASK_PROPOSALS', 'TASK_PROPOSALS'],
+  ] as const)(
+    'authorizes organizer/admin and queues %s without mutating M3 data',
+    async (_label, method, type, operation) => {
+      const { access, jobs, service } = setup();
+
+      await service[method]({
+        actorId: 'organizer-1',
+        meetingId: 'meeting-1',
+        request: {},
+        idempotencyKey: `idem-${operation}`,
+        requestId: `request-${operation}`,
+      });
+
+      expect(access.requireMeetingOrganizerOrAdmin).toHaveBeenCalledWith(
+        'organizer-1',
+        'meeting-1',
+      );
+      expect(jobs.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          groupId: 'group-1',
+          meetingId: 'meeting-1',
+          type,
+          payload: expect.objectContaining({ operation }),
+        }),
+      );
+    },
+  );
 });

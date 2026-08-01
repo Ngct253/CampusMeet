@@ -179,12 +179,12 @@ Resources:
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
-        EntryPoints: [src/index.ts]
+        EntryPoints: [services/api/src/index.ts]
         Target: es2022
         Minify: false
     Properties:
-      CodeUri: ../services/api
-      Handler: src/index.handler
+      CodeUri: ..
+      Handler: services/api/src/index.handler
       Role: !GetAtt ApiLambdaRole.Arn
       Environment:
         Variables:
@@ -252,12 +252,12 @@ Resources:
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
-        EntryPoints: [src/index.ts]
+        EntryPoints: [services/api/src/index.ts]
         Target: es2022
         Minify: false
     Properties:
-      CodeUri: ../services/api
-      Handler: src/index.reminderHandler
+      CodeUri: ..
+      Handler: services/api/src/index.reminderHandler
       Role: !GetAtt ReminderLambdaRole.Arn
       Environment:
         Variables:
