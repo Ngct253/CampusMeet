@@ -1,16 +1,16 @@
-# Hướng dẫn triển khai AWS CampusMeet theo giai đoạn
+# Runbook triển khai lại CampusMeet: IAM, 5 bảng và đăng nhập
 
-Tài liệu này là runbook triển khai AWS. Không coi template tồn tại hoặc build thành công là bằng chứng đã deploy.
+Tài liệu này là luồng duy nhất để dựng môi trường AWS dev dùng chung từ đầu: tạo quyền cho thành viên, deploy 5 bảng DynamoDB, deploy Cognito/API đăng nhập, cấu hình frontend và kiểm tra đăng ký/đăng nhập. Không coi template tồn tại hoặc build thành công là bằng chứng đã deploy.
 
-## 1. Trạng thái
+## 1. Kết quả sau khi hoàn thành
 
-| Giai đoạn                  | Trạng thái                                                                       |
-| -------------------------- | -------------------------------------------------------------------------------- |
-| Authentication integration | Đã từng deploy và xác minh; stack thử trước đó đã cleanup                        |
-| DynamoDB                   | 5 bảng đã deploy và verify; source nằm trong `infra/data-foundation.yaml`        |
-| API persistence            | Chưa hoàn thiện; repository vẫn còn skeleton ở các vertical slice chưa implement |
-| Upload/live transcript/AI  | Kiến trúc và contract đã chốt; phân công theo kế hoạch nhóm                      |
-| Full application stack     | Chưa production-ready                                                            |
+| Thành phần         | Kết quả cần có                                                                  |
+| ------------------ | ------------------------------------------------------------------------------- |
+| Thành viên AWS     | Mỗi người dùng IAM user riêng và đăng nhập CLI bằng `aws login`                 |
+| DynamoDB           | Đúng 5 bảng `campusmeet-dev-*`, `PAY_PER_REQUEST`, TTL/GSI đúng contract        |
+| Đăng nhập ứng dụng | Cognito User Pool, web client, Lambda `/health`, `/me` và HTTP API đã hoạt động |
+| Frontend local     | `apps/web/.env` lấy đúng ba output CloudFormation                               |
+| Kiểm tra cuối      | Đăng ký, nhận mã, xác nhận, đăng nhập, mở `/app` và đăng xuất thành công        |
 
 Source of truth data model: [Mô hình dữ liệu DynamoDB](dynamodb-data-model.md).
 
@@ -26,41 +26,79 @@ CampusMeet tách stack để giảm blast radius:
 
 `infra/template.yaml` không tạo lại bảng. Data stack phải tồn tại trước application stack.
 
-## 3. Điều kiện trước
+Thứ tự bắt buộc:
 
-- AWS account dev: `604360241374`.
-- Region: `ap-southeast-1`.
-- AWS CLI và SAM CLI đã cài.
-- Node.js 22 LTS và npm 10+.
-- Dùng IAM user/profile riêng, không root và không dùng chung access key.
-- MFA bật cho người dùng con người.
-- Người thực hiện deploy có quyền CloudFormation/SAM/DynamoDB cần thiết.
-- Budget alert đã cấu hình.
-
-Kiểm tra identity trước mọi thao tác:
-
-```powershell
-aws sts get-caller-identity `
-  --profile <profile> `
-  --region ap-southeast-1
+```text
+IAM user/CLI → data stack → verify 5 bảng → auth stack → lấy outputs → .env → smoke test login
 ```
 
-Kết quả `Account` phải là `604360241374`.
+`infra/template.yaml` chưa production-ready và không nằm trong lần dựng nền tảng này.
 
-## 4. Validate data foundation
+## 3. Điều kiện trước
+
+- Cả nhóm đã chốt một AWS account dev và ghi lại Account ID của tài khoản đó.
+- Region: `ap-southeast-1`.
+- AWS CLI `2.32.0` trở lên và AWS SAM CLI đã cài.
+- Node.js 22 LTS và npm 10+.
+- Mỗi người dùng IAM user riêng; không dùng root hằng ngày và không tạo/chia sẻ access key dài hạn.
+- Một người giữ vai trò deployment owner vì auth template tạo IAM execution role.
+- Budget alert đã cấu hình.
+
+Mỗi thành viên đăng nhập bằng credential Console của chính mình:
+
+```powershell
+aws login
+aws sts get-caller-identity
+```
+
+Nếu máy có nhiều tài khoản AWS, dùng profile riêng trong cả hai lệnh. Các lệnh còn lại trong runbook dùng profile mặc định.
+
+Ghi Account ID để dùng khi verify:
+
+```powershell
+$AccountId = aws sts get-caller-identity --query Account --output text
+$AccountId
+```
+
+Không tiếp tục nếu Account ID hoặc Region không đúng môi trường nhóm đã chốt.
+
+## 4. Cấp quyền IAM cho thành viên
+
+Deployment owner thực hiện một lần trong AWS Console:
+
+1. Nếu account chưa có deployment owner, root chỉ dùng một lần để tạo `campusmeet-admin`, cấp Console access và `AdministratorAccess`, sau đó đăng xuất root. Không tạo thêm admin nếu account đã có owner tương đương.
+2. Mở **IAM → User groups → Create group** và tạo `CampusMeetDevelopers` nếu chưa có.
+3. Gắn `SignInLocalDevelopmentAccess` để thành viên dùng `aws login` với credential tạm thời.
+4. Nếu đây là account dev chỉ dành cho CampusMeet và nhóm cần thao tác các dịch vụ AWS, gắn `PowerUserAccess`. Policy này không cho quản lý IAM user/group.
+5. Tạo một IAM user cho từng người, bật Console access, yêu cầu đổi mật khẩu lần đầu và thêm vào `CampusMeetDevelopers`.
+6. Gửi sign-in URL, IAM username và mật khẩu tạm qua kênh riêng; không đưa vào Git hoặc nhóm chat công khai.
+7. Không tạo access key cho người dùng con người.
+
+`PowerUserAccess` vẫn không cho tạo IAM role hoặc `iam:PassRole`. Vì `infra/auth-integration.yaml` tạo execution role, chỉ deployment owner có quyền IAM phù hợp mới deploy auth stack. Thành viên khác phát triển tính năng, đọc logs và dùng tài nguyên dev qua quyền nhóm; không tự deploy chồng stack dùng chung.
+
+Mỗi thành viên xác minh CLI:
+
+```powershell
+aws --version
+aws login
+aws sts get-caller-identity
+```
+
+Kết quả phải xác định đúng IAM user/session của người đang đăng nhập và `Account` phải bằng `$AccountId` mà nhóm đã chốt.
+
+## 5. Validate data foundation
 
 ```powershell
 sam validate `
   --template-file infra/data-foundation.yaml `
   --lint `
-  --profile <profile> `
   --region ap-southeast-1
 ```
 
 Hoặc:
 
 ```powershell
-npm run sam:validate:data -- --profile <profile> --region ap-southeast-1
+npm run sam:validate:data -- --region ap-southeast-1
 ```
 
 Expected resources:
@@ -83,12 +121,12 @@ campusmeet-dev-task-data
 campusmeet-dev-ai-work
 ```
 
-## 5. Preview data change set
+## 6. Preview data change set
 
 ```powershell
 sam deploy `
   --template-file infra/data-foundation.yaml `
-  --stack-name <data-stack-name> `
+  --stack-name campusmeet-dev-data-v2 `
   --resolve-s3 `
   --parameter-overrides `
     Environment=dev `
@@ -96,7 +134,6 @@ sam deploy `
     EnablePointInTimeRecovery=false `
     EnableDeletionProtection=false `
   --no-execute-changeset `
-  --profile <profile> `
   --region ap-southeast-1
 ```
 
@@ -113,34 +150,32 @@ Review change set:
 
 Nếu change set có hành động ngoài danh sách trên, không execute.
 
-## 6. Execute data stack
+## 7. Execute data stack
 
 Có thể execute change set trong CloudFormation Console sau review, hoặc chạy lại deploy không có `--no-execute-changeset`:
 
 ```powershell
 sam deploy `
   --template-file infra/data-foundation.yaml `
-  --stack-name <data-stack-name> `
+  --stack-name campusmeet-dev-data-v2 `
   --resolve-s3 `
   --parameter-overrides `
     Environment=dev `
     TablePrefix=campusmeet-dev `
     EnablePointInTimeRecovery=false `
     EnableDeletionProtection=false `
-  --profile <profile> `
   --region ap-southeast-1
 ```
 
 Không đóng terminal khi chưa đọc kết quả. Nếu stack thất bại, đọc Events trước khi retry.
 
-## 7. Verify 5 bảng
+## 8. Verify 5 bảng
 
 ```powershell
 powershell -NoProfile -File scripts/verify-data-foundation.ps1 `
-  -Profile <profile> `
   -Region ap-southeast-1 `
   -TablePrefix campusmeet-dev `
-  -ExpectedAccountId 604360241374
+  -ExpectedAccountId $AccountId
 ```
 
 Script kiểm tra:
@@ -156,90 +191,121 @@ Script kiểm tra:
 
 ```powershell
 aws cloudformation describe-stacks `
-  --stack-name <data-stack-name> `
+  --stack-name campusmeet-dev-data-v2 `
   --query "Stacks[0].Outputs" `
-  --profile <profile> `
   --region ap-southeast-1
 ```
 
 Lưu bằng chứng outputs trong ticket/PR; không hard-code ARN/account ID vào source.
 
-## 8. Cấu hình application stack
+## 9. Deploy Cognito và API đăng nhập
 
-`infra/template.yaml` nhận:
-
-```text
-Environment=dev
-DataTablePrefix=campusmeet-dev
-```
-
-Lambda environment nhận:
-
-```dotenv
-IDENTITY_TABLE=campusmeet-dev-identity
-COLLABORATION_TABLE=campusmeet-dev-collaboration
-MEETING_DATA_TABLE=campusmeet-dev-meeting-data
-TASK_DATA_TABLE=campusmeet-dev-task-data
-AI_WORK_TABLE=campusmeet-dev-ai-work
-```
-
-Validate application template:
+Deployment owner chạy từ thư mục gốc repository:
 
 ```powershell
-sam validate `
-  --template-file infra/template.yaml `
-  --lint `
-  --profile <profile> `
-  --region ap-southeast-1
-```
+npm ci
 
-Application stack chỉ được deploy sau khi repository dùng đúng 5 biến môi trường và kiểm thử persistence đạt. Thứ tự triển khai chức năng nằm tại [Kế hoạch triển khai nhóm](ke-hoach-trien-khai-nhom.md); cấu trúc code nằm tại [Hướng dẫn cấu trúc repository](huong-dan-cau-truc-repository.md).
-
-## 9. Smoke test data layer
-
-Data stack chỉ chứng minh hạ tầng. Sau khi repository được implement, smoke test tối thiểu:
-
-1. Đăng nhập Cognito.
-2. Tạo group.
-3. Đọc group và creator membership.
-4. Mời/chấp nhận thành viên bằng token hash.
-5. Tạo meeting và query timeline group.
-6. Lưu minutes version.
-7. Tạo/update task và query dashboard theo GSI.
-8. Tạo notification và mark read.
-9. Complete upload retry hai lần nhưng chỉ có một AIJob.
-10. Gửi lại final transcript segment cùng sequence nhưng không duplicate.
-11. Query RAG group A không trả source group B.
-
-Lưu request ID và kết quả; không lưu token/password/content nhạy cảm.
-
-## 10. Rollback
-
-Nếu repository/application lỗi:
-
-1. Không xóa data stack ngay vì tables có `Retain`.
-2. Rollback application stack/code về phiên bản ổn định gần nhất.
-3. Dừng ghi vào 5 bảng nếu mutation chưa an toàn.
-4. Đọc CloudFormation Events, Lambda logs và request IDs.
-5. Không copy dữ liệu ngược tự động; review mapping và business invariants trước mọi thao tác phục hồi.
-
-## 11. Auth integration
-
-Auth stack vẫn deploy riêng khi cần xác minh Cognito:
-
-```powershell
 sam validate `
   --template-file infra/auth-integration.yaml `
   --lint `
-  --profile <profile> `
   --region ap-southeast-1
 
 npm run sam:build:auth
 ```
 
-Frontend dùng `UserPoolId`, `UserPoolClientId`, `ApiUrl` trong `.env`. Các giá trị này là public client config, không phải secret.
+Tạo change set để kiểm tra trước:
 
-## 12. Hạ tầng upload/live transcript/AI
+```powershell
+sam deploy `
+  --template-file infra/auth-integration.yaml `
+  --stack-name campusmeet-dev-auth `
+  --resolve-s3 `
+  --capabilities CAPABILITY_IAM `
+  --parameter-overrides AllowedOrigin=http://localhost:5173 `
+  --no-execute-changeset `
+  --region ap-southeast-1
+```
+
+Change set chỉ được tạo các thành phần của stack auth: Cognito User Pool/client, HTTP API, Lambda, execution role và log group. Sau khi review, execute change set trong CloudFormation Console hoặc chạy lại lệnh trên và bỏ `--no-execute-changeset`.
+
+Đọc ba output public:
+
+```powershell
+aws cloudformation describe-stacks `
+  --stack-name campusmeet-dev-auth `
+  --query "Stacks[0].Outputs" `
+  --output table `
+  --region ap-southeast-1
+```
+
+Kết quả phải có `UserPoolId`, `UserPoolClientId` và `ApiUrl`. Không dùng User Pool ARN, Lambda URL hoặc CloudFormation stack ID thay cho các giá trị này.
+
+## 10. Cấu hình frontend cho cả nhóm
+
+Mỗi thành viên tạo `apps/web/.env` từ `apps/web/.env.example` và điền output của cùng stack:
+
+```dotenv
+VITE_COGNITO_USER_POOL_ID=<UserPoolId>
+VITE_COGNITO_USER_POOL_CLIENT_ID=<UserPoolClientId>
+VITE_API_BASE_URL=<ApiUrl>
+```
+
+Quy tắc:
+
+- không commit `.env`;
+- không thêm `/dev` vào `ApiUrl` vì auth stack dùng stage `$default`;
+- không thêm dấu `/` cuối URL;
+- `VITE_*` là public client config, không đặt password, access key hoặc token vào đây;
+- khi auth stack được dựng lại, cả nhóm phải cập nhật lại ba giá trị vì ID/URL có thể đổi.
+
+Chi tiết lấy từng output bằng CLI/Console và xử lý lỗi nằm trong [Hướng dẫn cấu hình đăng nhập](huong-dan-cau-hinh-dang-nhap.md).
+
+## 11. Kiểm tra đăng ký và đăng nhập
+
+```powershell
+npm run dev
+```
+
+Kiểm tra theo đúng thứ tự:
+
+1. Mở `http://localhost:5173/sign-up` và đăng ký bằng email thật.
+2. Xác nhận Cognito gửi mã; kiểm tra spam nếu chưa thấy email.
+3. Nhập mã tại `/confirm-sign-up` và xác nhận user chuyển sang `CONFIRMED` trong Cognito Console.
+4. Đăng nhập tại `/sign-in` và mở được `/app`.
+5. Đóng/mở lại trình duyệt và xác nhận phiên vẫn được khôi phục.
+6. Đăng xuất và xác nhận `/app` chuyển về `/sign-in`.
+
+Kiểm tra API public:
+
+```powershell
+curl.exe -i "<ApiUrl>/health"
+curl.exe -i "<ApiUrl>/me"
+```
+
+`/health` phải trả `200`; `/me` không có token phải trả `401`. Frontend tự gửi access token khi gọi API thật, không chép token vào terminal history, tài liệu hoặc issue.
+
+## 12. Application stack và persistence tiếp theo
+
+`infra/template.yaml` nhận `Environment=dev` và `DataTablePrefix=campusmeet-dev`, rồi truyền năm biến môi trường bảng vào Lambda. Chỉ validate ở giai đoạn nền tảng:
+
+```powershell
+sam validate `
+  --template-file infra/template.yaml `
+  --lint `
+  --region ap-southeast-1
+```
+
+Chưa deploy application stack cho tới khi repository thật, authorization và integration test của vertical slice cần triển khai đã hoàn thiện. Không deploy application stack chỉ vì data/auth stack đã thành công.
+
+## 13. Rollback khi deploy lỗi
+
+1. Đọc **CloudFormation → stack → Events** và lỗi đầu tiên trước khi retry.
+2. Không tạo bảng, User Pool hoặc API thay thế thủ công trong Console.
+3. Data tables có `Retain`; không giả định xóa stack sẽ xóa bảng.
+4. Auth stack phải được sửa trong template và deploy lại, không sửa cấu hình production bằng tay.
+5. Sau rollback, chạy lại verify 5 bảng và smoke test đăng nhập.
+
+## 14. Hạ tầng upload/live transcript/AI
 
 Không cấp `s3:*`, `transcribe:*` hoặc `bedrock:*` rộng cho API Lambda.
 
@@ -253,11 +319,11 @@ Không cấp `s3:*`, `transcribe:*` hoặc `bedrock:*` rộng cho API Lambda.
 
 Chi tiết: [Thiết kế kỹ thuật upload/live transcript/AI](thiet-ke-ky-thuat-upload-live-transcript-ai.md).
 
-## 13. Chi phí và cleanup
+## 15. Chi phí
 
 - On-demand vẫn tính phí request/storage/index/backup.
 - GSI nhân thêm write/storage cho item có index key.
 - PITR, backup, S3 export/import, CloudWatch logs, Step Functions, Transcribe và Bedrock đều có thể phát sinh phí.
-- Dev mặc định PITR/deletion protection tắt để dễ cleanup; staging/prod phải review trước khi bật.
+- Dev mặc định PITR/deletion protection tắt; staging/prod phải review chi phí và vận hành trước khi bật.
 - `DeletionPolicy: Retain` ngăn xóa dữ liệu do xóa stack nhầm, nhưng retained table vẫn phát sinh phí và phải quản lý thủ công.
 - Sau mỗi phiên integration, kiểm tra CloudFormation stacks, tables, S3 objects, log groups, schedules và AI executions còn tồn tại.

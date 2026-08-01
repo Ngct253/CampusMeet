@@ -1,6 +1,6 @@
 # Hướng dẫn cấu hình đăng ký và đăng nhập
 
-Tài liệu này cấu hình frontend React dùng Amazon Cognito từ stack `infra/auth-integration.yaml`. Stack dùng API Gateway stage `$default`, vì vậy `ApiUrl` **không có** hậu tố `/dev`.
+Tài liệu này giải thích chi tiết cách lấy output và cấu hình frontend React sau khi deployment owner đã dựng stack `infra/auth-integration.yaml` theo [runbook AWS](huong-dan-trien-khai-aws.md). Stack dùng API Gateway stage `$default`, vì vậy `ApiUrl` **không có** hậu tố `/dev`.
 
 ## 1. Điều kiện
 
@@ -11,38 +11,23 @@ Tài liệu này cấu hình frontend React dùng Amazon Cognito từ stack `inf
 
 Không dùng AWS root account. Không gửi AWS credential, password, token hoặc mã xác nhận qua Git/GitHub.
 
-## 2. Deploy stack auth
+## 2. Nhận auth stack dùng chung
 
-Từ thư mục gốc repository:
+Chỉ deployment owner deploy `campusmeet-dev-auth`. Thành viên không tạo stack auth riêng cho máy của mình.
 
-```powershell
-aws login --profile <aws-profile> --region <aws-region>
-aws sts get-caller-identity --profile <aws-profile>
-
-npm ci
-sam validate `
-  --template-file infra/auth-integration.yaml `
-  --lint `
-  --profile <aws-profile> `
-  --region <aws-region>
-npm run sam:build:auth
-```
-
-Tạo change set để review trước:
+Mỗi thành viên đăng nhập và kiểm tra đúng account trước khi lấy output:
 
 ```powershell
-sam deploy `
-  --template-file infra/auth-integration.yaml `
-  --stack-name <stack-name> `
-  --resolve-s3 `
-  --capabilities CAPABILITY_IAM `
-  --parameter-overrides AllowedOrigin=http://localhost:5173 `
-  --no-execute-changeset `
-  --profile <aws-profile> `
-  --region <aws-region>
+aws login
+aws sts get-caller-identity
+aws cloudformation describe-stacks `
+  --stack-name campusmeet-dev-auth `
+  --region ap-southeast-1 `
+  --query "Stacks[0].StackStatus" `
+  --output text
 ```
 
-Sau khi review resource và IAM, execute change set theo [hướng dẫn triển khai AWS](huong-dan-trien-khai-aws.md).
+Kết quả phải là `CREATE_COMPLETE` hoặc `UPDATE_COMPLETE`. Nếu stack chưa tồn tại, deployment owner thực hiện mục 9 trong [runbook AWS](huong-dan-trien-khai-aws.md); thành viên không tự đổi stack name để né lỗi.
 
 ## 3. Lấy đầy đủ ID bằng AWS CLI
 
@@ -50,36 +35,32 @@ Xem toàn bộ output:
 
 ```powershell
 aws cloudformation describe-stacks `
-  --stack-name <stack-name> `
+  --stack-name campusmeet-dev-auth `
   --query "Stacks[0].Outputs" `
   --output table `
-  --profile <aws-profile> `
-  --region <aws-region>
+  --region ap-southeast-1
 ```
 
 Lấy riêng từng giá trị để tránh chép nhầm:
 
 ```powershell
 aws cloudformation describe-stacks `
-  --stack-name <stack-name> `
+  --stack-name campusmeet-dev-auth `
   --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue | [0]" `
   --output text `
-  --profile <aws-profile> `
-  --region <aws-region>
+  --region ap-southeast-1
 
 aws cloudformation describe-stacks `
-  --stack-name <stack-name> `
+  --stack-name campusmeet-dev-auth `
   --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue | [0]" `
   --output text `
-  --profile <aws-profile> `
-  --region <aws-region>
+  --region ap-southeast-1
 
 aws cloudformation describe-stacks `
-  --stack-name <stack-name> `
+  --stack-name campusmeet-dev-auth `
   --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue | [0]" `
   --output text `
-  --profile <aws-profile> `
-  --region <aws-region>
+  --region ap-southeast-1
 ```
 
 Ánh xạ output sang frontend:
@@ -97,16 +78,16 @@ Không dùng User Pool ARN thay cho User Pool ID. Không dùng Lambda URL hoặc
 Nếu không dùng CLI:
 
 1. Mở **AWS Console → CloudFormation → Stacks**.
-2. Chọn đúng Region và `<stack-name>`.
+2. Chọn Region `ap-southeast-1` và stack `campusmeet-dev-auth`.
 3. Mở tab **Outputs**.
 4. Sao chép đúng ba key: `UserPoolId`, `UserPoolClientId`, `ApiUrl`.
 
 Có thể đối chiếu Cognito:
 
 1. Mở **Amazon Cognito → User pools**.
-2. Chọn pool có tên `<stack-name>-users`.
+2. Chọn pool có tên `campusmeet-dev-auth-users`.
 3. User Pool ID nằm ở trang tổng quan.
-4. Mở **App integration → App clients**, chọn `<stack-name>-web`.
+4. Mở **App integration → App clients**, chọn `campusmeet-dev-auth-web`.
 5. Sao chép Client ID; stack này đặt `GenerateSecret: false`, nên frontend không cần và không được chứa client secret.
 
 ## 5. Tạo cấu hình frontend
@@ -177,4 +158,4 @@ Kỳ vọng `/health` trả `200`; `/me` không có token trả `401`. Frontend 
 | Browser báo CORS                           | `AllowedOrigin` phải đúng origin, gồm cả port và không có path      |
 | API trả 404 khi URL có `/dev`              | Xóa `/dev`; auth integration dùng stage `$default`                  |
 
-Khi kết thúc môi trường thử nghiệm, người quản lý stack thực hiện cleanup theo [hướng dẫn triển khai AWS](huong-dan-trien-khai-aws.md).
+Khi deployment owner dựng lại auth stack, cả nhóm phải lấy lại outputs và cập nhật `.env` trước khi tiếp tục phát triển.

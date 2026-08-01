@@ -12,7 +12,7 @@ Repository đang chuyển từ scaffold sang các vertical slice tích hợp th�
 | ------------------------- | ------------------------------------------------------------------------------------------------ |
 | Frontend                  | Có application shell, Cognito auth thật khi có env; nhiều màn hình nghiệp vụ vẫn dùng mock       |
 | Backend                   | Có `/health`, `/me` và handler skeleton; repository nghiệp vụ chưa hoàn thiện                    |
-| Cognito                   | Đã deploy/kiểm thử bằng auth integration stack; stack thử trước đó đã cleanup                    |
+| Cognito                   | Auth integration stack đã deploy/kiểm thử; có thể dựng lại theo runbook AWS                      |
 | DynamoDB                  | 5 bảng đã deploy và verify trong `ap-southeast-1`                                                |
 | Google Calendar/Meet      | Contract/kiến trúc đã chốt; adapter thật chưa hoàn thiện                                         |
 | Upload/live transcript/AI | Đã chốt contract và kiến trúc; phân công theo kế hoạch nhóm, chi tiết kỹ thuật trong tài liệu AI |
@@ -85,29 +85,30 @@ Không commit `.env`, token, password hoặc AWS credential.
 Validate/build auth:
 
 ```powershell
-aws sts get-caller-identity --profile <profile>
+aws login
+aws sts get-caller-identity
 
 sam validate `
   --template-file infra/auth-integration.yaml `
   --lint `
-  --profile <profile> `
   --region ap-southeast-1
 
 npm run sam:build:auth
 ```
 
-Chi tiết nằm tại [Hướng dẫn cấu hình đăng nhập](docs/huong-dan-cau-hinh-dang-nhap.md).
+Thứ tự dựng IAM, 5 bảng và auth stack nằm tại [Runbook triển khai AWS](docs/huong-dan-trien-khai-aws.md); cách lấy output chi tiết nằm tại [Hướng dẫn cấu hình đăng nhập](docs/huong-dan-cau-hinh-dang-nhap.md).
 
 ## Kiểm tra DynamoDB dev
 
-5 bảng được quản lý bởi stack dữ liệu CloudFormation hiện tại. Kiểm tra trực tiếp trên AWS bằng:
+5 bảng được quản lý bởi data stack CloudFormation. Sau `aws login`, lấy Account ID hiện tại và kiểm tra bằng:
 
 ```powershell
+$AccountId = aws sts get-caller-identity --query Account --output text
+
 powershell -NoProfile -File scripts/verify-data-foundation.ps1 `
-  -Profile <profile> `
   -Region ap-southeast-1 `
   -TablePrefix campusmeet-dev `
-  -ExpectedAccountId 604360241374
+  -ExpectedAccountId $AccountId
 ```
 
 Quy trình validate, preview change set, deploy và rollback nằm tại [Hướng dẫn triển khai AWS](docs/huong-dan-trien-khai-aws.md).
