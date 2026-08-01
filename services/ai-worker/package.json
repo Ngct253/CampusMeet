@@ -1,0 +1,23 @@
+{
+  "name": "@campusmeet/ai-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-agent": "^3.1101.0",
+    "@aws-sdk/client-bedrock-agent-runtime": "^3.1101.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1101.0",
+    "@aws-sdk/client-dynamodb": "^3.1101.0",
+    "@aws-sdk/client-s3": "^3.1101.0",
+    "@aws-sdk/lib-dynamodb": "^3.1101.0",
+    "@campusmeet/shared": "0.1.0",
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^1.1.1",
+    "zod": "^3.25.76"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  }
+}
