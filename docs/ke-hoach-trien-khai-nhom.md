@@ -27,12 +27,14 @@ Nhiều repository có thể dùng cùng một bảng nhưng vẫn tách theo do
 | Thành viên | Chức năng sở hữu                                                                       | Tỷ lệ | Đầu ra cho thành viên khác                                          |
 | ---------- | -------------------------------------------------------------------------------------- | ----: | ------------------------------------------------------------------- |
 | M1         | Identity, group, membership, invitation, authorization và notification inbox           |   20% | Membership lookup, authorization helper và notification repository  |
-| M2         | Meeting, agenda, attendee, consent, live STT, recording và final transcript segment    |   20% | Meeting boundary và nguồn transcript ổn định                        |
-| M3         | Transcript editor, minutes, task, dashboard và xác nhận proposal                       |   20% | Task/Minutes API chuẩn; proposal chỉ gọi API này sau xác nhận       |
-| M4         | Google OAuth/Calendar/Meet REST và Meet Add-on; upload, AIJob, reminder và email       |   20% | Add-on dùng chung API; approved source/AIJob và external references |
-| M5         | KnowledgeSource, Bedrock ingestion, RAG nhiều meeting, chat, citation và sinh bản nháp |   20% | Grounded answer/draft có citation cho UI và M3                      |
+| M2         | Meeting, agenda, attendee, consent, live Amazon STT, recording và final transcript      |   20% | Meeting boundary, live session/gap metadata và final segment        |
+| M3         | Transcript edit/approval, minutes, task, dashboard và xác nhận proposal                 |   20% | Approved transcript, Task/Minutes API và `GroupProgressSnapshot`    |
+| M4         | Google/Meet Add-on; upload, AIJob orchestration, reminder và email                      |   20% | Add-on dùng chung API; Attachment `READY`, AIJob và external refs   |
+| M5         | Contract AI, KnowledgeSource, Bedrock RAG, citation, late summary và AI draft/analysis  |   20% | Grounded answer/draft/analysis và nghiệm thu AI đầu-cuối            |
 
 Người phụ trách chịu trách nhiệm kết quả, không độc quyền tệp. Dữ liệu dùng chung, router, IAM và IaC luôn cần review chéo.
+
+M5 là integration owner của luồng AI, chịu trách nhiệm contract chung và demo đầu-cuối nhưng không tự sửa repository thuộc M2–M4. Một endpoint chỉ có một owner. Shared contract do M5 mở PR trước, M1–M4 review phần mình cung cấp hoặc tiêu thụ.
 
 ## 4. Quy tắc làm song song
 
@@ -114,16 +116,17 @@ Active group member/admin
 → sửa/hủy idempotent
 → query timeline group
 → consent + live session hợp lệ
-→ browser capture audio và gửi Transcribe
-→ final segment/recording được lưu idempotent
+→ browser capture audio và gửi Amazon Transcribe theo languageCode đã chọn
+→ heartbeat/reconnect tiếp tục từ sequence cuối
+→ final segment/gap metadata/recording được lưu idempotent
 → meeting boundary dùng được cho M3–M5
 ```
 
 ### Tệp và việc cần làm
 
-- Shared: meeting, consent, live-session, recording và transcript-segment DTO trong `packages/shared/src/`.
+- Shared: meeting, consent, live-session, heartbeat/reconnect, recording và transcript-segment DTO trong `packages/shared/src/`.
 - Frontend: meeting CRUD và live-status/capture trong `apps/web/src/features/meetings/`; audio chỉ bắt đầu sau user gesture và consent.
-- Backend: meeting handlers cùng live-session/signed Transcribe URL/final-segment API trong `services/api/src/handlers/` và application service tương ứng.
+- Backend: meeting handlers cùng live-session/signed Transcribe URL/final-segment/heartbeat/reconnect API trong `services/api/src/handlers/` và application service tương ứng.
 - Repository: meeting/agenda/attendee/consent/live-session/recording/final segment trong bảng `meeting-data`.
 
 ### Khóa và cách truy vấn
@@ -143,7 +146,11 @@ Active group member/admin
 - Query group khác bị từ chối.
 - Không hard-delete meeting history.
 - Chưa consent không được cấp signed streaming URL.
+- Member không phải Organizer/Group Admin không được start recording hoặc live transcription.
 - Partial segment không persist; retry final segment không tạo bản ghi trùng.
+- `languageCode` không thuộc allowlist bị từ chối; frontend mặc định `vi-VN`, không có `AUTO` hoặc Deepgram.
+- Heartbeat quá hạn chuyển session sang `FAILED`; reconnect kiểm tra lại quyền, cấp URL mới và tiếp tục từ sequence cuối.
+- Khoảng audio thiếu được lưu, không suy đoán nội dung từ agenda hoặc participant metadata.
 
 ## 7. M3 — Transcript editor, minutes, task và dashboard
 
@@ -152,6 +159,8 @@ Active group member/admin
 ```text
 Meeting
 → sửa transcript theo optimistic version
+→ Organizer/Group Admin duyệt đúng version
+→ tạo ingestion AIJob idempotent
 → lưu minutes version
 → user xác nhận action item
 → tạo task
@@ -162,9 +171,9 @@ Meeting
 
 ### Tệp và việc cần làm
 
-- Shared: Transcript edit, Minutes, Decision, ActionItem, Task, Dashboard và Proposal confirmation DTO trong `packages/shared/src/`.
+- Shared: Transcript edit/approval, Minutes, Decision, ActionItem, Task, Dashboard, `GroupProgressSnapshot` và Proposal confirmation DTO trong `packages/shared/src/`.
 - Frontend: transcript editor, minutes editor, task list/update, dashboard và proposal preview/confirm trong `apps/web/src/features/`.
-- Backend: transcript edit, minutes/task/dashboard và proposal-confirm handlers/services trong `services/api/src/`.
+- Backend: transcript edit/approval, minutes/task/dashboard/snapshot và proposal-confirm handlers/services trong `services/api/src/`.
 - Repository:
   - transcript version/edit history trong `meeting-data`;
   - minutes trong `meeting-data`;
@@ -187,8 +196,10 @@ Meeting
 - Overdue được tính, không lưu status `OVERDUE`.
 - Dashboard không Scan.
 - Transcript update bằng version cũ trả `409`.
+- Transcript approval bằng version cũ trả `409`; retry không tạo ingestion job trùng.
 - Proposal retry chỉ thực thi Task/Minutes API một lần.
 - Group khác không đọc minutes/task.
+- `GroupProgressSnapshot` chỉ chứa dữ liệu xác định của một group; không chấm điểm/xếp hạng cá nhân.
 
 M5 không ghi task hoặc minutes chính thức trực tiếp. M5 tạo draft có citation; M3 sở hữu preview, xác nhận và gọi API nghiệp vụ chuẩn.
 
@@ -206,7 +217,7 @@ User kết nối Google
 → Meet Add-on side panel lấy meetingId/meetingCode và ánh xạ meeting nội bộ
 → Add-on gọi cùng API, membership và authorization với CampusMeet web
 → SDK/iframe/add-on lỗi thì mở đúng meeting trên CampusMeet web
-→ upload file/audio trực tiếp S3
+→ upload tối đa 10 file/meeting trực tiếp S3 theo allowlist và giới hạn đã khóa
 → complete verification tạo đúng một AIJob
 → Step Functions xử lý bất đồng bộ
 → reminder tạo notification và thử gửi email
@@ -214,7 +225,7 @@ User kết nối Google
 
 ### Tệp và việc cần làm
 
-- Shared: Google integration, attachment, upload-complete, AIJob và reminder DTO trong `packages/shared/src/`; chỉ thêm DTO Add-on khi không tái sử dụng được meeting contract hiện có.
+- Shared: Google integration, attachment/upload/download, upload-complete, AIJob và reminder DTO trong `packages/shared/src/`; chỉ thêm DTO Add-on khi không tái sử dụng được meeting contract hiện có.
 - Frontend web: connect/disconnect/status/retry và upload progress/cancel/retry trong `apps/web/src/features/`.
 - Meet Add-on frontend:
   - tạo route `/meet-addon/side-panel` tại `apps/web/src/routes/router.tsx`; route này không dùng `AppShell` hoặc sidebar dashboard;
@@ -222,7 +233,7 @@ User kết nối Google
   - cô lập Meet Add-ons SDK và `getMeetingInfo()` tại `apps/web/src/features/meet-addon/meet-addon-client.ts`;
   - dùng `meetingId` làm external identifier chính; `meetingCode` chỉ hỗ trợ nhận context hiện tại, không lưu làm định danh dài hạn.
 - Meet Add-on deployment: tạo HTTP deployment manifest `integrations/google-meet-addon/deployment.json` với `sidePanelUrl`, `addOnOrigins`, logo và `supportsScreenSharing`; không đặt secret hoặc OAuth token trong manifest.
-- Backend: OAuth/meeting sync, ánh xạ Meet context sang meeting nội bộ, presigned upload/complete, AIJob status và reminder handlers/services trong `services/api/src/`; Add-on không có backend riêng.
+- Backend: OAuth/meeting sync, ánh xạ Meet context sang meeting nội bộ, presigned upload/complete/download, AIJob status và reminder handlers/services trong `services/api/src/`; Add-on không có backend riêng.
 - Adapter: Google Calendar/Meet REST, S3, Step Functions, EventBridge Scheduler và SES.
 - Data:
   - integration reference/ciphertext secret reference trong `identity`;
@@ -237,6 +248,8 @@ User kết nối Google
 - Chỉ hiển thị Meet URL khi `READY`.
 - Retry dùng idempotency/request ID; không tạo event mới mù quáng.
 - Google artifact không có là kết quả hợp lệ, không làm mất meeting/minutes/task nội bộ.
+- Upload khóa ở 10 file/meeting, 50 MB/file; tài liệu TXT/PDF/DOCX, audio MP3/WAV/WebM/M4A và tối đa 60 phút. Complete handler kiểm tra `HeadObject`; worker kiểm tra extension, MIME và magic bytes trước khi chuyển `READY`.
+- Upload chưa hoàn tất expire sau 1 ngày; raw audio giữ 7 ngày và có thể bị xóa sớm theo quyền.
 - Add-on là client surface trong Google Meet, không phải mục điều hướng của CampusMeet dashboard.
 - Add-on không bỏ qua Cognito, membership, role hoặc audit. M1 chỉ bàn giao auth/session và authorization helper; M4 sở hữu route, SDK, manifest, mapping và deployment Add-on.
 - Nếu Add-on chưa cài, SDK không khởi tạo, meeting chưa ánh xạ hoặc iframe không có phiên đăng nhập, hiển thị trạng thái rõ và nút mở meeting tương ứng trên CampusMeet web.
@@ -249,6 +262,7 @@ User kết nối Google
 - Token hết hạn chuyển đúng trạng thái cần kết nối lại.
 - Không lộ token trong response/log.
 - Binary không đi qua API; complete upload retry chỉ tạo một AIJob.
+- User không có quyền nguồn không được cấp download URL; file sai extension/MIME/magic bytes/size/checksum bị `REJECTED`.
 - Job success/failure/cancel/retry cập nhật trạng thái idempotent.
 - Email lỗi không rollback notification trong ứng dụng.
 - Manifest chỉ dùng HTTPS origin do nhóm sở hữu; origin của `sidePanelUrl` thuộc `addOnOrigins`.
@@ -256,6 +270,8 @@ User kết nối Google
 - `getMeetingInfo()` trả `meetingId`/`meetingCode`; meeting hợp lệ ánh xạ đúng bản ghi nội bộ, meeting lạ hiển thị trạng thái chưa liên kết.
 - Thành viên hợp lệ đọc được meeting qua cùng API; user không thuộc group nhận `403`, không lộ dữ liệu qua Add-on.
 - SDK không khả dụng, phiên đăng nhập iframe lỗi hoặc Add-on bị chặn đều mở được fallback CampusMeet web.
+
+M4 triển khai thành ba PR độc lập để tránh một branch dài: M4-A upload/AIJob (dependency M5), M4-B Google/Meet Add-on và M4-C reminder/email. Add-on không chặn luồng AI trên CampusMeet web.
 
 ## 9. M5 — Knowledge, RAG và trợ lý AI
 
@@ -268,17 +284,19 @@ Approved transcript/file + active membership
 → normalize và tạo KnowledgeSource version
 → Knowledge Base/S3 Vectors
 → RAG current/selected/whole-group có citation
-→ chat hoặc minutes/task draft có citation
+→ chat + late-join summary + minutes/task draft có citation
+→ progress analysis chỉ diễn giải GroupProgressSnapshot của M3
 → chuyển draft cho proposal API của M3
 ```
 
 ### Tệp và việc cần làm
 
-- Shared: `KnowledgeSource`, `GroundedAnswer`, `Citation`, conversation và draft DTO trong `packages/shared/src/`.
-- Backend: ingestion, retrieval, chat và draft handlers/services trong `services/api/src/`.
+- Shared: M5 mở contract PR cho `AIJob`, `KnowledgeSource`, `KnowledgeScope`, `GroundedAnswer`, `Citation`, conversation, late summary, minutes/task draft và progress-analysis DTO; input API/output Worker có Zod schema runtime.
+- Backend: ingestion, retrieval, current-meeting chat/late summary, selected/whole-group search, minutes/task draft và progress-analysis handlers/services trong `services/api/src/`.
 - Worker: normalize source, gọi Bedrock và cập nhật trạng thái trong worker Lambda được khai báo tại `infra/template.yaml`.
-- Frontend: chat, chọn phạm vi meeting, citation và trạng thái thiếu nguồn trong `apps/web/src/features/`.
+- Frontend: chat, chọn phạm vi meeting, late summary, citation viewer, minutes/task draft, missing fields và trạng thái job/thiếu nguồn trong `apps/web/src/features/`.
 - Data: metadata ở `ai-work`, normalized source ở S3, vector ở Bedrock Knowledge Bases/S3 Vectors.
+- Hạ tầng: M5 sở hữu AI Worker, Bedrock Knowledge Base, S3 Vectors, IAM role AI, alarm/cost/cleanup; M4 sở hữu S3 user-content và Step Functions/AIJob đầu vào.
 
 ### Kiểm thử tối thiểu
 
@@ -287,6 +305,13 @@ Approved transcript/file + active membership
 - Group A không retrieve source group B.
 - Citation mở đúng meeting/file/transcript segment qua URI nội bộ.
 - Draft không tự ghi minutes/task; thiếu nguồn trả `insufficientContext=true`.
+- Late-join summary chỉ dùng final live segment, ghi `Speaker N`/timestamp, trạng thái chưa duyệt và khoảng stream bị thiếu.
+- Prompt injection trong source không đổi filter/system instruction hoặc kích hoạt mutation.
+- Progress analysis chỉ nhận snapshot đúng group; Member thường và truy vấn group khác nhận `403`.
+- TaskProposal không tự bịa assignee/priority/deadline, trả `missingFields` và confirm lặp chỉ tạo một Task qua API M3.
+- Log không chứa audio, transcript, prompt, token, presigned URL hoặc model response nhạy cảm.
+
+M5 chịu trách nhiệm kịch bản nghiệm thu từ Attachment/final segment thật đến RAG, late summary, draft, confirm và progress analysis. Fake repository/provider chỉ dùng trong test/local, không xuất hiện trong handler demo.
 
 ## 10. Trách nhiệm hạ tầng và quy trình database
 
@@ -318,14 +343,14 @@ Không developer nào cần `DATABASE_URL`. Local AWS SDK dùng DynamoDB Local h
 ## 11. Trình tự merge đề xuất
 
 1. Data model/IaC 5 bảng và docs.
-2. Shared error/pagination/idempotency conventions.
-3. M1 membership/authorization boundary.
-4. M2 meeting boundary.
-5. M3 minutes/task/dashboard core.
-6. M4 Google integration và Meet Add-on dựa trên meeting thật.
-7. M2 làm spike streaming song song; M4 làm upload/AIJob; M5 làm fake-provider ingestion/RAG theo contract approved source.
-8. Notification/reminder integration.
-9. Full smoke/security/cost/cleanup rehearsal.
+2. M5 mở PR khóa shared AI DTO/Zod/API contract; owner liên quan review.
+3. Shared router path-template, error/pagination/idempotency conventions.
+4. M1 membership/authorization boundary.
+5. M2 meeting + live Amazon Transcribe boundary.
+6. M3 transcript approval, minutes/task/dashboard và `GroupProgressSnapshot`.
+7. M4-A upload/AIJob; M5 làm fake-provider ingestion/RAG theo contract approved source.
+8. M4-B Google integration/Meet Add-on và M4-C notification/reminder.
+9. M5 nối repository/provider thật và chạy full smoke/security/cost/cleanup rehearsal.
 
 M2/M4/M5 có thể dùng fake đúng port khi dependency chưa xong; deployment thật không được bypass authorization boundary của M1/M2.
 
@@ -337,9 +362,10 @@ M2/M4/M5 có thể dùng fake đúng port khi dependency chưa xong; deployment 
 | Core 1            | Auth → group → invitation/membership                                       |
 | Core 2            | Group → meeting → minutes → task → dashboard                               |
 | Integration       | Google Calendar/Meet status/retry + Meet Add-on unpublished + reminder     |
-| AI source         | consent/upload/live segment/transcript editor/AIJob                        |
-| AI grounded       | KnowledgeSource ingestion + current/selected/whole-group RAG + citation    |
-| Proposal          | minutes/task proposal preview/confirm/idempotency                          |
+| AI source         | consent/upload/live segment/reconnect/transcript approval/AIJob            |
+| AI grounded       | KnowledgeSource + current/selected/whole-group RAG + late summary/citation |
+| Proposal          | minutes/task draft + missing fields + preview/confirm/idempotency          |
+| Progress AI       | M3 snapshot → M5 analysis; Admin được phép, Member nhận `403`              |
 | Release candidate | Cross-group tests, logs/alarms, budget, retention và cleanup rehearsal đạt |
 
 ## 13. Điều kiện hoàn thành cho mỗi chức năng

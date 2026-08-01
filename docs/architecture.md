@@ -108,9 +108,9 @@ Mỗi entity logic vẫn tồn tại. Việc gom bảng dùng composite `PK/SK`,
 
 - Không xây video call/WebRTC; Calendar API vẫn là luồng tạo event và Meet link.
 - Meet REST API chỉ đồng bộ participants/recording/transcript khi artifact và quyền thực tế cho phép; upload/recording fallback vẫn bắt buộc.
-- Mỗi phiên họp khởi tạo live transcription sau user gesture/consent và hiển thị trạng thái `STARTING/ACTIVE/RECONNECTING/FAILED`.
+- Mỗi phiên họp khởi tạo live transcription sau user gesture/consent và hiển thị trạng thái `STARTING/ACTIVE/RECONNECTING/STOPPED/FAILED`.
 - Voice/live transcript là nguồn nội dung phát biểu; agenda hoặc participant metadata không được dùng để suy đoán người dùng đã nói gì.
-- STT giữ ngôn ngữ đang nói, ưu tiên chất lượng tiếng Việt và chỉ gắn `Speaker N`; không tự nhận diện danh tính.
+- MVP chỉ dùng Amazon Transcribe. Người dùng chọn `languageCode` trước phiên, frontend mặc định `vi-VN`; không có `AUTO`, không tự dịch và chỉ gắn `Speaker N`, không tự nhận diện danh tính.
 - Partial transcript không lưu hoặc ingest. Final segment ghi idempotent theo `sessionId + sequence`/`ResultId`.
 - Chat current-meeting có thể đọc final segment được phép trực tiếp; approved transcript/minutes/file mới ingest vào Knowledge Base cho selected/whole-group RAG.
 - Retrieval luôn filter group/meeting-set/ACL/source status trước khi model nhận chunk.
@@ -173,7 +173,6 @@ flowchart LR
   U["User / Browser"]
   G["Google OAuth + Calendar + Meet REST\nExternal"]
   MA["Google Meet\nAdd-on side panel host"]
-  DG["Deepgram\nOptional STT adapter"]
   E["Email recipient"]
   CF["CloudFront\nEdge / global"]
 
@@ -223,7 +222,6 @@ flowchart LR
   API -->|"10. tạo AIJob"| DDB
   API -->|"11. start execution"| SFN
   SFN -->|"12a. STT"| TR
-  SFN -. "12b. adapter tùy chọn" .-> DG
   SFN -->|"13. parse / normalize / generation"| AI --> BR
   BR -->|"14. grounded retrieval"| KB --> VEC
   AI -->|"15. job/source/citation metadata"| DDB

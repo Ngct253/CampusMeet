@@ -152,6 +152,7 @@ Consent phải giữ actor, consent text/version, source capture, timestamp và 
 | Transcript metadata | `TRANSCRIPT#<transcriptId>` | `META`                                 |
 | Final segment       | `TRANSCRIPT#<transcriptId>` | `SEGMENT#<paddedSequence>#<segmentId>` |
 | Edit/version event  | `TRANSCRIPT#<transcriptId>` | `EDIT#<createdAt>#<eventId>`           |
+| Approval event      | `TRANSCRIPT#<transcriptId>` | `APPROVAL#<createdAt>#<eventId>`       |
 
 Quy tắc transcript:
 
@@ -159,6 +160,8 @@ Quy tắc transcript:
 - Final segment ghi idempotent theo `sessionId + sequence` hoặc `ResultId`.
 - Segment giữ timestamp, confidence, language code và `Speaker N`; không tự ánh xạ danh tính.
 - Optimistic update dùng `version` và condition expression.
+- Approval chỉ do Organizer hoặc Group Admin thực hiện trên `expectedVersion`; metadata giữ `approvedVersion`, `approvedBy`, `approvedAt` và idempotency reference.
+- Approval retry không tạo AIJob/KnowledgeSource version trùng; chỉnh sửa transcript sau approval tạo version mới chưa duyệt và làm KnowledgeSource cũ `STALE` khi version mới được ingest.
 - Query segment theo trang bằng `PK=TRANSCRIPT#id` và sort-key range.
 - Audio/raw chunk nằm trong S3.
 
