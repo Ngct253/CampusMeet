@@ -120,12 +120,25 @@ export class AIExecutionService {
   }
 
   async checkIngestion(aiJobId: string, ingestionJobId: string): Promise<unknown> {
+    const record = await this.dependencies.jobs.get(aiJobId);
+    if (!record) throw new Error('AI_JOB_NOT_FOUND');
+    if (record.payload.operation !== 'INGEST_SOURCE') throw new Error('INVALID_INGESTION_JOB');
     const status = await this.dependencies.ingestion.status(ingestionJobId);
     if (status === 'FAILED') {
+      await this.dependencies.knowledgeSources.markIngestionStatus(
+        record.payload.sourceId,
+        record.payload.sourceVersion,
+        'FAILED',
+      );
       await this.dependencies.jobs.markFailed(aiJobId, 'KNOWLEDGE_BASE_INGESTION_FAILED');
       throw new Error('KNOWLEDGE_BASE_INGESTION_FAILED');
     }
     if (status !== 'COMPLETE') return { pending: true, ingestionJobId, status };
+    await this.dependencies.knowledgeSources.markIngestionStatus(
+      record.payload.sourceId,
+      record.payload.sourceVersion,
+      'READY',
+    );
     const result = { pending: false, ingestionJobId, status };
     await this.dependencies.jobs.markCompleted(aiJobId, result);
     return result;
@@ -351,6 +364,7 @@ export class AIExecutionService {
         sourceId: payload.sourceId,
         version: payload.sourceVersion,
         approved: true,
+        ingestionStatus: 'READY',
       },
     });
     const now = new Date().toISOString();

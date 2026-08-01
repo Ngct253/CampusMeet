@@ -21,11 +21,7 @@ export const aiJobTypeSchema = z.enum([
 ]);
 export type AIJobType = z.infer<typeof aiJobTypeSchema>;
 
-export const knowledgeScopeSchema = z.enum([
-  'CURRENT_MEETING',
-  'SELECTED_MEETINGS',
-  'WHOLE_GROUP',
-]);
+export const knowledgeScopeSchema = z.enum(['CURRENT_MEETING', 'SELECTED_MEETINGS', 'WHOLE_GROUP']);
 export type KnowledgeScope = z.infer<typeof knowledgeScopeSchema>;
 
 export const knowledgeSourceTypeSchema = z.enum(['ATTACHMENT', 'TRANSCRIPT', 'MINUTES']);
@@ -52,7 +48,10 @@ export const citationSchema = z.object({
   sourceId: z.string().min(1),
   sourceVersion: z.number().int().positive(),
   segmentId: z.string().min(1).optional(),
-  speakerLabel: z.string().regex(/^Speaker [1-9]\d*$/).optional(),
+  speakerLabel: z
+    .string()
+    .regex(/^Speaker [1-9]\d*$/)
+    .optional(),
   startMs: z.number().int().nonnegative().optional(),
   endMs: z.number().int().nonnegative().optional(),
   excerpt: z.string().max(500).optional(),
@@ -60,36 +59,38 @@ export const citationSchema = z.object({
 });
 export type Citation = z.infer<typeof citationSchema>;
 
-export interface AIJob {
-  aiJobId: string;
-  groupId: string;
-  meetingId?: string;
-  sourceId?: string;
-  type: AIJobType;
-  status: AIJobStatus;
-  attempt: number;
-  requestId: string;
-  provider?: 'AMAZON_TRANSCRIBE' | 'BEDROCK';
-  inputTokens?: number;
-  outputTokens?: number;
-  estimatedCostUsd?: number;
-  errorCode?: string;
-  createdAt: ISODateTime;
-  updatedAt: ISODateTime;
-}
+export const aiJobSchema = z.object({
+  aiJobId: z.string().min(1),
+  groupId: z.string().min(1),
+  meetingId: z.string().min(1).optional(),
+  sourceId: z.string().min(1).optional(),
+  type: aiJobTypeSchema,
+  status: aiJobStatusSchema,
+  attempt: z.number().int().nonnegative(),
+  requestId: z.string().min(1),
+  provider: z.enum(['AMAZON_TRANSCRIBE', 'BEDROCK']).optional(),
+  inputTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  estimatedCostUsd: z.number().nonnegative().optional(),
+  errorCode: z.string().min(1).optional(),
+  createdAt: z.string().datetime({ offset: true }),
+  updatedAt: z.string().datetime({ offset: true }),
+});
+export type AIJob = z.infer<typeof aiJobSchema>;
 
-export interface KnowledgeSource {
-  sourceId: string;
-  groupId: string;
-  meetingId: string;
-  sourceType: KnowledgeSourceType;
-  version: number;
-  approved: boolean;
-  ingestionStatus: IngestionStatus;
-  normalizedObjectKey: string;
-  createdAt: ISODateTime;
-  updatedAt: ISODateTime;
-}
+export const knowledgeSourceSchema = z.object({
+  sourceId: z.string().min(1),
+  groupId: z.string().min(1),
+  meetingId: z.string().min(1),
+  sourceType: knowledgeSourceTypeSchema,
+  version: z.number().int().positive(),
+  approved: z.literal(true),
+  ingestionStatus: ingestionStatusSchema,
+  normalizedObjectKey: z.string().min(1),
+  createdAt: z.string().datetime({ offset: true }),
+  updatedAt: z.string().datetime({ offset: true }),
+});
+export type KnowledgeSource = z.infer<typeof knowledgeSourceSchema>;
 
 export interface Conversation {
   conversationId: string;
@@ -273,7 +274,10 @@ export const knowledgeIngestionPayloadSchema = z.object({
 });
 export type KnowledgeIngestionPayload = z.infer<typeof knowledgeIngestionPayloadSchema>;
 
-export const aiWorkerPayloadSchema = z.union([aiRequestPayloadSchema, knowledgeIngestionPayloadSchema]);
+export const aiWorkerPayloadSchema = z.union([
+  aiRequestPayloadSchema,
+  knowledgeIngestionPayloadSchema,
+]);
 export type AIWorkerPayload = z.infer<typeof aiWorkerPayloadSchema>;
 
 export const aiWorkerEventSchema = z.object({

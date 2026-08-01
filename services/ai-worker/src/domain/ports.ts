@@ -110,6 +110,11 @@ export interface SourceObjectStore {
 export interface KnowledgeSourceRepository {
   saveVersion(source: KnowledgeSource): Promise<KnowledgeSource>;
   markOlderVersionsStale(sourceId: string, currentVersion: number): Promise<void>;
+  markIngestionStatus(
+    sourceId: string,
+    version: number,
+    status: Extract<IngestionStatus, 'READY' | 'FAILED'>,
+  ): Promise<void>;
 }
 
 export interface KnowledgeBaseIngestionGateway {

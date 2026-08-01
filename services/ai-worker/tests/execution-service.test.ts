@@ -104,6 +104,7 @@ const setup = (payload: AIRequestPayload, chunks: SourceChunk[] = []) => {
   const knowledgeSources: KnowledgeSourceRepository = {
     saveVersion: vi.fn().mockRejectedValue(new Error('NOT_USED')),
     markOlderVersionsStale: vi.fn().mockRejectedValue(new Error('NOT_USED')),
+    markIngestionStatus: vi.fn().mockRejectedValue(new Error('NOT_USED')),
   };
   const ingestion: KnowledgeBaseIngestionGateway = {
     start: vi.fn().mockRejectedValue(new Error('NOT_USED')),
