@@ -1,39 +1,38 @@
 # Kế hoạch triển khai CampusMeet cho nhóm 5 người
 
-Kế hoạch này chuyển repository hiện tại thành các vertical slice có thể triển khai và demo. Phạm vi nghiệp vụ logic do [SRS](CampusMeet-SRS.md) quyết định; HTTP contract nằm trong [API contract](api-contract.md); mô hình vật lý DynamoDB nằm trong [DynamoDB data model v2](dynamodb-data-model.md).
+Kế hoạch này chuyển repository hiện tại thành các vertical slice có thể triển khai và demo. Phạm vi nghiệp vụ logic do [SRS](CampusMeet-SRS.md) quyết định; HTTP contract nằm trong [API contract](api-contract.md); mô hình vật lý DynamoDB nằm trong [mô hình dữ liệu DynamoDB](dynamodb-data-model.md).
 
 ## 1. Trạng thái nền tảng chung
 
 - Cognito sign-up, confirmation, sign-in, sign-out và protected route đã có nền tảng/kiểm thử integration.
 - Frontend nghiệp vụ vẫn còn mock ở nhiều feature.
 - API nghiệp vụ và repository thật còn chưa hoàn thiện.
-- Data foundation v2 đã chốt 5 bảng vật lý; 17 bảng legacy phải audit/backup trước khi cleanup.
-- M5 giữ đầy đủ upload an toàn, live transcription, transcript editor, AIJob, KnowledgeSource, Bedrock RAG nhiều meeting, citation và proposal có xác nhận.
-- Không owner nào tự tạo table/GSI bằng Console.
+- Data foundation gồm 5 bảng vật lý đã deploy và verify.
+- Không thành viên nào tự tạo bảng/GSI bằng Console.
 
 ## 2. Năm bảng dùng chung
 
-| Bảng | Owner sử dụng chính | Dữ liệu |
-| --- | --- | --- |
-| `identity` | M1/M4/M5 | User, preference, Google integration reference, OAuth state, notification |
-| `collaboration` | M1; mọi owner đọc membership | Group, membership, invitation, audit |
-| `meeting-data` | M2/M3/M4/M5 | Meeting, agenda, attendee, minutes, reminder, attachment, recording, consent, live session, transcript/segment |
-| `task-data` | M3; M5 tạo proposal gọi Task API | Task, task history và dashboard indexes |
-| `ai-work` | M5 | AIJob, KnowledgeSource, conversation/message/citation, task/tool proposal, idempotency |
+| Bảng            | Người sử dụng chính               | Dữ liệu                                                                                                        |
+| --------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `identity`      | M1/M4                             | User, preference, Google integration reference, OAuth state, notification                                      |
+| `collaboration` | M1; mọi thành viên đọc membership | Group, membership, invitation, audit                                                                           |
+| `meeting-data`  | M2/M3/M4                          | Meeting, agenda, attendee, minutes, reminder, attachment, recording, consent, live session, transcript/segment |
+| `task-data`     | M3                                | Task, task history và dashboard indexes                                                                        |
+| `ai-work`       | M3/M4/M5                          | AIJob, KnowledgeSource, conversation/message/citation, task/tool proposal, idempotency                         |
 
 Nhiều repository có thể dùng cùng một bảng nhưng vẫn tách theo domain. Handler không query DynamoDB trực tiếp.
 
-## 3. Phân công ownership
+## 3. Phân công trách nhiệm
 
-| Thành viên | Outcome chịu trách nhiệm | Phụ thuộc chính |
-| --- | --- | --- |
-| M1 | Group, membership, invitation và authorization boundary | Cung cấp membership check cho M2–M5 |
-| M2 | Meeting nội bộ, agenda, attendee, lifecycle | Dùng membership M1; cung cấp meeting boundary cho M3–M5 |
-| M3 | Minutes, task, dashboard, notification core | Dùng meeting M2 và active member M1 |
-| M4 | Google OAuth, Calendar/Meet sync và artifact reference | Dùng meeting lifecycle; phối hợp secret/runtime với infra |
-| M5 | Upload, recording consent, live transcript, AIJob, RAG, citation, proposal và AI infrastructure | Dùng membership, meeting và Task/Minutes API chuẩn |
+| Thành viên | Chức năng sở hữu                                                                       | Tỷ lệ | Đầu ra cho thành viên khác                                         |
+| ---------- | -------------------------------------------------------------------------------------- | ----: | ------------------------------------------------------------------ |
+| M1         | Identity, group, membership, invitation, authorization và notification inbox           |   20% | Membership lookup, authorization helper và notification repository |
+| M2         | Meeting, agenda, attendee, consent, live STT, recording và final transcript segment    |   20% | Meeting boundary và nguồn transcript ổn định                       |
+| M3         | Transcript editor, minutes, task, dashboard và xác nhận proposal                       |   20% | Task/Minutes API chuẩn; proposal chỉ gọi API này sau xác nhận      |
+| M4         | Google OAuth/Calendar/Meet, attachment upload, AIJob orchestration, reminder và email  |   20% | Approved source + AIJob cho M5; external references cho M2         |
+| M5         | KnowledgeSource, Bedrock ingestion, RAG nhiều meeting, chat, citation và sinh bản nháp |   20% | Grounded answer/draft có citation cho UI và M3                     |
 
-Ownership là trách nhiệm outcome, không phải độc quyền file. Shared contracts, router, IAM và IaC luôn cần review chéo.
+Người phụ trách chịu trách nhiệm kết quả, không độc quyền tệp. Dữ liệu dùng chung, router, IAM và IaC luôn cần review chéo.
 
 ## 4. Quy tắc làm song song
 
@@ -57,16 +56,17 @@ Ownership là trách nhiệm outcome, không phải độc quyền file. Shared 
 → mời thành viên
 → thành viên chấp nhận/từ chối
 → mọi API khác kiểm tra membership/role dùng chung
+→ notification inbox đọc/đánh dấu đã đọc đúng user
 ```
 
-### Code/contract
+### Tệp và việc cần làm
 
-- Shared: `Group`, `Membership`, `Invitation`, role/status và request/response DTO.
-- Frontend: group list/detail/create, member list, invitation state.
-- Backend: group/membership/invitation handlers và application services.
-- Repository: `collaboration` table.
+- Shared: sửa `packages/shared/src/types/` và `packages/shared/src/dto/` cho `Group`, `Membership`, `Invitation`, profile, notification và role/status.
+- Frontend: làm group/member/invitation tại `apps/web/src/features/groups/`; làm notification inbox tại `apps/web/src/features/notifications/`.
+- Backend: thay skeleton group/notification trong `services/api/src/handlers/`; đặt business rule trong application service, không đặt trong React hoặc handler.
+- Repository: triển khai group/membership/invitation ở bảng `collaboration`; profile/notification ở bảng `identity` trong `services/api/src/repositories/`.
 
-### Key/access patterns
+### Khóa và cách truy vấn
 
 - Group: `GROUP#id / META`.
 - Membership: `GROUP#id / MEMBER#userId`.
@@ -93,7 +93,7 @@ Put membership nếu chưa có
 Put audit event
 ```
 
-### Test tối thiểu
+### Kiểm thử tối thiểu
 
 - Tạo group thành công.
 - Tên không hợp lệ bị từ chối.
@@ -101,6 +101,7 @@ Put audit event
 - User ngoài group nhận `403`.
 - Không thể xóa/hạ quyền admin cuối cùng.
 - Token invitation hết hạn/revoked không tạo membership.
+- User không đọc/mark-read notification của người khác.
 
 ## 6. M2 — Meeting nội bộ
 
@@ -112,17 +113,20 @@ Active group member/admin
 → agenda + attendee
 → sửa/hủy idempotent
 → query timeline group
+→ consent + live session hợp lệ
+→ browser capture audio và gửi Transcribe
+→ final segment/recording được lưu idempotent
 → meeting boundary dùng được cho M3–M5
 ```
 
-### Code/contract
+### Tệp và việc cần làm
 
-- Shared: meeting request/response, lifecycle, agenda, attendee, organizer.
-- Frontend: meeting form/list/detail/cancel.
-- Backend: meeting handlers/application service.
-- Repository: `meeting-data` table.
+- Shared: meeting, consent, live-session, recording và transcript-segment DTO trong `packages/shared/src/`.
+- Frontend: meeting CRUD và live-status/capture trong `apps/web/src/features/meetings/`; audio chỉ bắt đầu sau user gesture và consent.
+- Backend: meeting handlers cùng live-session/signed Transcribe URL/final-segment API trong `services/api/src/handlers/` và application service tương ứng.
+- Repository: meeting/agenda/attendee/consent/live-session/recording/final segment trong bảng `meeting-data`.
 
-### Key/access patterns
+### Khóa và cách truy vấn
 
 - Meeting: `MEETING#id / META`.
 - Attendee: `MEETING#id / ATTENDEE#userId`.
@@ -131,59 +135,64 @@ Active group member/admin
 - Organizer timeline: GSI2 `USER#organizerId`.
 - Google external lookup: sparse GSI3.
 
-### Test tối thiểu
+### Kiểm thử tối thiểu
 
 - End time sau start time.
 - Organizer/attendee phải là active member.
 - Hủy meeting lần hai không tạo side effect mới.
 - Query group khác bị từ chối.
 - Không hard-delete meeting history.
+- Chưa consent không được cấp signed streaming URL.
+- Partial segment không persist; retry final segment không tạo bản ghi trùng.
 
-## 7. M3 — Minutes, task, dashboard và notification core
+## 7. M3 — Transcript editor, minutes, task và dashboard
 
 ### Kết quả phải bàn giao
 
 ```text
 Meeting
+→ sửa transcript theo optimistic version
 → lưu minutes version
 → user xác nhận action item
 → tạo task
 → cập nhật TODO/DOING/DONE
 → dashboard thay đổi
-→ notification hiển thị đúng user
+→ AI draft chỉ được áp dụng sau preview + xác nhận
 ```
 
-### Code/contract
+### Tệp và việc cần làm
 
-- Shared: Minutes, Decision, ActionItem, Task, Dashboard DTO, Notification.
-- Frontend: minutes editor, task list/update, dashboard, notifications.
-- Backend: minutes/task/dashboard/notification handlers và services.
+- Shared: Transcript edit, Minutes, Decision, ActionItem, Task, Dashboard và Proposal confirmation DTO trong `packages/shared/src/`.
+- Frontend: transcript editor, minutes editor, task list/update, dashboard và proposal preview/confirm trong `apps/web/src/features/`.
+- Backend: transcript edit, minutes/task/dashboard và proposal-confirm handlers/services trong `services/api/src/`.
 - Repository:
+  - transcript version/edit history trong `meeting-data`;
   - minutes trong `meeting-data`;
   - tasks trong `task-data`;
-  - notifications trong `identity`.
+  - proposal state/execution reference trong `ai-work`.
 
-### Access patterns
+### Cách truy vấn
 
 - Minutes versions: `MEETING#id / MINUTES#VERSION#n`.
 - Task: `TASK#id / META`.
 - Group dashboard: task GSI1 group/status/due.
 - Personal dashboard: task GSI2 assignee/due.
 - Tasks from meeting: task GSI3.
-- Notification: `USER#id / NOTIFICATION#createdAt#id`; unread sparse GSI2.
+- Proposal: `PROPOSAL#id / META|EXECUTION`; confirm phải kiểm tra lại quyền và version.
 
-### Test tối thiểu
+### Kiểm thử tối thiểu
 
 - Assignee phải là active member.
 - `DONE` lưu `completedAt`; reopen xử lý version đúng.
 - Overdue được tính, không lưu status `OVERDUE`.
 - Dashboard không Scan.
-- Mark-read idempotent.
+- Transcript update bằng version cũ trả `409`.
+- Proposal retry chỉ thực thi Task/Minutes API một lần.
 - Group khác không đọc minutes/task.
 
-M5 không ghi task hoặc minutes chính thức trực tiếp. AI chỉ tạo draft/proposal và gọi API M3 sau khi user xác nhận.
+M5 không ghi task hoặc minutes chính thức trực tiếp. M5 tạo draft có citation; M3 sở hữu preview, xác nhận và gọi API nghiệp vụ chuẩn.
 
-## 8. M4 — Google Calendar và Meet
+## 8. M4 — Google, upload, AIJob và reminder
 
 ### Kết quả phải bàn giao
 
@@ -193,18 +202,23 @@ User kết nối Google
 → tạo/update/cancel Calendar event
 → lưu googleSyncStatus + external refs
 → retry không tạo event trùng
-→ artifact có thì đồng bộ reference, không có thì dùng fallback M5
+→ artifact có thì đồng bộ reference, không có thì dùng upload fallback
+→ upload file/audio trực tiếp S3
+→ complete verification tạo đúng một AIJob
+→ Step Functions xử lý bất đồng bộ
+→ reminder tạo notification và thử gửi email
 ```
 
-### Code/contract
+### Tệp và việc cần làm
 
-- Shared: Google integration status, connect/callback/sync DTO.
-- Frontend: connect/disconnect/status/retry UI.
-- Backend: OAuth start/callback/disconnect và meeting sync application service.
-- Adapter: Google Calendar/Meet REST.
+- Shared: Google integration, attachment, upload-complete, AIJob và reminder DTO trong `packages/shared/src/`.
+- Frontend: connect/disconnect/status/retry và upload progress/cancel/retry trong `apps/web/src/features/`.
+- Backend: OAuth/meeting sync, presigned upload/complete, AIJob status và reminder handlers/services trong `services/api/src/`.
+- Adapter: Google Calendar/Meet REST, S3, Step Functions, EventBridge Scheduler và SES.
 - Data:
   - integration reference/ciphertext secret reference trong `identity`;
-  - Google event/space/conference reference trong meeting META của `meeting-data`.
+  - Google reference, attachment/reminder metadata trong `meeting-data`;
+  - AIJob state/idempotency trong `ai-work`; binary/audio trong S3 private.
 
 ### Quy tắc
 
@@ -215,98 +229,58 @@ User kết nối Google
 - Retry dùng idempotency/request ID; không tạo event mới mù quáng.
 - Google artifact không có là kết quả hợp lệ, không làm mất meeting/minutes/task nội bộ.
 
-### Test tối thiểu
+### Kiểm thử tối thiểu
 
 - OAuth state không hợp lệ/hết hạn bị từ chối.
 - Retry timeout không tạo hai event.
 - Token hết hạn chuyển đúng trạng thái cần kết nối lại.
 - Không lộ token trong response/log.
+- Binary không đi qua API; complete upload retry chỉ tạo một AIJob.
+- Job success/failure/cancel/retry cập nhật trạng thái idempotent.
+- Email lỗi không rollback notification trong ứng dụng.
 
-## 9. M5 — Upload, live transcript và AI đầy đủ
+## 9. M5 — Knowledge, RAG và trợ lý AI
 
-Nguồn chi tiết: [Kế hoạch M5](ke-hoach-m5-upload-transcript-ai.md).
+Thiết kế contract, dữ liệu và bảo mật nằm tại [Thiết kế kỹ thuật Upload, Live Transcript và AI](thiet-ke-ky-thuat-upload-live-transcript-ai.md). Phần này chỉ nêu việc M5 phải làm.
 
-### Demo bắt buộc
+### Kết quả phải bàn giao
 
 ```text
-Meeting + active membership
-→ consent/cấp quyền capture
-→ live transcription chạy nền
-→ final segment có timestamp/confidence/language/Speaker N
-→ transcript editor/version
-→ recording/file upload trực tiếp S3
-→ AIJob bất đồng bộ
-→ normalized approved source
+Approved transcript/file + active membership
+→ normalize và tạo KnowledgeSource version
 → Knowledge Base/S3 Vectors
 → RAG current/selected/whole-group có citation
-→ minutes/task proposal
-→ user preview + xác nhận
-→ API nghiệp vụ chuẩn thực thi
+→ chat hoặc minutes/task draft có citation
+→ chuyển draft cho proposal API của M3
 ```
 
-### Phạm vi không được mất khi thu gọn bảng
+### Tệp và việc cần làm
 
-- Attachment metadata và presigned upload.
-- Recording, consent record và retention.
-- LiveTranscriptionSession, heartbeat/reconnect/sequence.
-- Transcript metadata, final segment và edit history.
-- AIJob state/attempt/progress/error an toàn.
-- KnowledgeSource/version/ingestion status.
-- Conversation, message và citation.
-- TaskProposal/ToolProposal, one-time confirmation và idempotency.
-- RAG nhiều meeting trong cùng group.
-- Kiểm tra chống retrieval chéo group.
+- Shared: `KnowledgeSource`, `GroundedAnswer`, `Citation`, conversation và draft DTO trong `packages/shared/src/`.
+- Backend: ingestion, retrieval, chat và draft handlers/services trong `services/api/src/`.
+- Worker: normalize source, gọi Bedrock và cập nhật trạng thái trong worker Lambda được khai báo tại `infra/template.yaml`.
+- Frontend: chat, chọn phạm vi meeting, citation và trạng thái thiếu nguồn trong `apps/web/src/features/`.
+- Data: metadata ở `ai-work`, normalized source ở S3, vector ở Bedrock Knowledge Bases/S3 Vectors.
 
-### Nơi lưu
+### Kiểm thử tối thiểu
 
-| Dữ liệu | Nơi lưu |
-| --- | --- |
-| Attachment/recording/live/transcript metadata | `meeting-data` |
-| Final transcript segment | `meeting-data`, partition `TRANSCRIPT#id` |
-| AIJob/KnowledgeSource/conversation/citation/proposal | `ai-work` |
-| Binary/audio/raw recording | S3 private |
-| Normalized source | S3 data-source prefix |
-| Vector | Bedrock Knowledge Bases + S3 Vectors |
-| Log/metric | CloudWatch, không chứa content nhạy cảm |
-
-### Quy tắc live transcript
-
-- Browser chỉ nhận signed streaming connection ngắn hạn sau authorization/consent/quota check.
-- Audio không đi qua API Gateway/Lambda payload.
-- Partial result chỉ hiển thị tạm; không persist/ingest/citation.
-- Final segment idempotent theo `sessionId + sequence` hoặc `ResultId`.
-- Không tự ánh xạ `Speaker N` sang danh tính.
-- Khi live source lỗi, chức năng AI phụ thuộc nội dung trả trạng thái chưa đủ dữ liệu; không suy đoán từ agenda/participant metadata.
-
-### Quy tắc RAG
-
-- Current meeting có thể đọc final live segment được phép trực tiếp.
-- Chỉ approved file/transcript/minutes mới ingest cho selected/whole-group.
-- Retrieval filter `authorized groupId`, `approved=true` và optional meeting set trước model.
-- Citation phải trỏ nguồn nội bộ ổn định; không trả raw S3 key/URL nhạy cảm.
-- Thiếu nguồn trả `insufficientContext=true`.
-
-### Test tối thiểu
-
-- Binary không đi qua API.
-- File sai MIME/size/checksum bị từ chối.
-- Complete upload retry chỉ tạo một AIJob.
-- Segment retry không duplicate.
-- Optimistic transcript edit version cũ trả conflict.
-- Job retry/backoff/timeout chuyển đúng trạng thái.
+- Chỉ ingest source `approved=true`; version cũ chuyển `STALE`.
+- Ingestion retry không tạo KnowledgeSource version trùng.
 - Group A không retrieve source group B.
-- Proposal chỉ execute một lần và kiểm tra lại quyền lúc confirm.
+- Citation mở đúng meeting/file/transcript segment qua URI nội bộ.
+- Draft không tự ghi minutes/task; thiếu nguồn trả `insufficientContext=true`.
 
-## 10. Infrastructure owner và database workflow
+## 10. Trách nhiệm hạ tầng và quy trình database
 
-Owner infra/M5 review chung chịu trách nhiệm:
+M4 sở hữu hạ tầng luồng vào; M5 sở hữu hạ tầng AI. M1 review quyền IAM có liên quan dữ liệu nhóm:
 
 - `infra/data-foundation.yaml`;
-- IAM roles/policies;
+- IAM roles/policies theo từng runtime;
 - change set;
 - shared dev deployment;
 - audit/backup/cleanup;
-- cost/retention/alarms.
+- M4: S3 user-content, Scheduler, Step Functions orchestration và runtime API;
+- M5: Bedrock Knowledge Base, vector store, AI Worker, AI alarms/cost/cleanup.
 
 Developer workflow:
 
@@ -317,7 +291,7 @@ Use case/access pattern
 → DynamoDB Local integration
 → PR
 → CI
-→ owner deploy shared AWS dev
+→ người phụ trách deploy AWS dev dùng chung
 → smoke test
 ```
 
@@ -325,32 +299,32 @@ Không developer nào cần `DATABASE_URL`. Local AWS SDK dùng DynamoDB Local h
 
 ## 11. Trình tự merge đề xuất
 
-1. Data model/IaC v2 và docs.
+1. Data model/IaC 5 bảng và docs.
 2. Shared error/pagination/idempotency conventions.
 3. M1 membership/authorization boundary.
 4. M2 meeting boundary.
 5. M3 minutes/task/dashboard core.
 6. M4 Google integration dựa trên meeting thật.
-7. M5 có thể làm spike streaming/contract song song; production handlers chỉ nối khi membership/meeting repository thật sẵn sàng.
+7. M2 làm spike streaming song song; M4 làm upload/AIJob; M5 làm fake-provider ingestion/RAG theo contract approved source.
 8. Notification/reminder integration.
 9. Full smoke/security/cost/cleanup rehearsal.
 
-M5 không phải chờ toàn bộ UI core để làm provider spike, fake repository và local workflow; nhưng deployment thật không được bypass authorization boundary của M1/M2.
+M2/M4/M5 có thể dùng fake đúng port khi dependency chưa xong; deployment thật không được bypass authorization boundary của M1/M2.
 
 ## 12. Mốc triển khai
 
-| Mốc | Điều kiện |
-| --- | --- |
-| Data foundation | 5 bảng deploy/verify; 17 bảng legacy audit/backup |
-| Core 1 | Auth → group → invitation/membership |
-| Core 2 | Group → meeting → minutes → task → dashboard |
-| Integration | Google Calendar/Meet status/retry + reminder/notification |
-| AI source | consent/upload/live segment/transcript editor/AIJob |
-| AI grounded | KnowledgeSource ingestion + current/selected/whole-group RAG + citation |
-| Proposal | minutes/task proposal preview/confirm/idempotency |
+| Mốc               | Điều kiện                                                                  |
+| ----------------- | -------------------------------------------------------------------------- |
+| Data foundation   | 5 bảng deploy/verify, TTL/GSI/tag đúng contract                            |
+| Core 1            | Auth → group → invitation/membership                                       |
+| Core 2            | Group → meeting → minutes → task → dashboard                               |
+| Integration       | Google Calendar/Meet status/retry + reminder/notification                  |
+| AI source         | consent/upload/live segment/transcript editor/AIJob                        |
+| AI grounded       | KnowledgeSource ingestion + current/selected/whole-group RAG + citation    |
+| Proposal          | minutes/task proposal preview/confirm/idempotency                          |
 | Release candidate | Cross-group tests, logs/alarms, budget, retention và cleanup rehearsal đạt |
 
-## 13. Definition of Done cho mỗi feature
+## 13. Điều kiện hoàn thành cho mỗi chức năng
 
 Một feature chỉ hoàn thành khi có:
 

@@ -8,20 +8,19 @@ CampusMeet không clone Google Meet. Google Meet là dịch vụ ngoài được
 
 Repository đang chuyển từ scaffold sang các vertical slice tích hợp thật.
 
-| Thành phần | Trạng thái |
-| --- | --- |
-| Frontend | Có application shell, Cognito auth thật khi có env; nhiều màn hình nghiệp vụ vẫn dùng mock |
-| Backend | Có `/health`, `/me` và handler skeleton; repository nghiệp vụ chưa hoàn thiện |
-| Cognito | Đã deploy/kiểm thử bằng auth integration stack; stack thử trước đó đã cleanup |
-| DynamoDB legacy | Account dev hiện có 17 bảng cũ được tạo trước khi review data model; chưa xóa |
-| DynamoDB v2 | Đã chốt thiết kế 5 bảng trong IaC; cần deploy và verify lại |
-| Google Calendar/Meet | Contract/kiến trúc đã chốt; adapter thật chưa hoàn thiện |
-| M5 AI | Đã chốt upload, live transcript, AIJob, Knowledge Base RAG nhiều meeting và citation; implementation còn theo kế hoạch M5 |
-| Full deployment | Chưa production-ready; triển khai theo từng stack/giai đoạn |
+| Thành phần                | Trạng thái                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------ |
+| Frontend                  | Có application shell, Cognito auth thật khi có env; nhiều màn hình nghiệp vụ vẫn dùng mock       |
+| Backend                   | Có `/health`, `/me` và handler skeleton; repository nghiệp vụ chưa hoàn thiện                    |
+| Cognito                   | Đã deploy/kiểm thử bằng auth integration stack; stack thử trước đó đã cleanup                    |
+| DynamoDB                  | 5 bảng đã deploy và verify trong `ap-southeast-1`                                                |
+| Google Calendar/Meet      | Contract/kiến trúc đã chốt; adapter thật chưa hoàn thiện                                         |
+| Upload/live transcript/AI | Đã chốt contract và kiến trúc; phân công theo kế hoạch nhóm, chi tiết kỹ thuật trong tài liệu AI |
+| Full deployment           | Chưa production-ready; triển khai theo từng stack/giai đoạn                                      |
 
 Việc bảng AWS tồn tại không có nghĩa backend đã kết nối persistence thật. Data layer chỉ hoàn thành khi repository, authorization, transaction và integration tests đạt.
 
-## DynamoDB data model v2
+## Mô hình dữ liệu DynamoDB
 
 CampusMeet dùng 5 bảng vật lý theo access pattern:
 
@@ -41,7 +40,7 @@ campusmeet-dev-ai-work
 
 Entity logic không bị xóa khi giảm từ 17 xuống 5 bảng; chúng được lưu bằng composite `PK/SK` và sparse GSI. Binary/audio nằm trong S3, vector nằm trong Bedrock Knowledge Bases/S3 Vectors.
 
-Đọc chi tiết tại [Mô hình dữ liệu DynamoDB v2](docs/dynamodb-data-model.md).
+Đọc chi tiết tại [Mô hình dữ liệu DynamoDB](docs/dynamodb-data-model.md).
 
 ## Công nghệ
 
@@ -60,7 +59,7 @@ Entity logic không bị xóa khi giảm từ 17 xuống 5 bảng; chúng đư�
 - Node.js 22 LTS.
 - npm 10 trở lên.
 - AWS CLI và AWS SAM CLI khi validate/deploy AWS.
-- PowerShell cho các script audit/verify hiện tại.
+- PowerShell cho các script kiểm tra AWS hiện tại.
 
 ```bash
 git clone <repository-url>
@@ -99,58 +98,9 @@ npm run sam:build:auth
 
 Chi tiết nằm tại [Hướng dẫn cấu hình đăng nhập](docs/huong-dan-cau-hinh-dang-nhap.md).
 
-## Triển khai lại DynamoDB dev
+## Kiểm tra DynamoDB dev
 
-### 1. Audit 17 bảng cũ — không sửa/xóa
-
-```powershell
-powershell -NoProfile -File scripts/audit-legacy-data-foundation.ps1 `
-  -Profile <profile> `
-  -Region ap-southeast-1 `
-  -ExpectedAccountId 604360241374 `
-  -ExportCsv legacy-dynamodb-audit.csv
-```
-
-Nếu bất kỳ bảng nào có dữ liệu, tạo backup/export và review migration trước khi xóa.
-
-### 2. Validate data template
-
-```powershell
-sam validate `
-  --template-file infra/data-foundation.yaml `
-  --lint `
-  --profile <profile> `
-  --region ap-southeast-1
-```
-
-Hoặc:
-
-```powershell
-npm run sam:validate:data -- --profile <profile> --region ap-southeast-1
-```
-
-### 3. Preview change set
-
-```powershell
-sam deploy `
-  --template-file infra/data-foundation.yaml `
-  --stack-name campusmeet-dev-data-v2 `
-  --resolve-s3 `
-  --parameter-overrides `
-    Environment=dev `
-    TablePrefix=campusmeet-dev `
-    EnablePointInTimeRecovery=false `
-    EnableDeletionProtection=false `
-  --no-execute-changeset `
-  --profile <profile> `
-  --region ap-southeast-1
-```
-
-Review change set. Nó phải tạo đúng 5 bảng mới và không sửa/xóa 17 bảng legacy.
-
-### 4. Execute và verify
-
-Sau khi execute change set:
+5 bảng được quản lý bởi stack dữ liệu CloudFormation hiện tại. Kiểm tra trực tiếp trên AWS bằng:
 
 ```powershell
 powershell -NoProfile -File scripts/verify-data-foundation.ps1 `
@@ -160,7 +110,7 @@ powershell -NoProfile -File scripts/verify-data-foundation.ps1 `
   -ExpectedAccountId 604360241374
 ```
 
-Không xóa bảng cũ chỉ vì verify v2 đạt. Backend phải chuyển sang 5 biến môi trường mới và smoke test xong trước.
+Quy trình validate, preview change set, deploy và rollback nằm tại [Hướng dẫn triển khai AWS](docs/huong-dan-trien-khai-aws.md).
 
 ## Biến môi trường backend
 
@@ -193,16 +143,15 @@ Local development nên dùng in-memory repository hoặc DynamoDB Local. Shared 
 
 ## Kiểm tra chất lượng
 
-| Lệnh | Mục đích |
-| --- | --- |
-| `npm run lint` | ESLint toàn monorepo |
-| `npm run typecheck` | TypeScript strict check |
-| `npm run test` | Vitest |
-| `npm run build` | Build workspaces/frontend |
-| `npm run format:check` | Kiểm tra Prettier |
-| `npm run sam:validate:data` | Validate data foundation |
-| `npm run aws:audit:legacy-data` | Audit read-only 17 bảng cũ |
-| `npm run aws:verify:data` | Verify 5 bảng v2 |
+| Lệnh                        | Mục đích                  |
+| --------------------------- | ------------------------- |
+| `npm run lint`              | ESLint toàn monorepo      |
+| `npm run typecheck`         | TypeScript strict check   |
+| `npm run test`              | Vitest                    |
+| `npm run build`             | Build workspaces/frontend |
+| `npm run format:check`      | Kiểm tra Prettier         |
+| `npm run sam:validate:data` | Validate data foundation  |
+| `npm run aws:verify:data`   | Verify 5 bảng DynamoDB    |
 
 Trước Pull Request chạy ít nhất `lint`, `typecheck`, `test`, `build` và validation liên quan tới file đã sửa.
 
@@ -213,16 +162,16 @@ apps/web/          React/Vite frontend
 services/api/      API Lambda, application/domain/repository boundaries
 packages/shared/   Shared types, enums, DTO
 infra/             Auth stack, data stack và application stack
-scripts/           AWS audit/verification helpers
+scripts/           AWS validation/verification helpers
 docs/              SRS, kiến trúc, API contract và runbook
 .github/           CI quality gates
 ```
 
 ## Tài liệu chính
 
-- [Mô hình dữ liệu DynamoDB v2](docs/dynamodb-data-model.md)
+- [Mô hình dữ liệu DynamoDB](docs/dynamodb-data-model.md)
 - [Kiến trúc hệ thống](docs/architecture.md)
-- [Kế hoạch M5 upload/transcript/AI](docs/ke-hoach-m5-upload-transcript-ai.md)
+- [Thiết kế kỹ thuật upload/live transcript/AI](docs/thiet-ke-ky-thuat-upload-live-transcript-ai.md)
 - [Hướng dẫn triển khai AWS](docs/huong-dan-trien-khai-aws.md)
 - [Hướng dẫn cấu trúc repository](docs/huong-dan-cau-truc-repository.md)
 - [API contract](docs/api-contract.md)

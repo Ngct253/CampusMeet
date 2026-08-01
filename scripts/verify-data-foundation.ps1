@@ -114,4 +114,4 @@ if ($failures.Count -gt 0) {
 }
 
 Write-Host ''
-Write-Host 'CampusMeet DynamoDB v2 verification passed.'
+Write-Host 'CampusMeet DynamoDB verification passed.'
