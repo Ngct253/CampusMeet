@@ -91,4 +91,4 @@ for (const invalidAction of ['dynamodb:TransactGetItems', 'dynamodb:TransactWrit
   );
 }
 
-console.log('Infrastructure contract validation passed: five-table DynamoDB model v2.');
+console.log('Infrastructure contract validation passed: five-table DynamoDB model.');

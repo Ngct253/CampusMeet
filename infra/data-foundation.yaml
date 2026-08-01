@@ -1,13 +1,13 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "CampusMeet DynamoDB data foundation v2. Five domain tables cover core collaboration and M5 AI workflows.",
+  "Description": "CampusMeet DynamoDB data foundation. Five domain tables cover core collaboration and AI workflows.",
   "Parameters": {
     "Environment": {"Type": "String", "Default": "dev", "AllowedValues": ["dev", "staging", "prod"], "Description": "CampusMeet deployment environment."},
     "TablePrefix": {
       "Type": "String",
       "Default": "campusmeet-dev",
       "AllowedPattern": "^[a-z0-9-]+$",
-      "Description": "Stable environment prefix. New v2 table suffixes do not collide with the legacy 17-table layout."
+      "Description": "Stable environment prefix for the five-table data model."
     },
     "EnablePointInTimeRecovery": {
       "Type": "String",
