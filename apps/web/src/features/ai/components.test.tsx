@@ -3,9 +3,11 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
+  AIJob,
   Citation,
   GroundedAnswer,
   GroupProgressAnalysis,
+  MinutesDraft,
   TaskProposal,
 } from '@campusmeet/shared';
 import {
@@ -13,6 +15,7 @@ import {
   AIJobState,
   GroundedAnswerView,
   GroupSearchPanel,
+  MinutesDraftPreview,
   ProgressAnalysisPanel,
   TaskProposalEditor,
 } from './components';
@@ -38,19 +41,32 @@ describe('AIChatPanel', () => {
     const onSubmit = vi.fn();
     render(<AIChatPanel onSubmit={onSubmit} />);
 
-    fireEvent.change(screen.getByLabelText('Hỏi về tài liệu hoặc nội dung cuộc họp'), {
+    fireEvent.change(screen.getByLabelText('Bạn muốn làm rõ điều gì?'), {
       target: { value: '  Quyết định nào đã được chốt?  ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Gửi câu hỏi' }));
+    expect(screen.getByText('32 / 4.000')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Hỏi CampusMeet' }));
     expect(onSubmit).toHaveBeenLastCalledWith({
       question: 'Quyết định nào đã được chốt?',
       intent: 'QUESTION_ANSWER',
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Tóm tắt cho người vào trễ' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tóm tắt phần đã lỡ' }));
     expect(onSubmit).toHaveBeenLastCalledWith(
       expect.objectContaining({ intent: 'LATE_JOIN_SUMMARY' }),
     );
+  });
+
+  it('locks the composer and announces grounded processing while pending', () => {
+    render(<AIChatPanel isPending onSubmit={vi.fn()} />);
+
+    expect(screen.getByRole('region', { name: 'Trợ lý cuộc họp' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Đang đối chiếu' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Tóm tắt phần đã lỡ' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Đang đối chiếu nguồn');
   });
 });
 
@@ -64,7 +80,7 @@ describe('grounded output', () => {
     };
     render(<GroundedAnswerView answer={answer} />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Chưa có đủ tài liệu');
+    expect(screen.getByRole('status')).toHaveTextContent('Chưa đủ căn cứ để trả lời');
     expect(screen.queryByText(answer.answer)).not.toBeInTheDocument();
   });
 
@@ -101,22 +117,69 @@ describe('GroupSearchPanel', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Câu hỏi'), { target: { value: 'Tiến độ thế nào?' } });
-    expect(screen.getByRole('button', { name: 'Tìm kiếm' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Câu hỏi cần đối chiếu'), {
+      target: { value: 'Tiến độ thế nào?' },
+    });
+    expect(screen.getByRole('button', { name: 'Tìm trong nguồn' })).toBeDisabled();
     fireEvent.click(screen.getByLabelText('Sprint 1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Tìm kiếm' }));
+    expect(screen.getByText('1 cuộc họp được chọn')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Tìm trong nguồn' }));
     expect(onSearch).toHaveBeenLastCalledWith({
       question: 'Tiến độ thế nào?',
       scope: 'SELECTED_MEETINGS',
       meetingIds: ['meeting-1'],
     });
 
-    fireEvent.change(screen.getByLabelText('Phạm vi'), { target: { value: 'WHOLE_GROUP' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Tìm kiếm' }));
+    fireEvent.click(screen.getByLabelText(/Toàn bộ nhóm/));
+    fireEvent.click(screen.getByRole('button', { name: 'Tìm trong nguồn' }));
     expect(onSearch).toHaveBeenLastCalledWith({
       question: 'Tiến độ thế nào?',
       scope: 'WHOLE_GROUP',
     });
+  });
+
+  it('keeps the selected scope visible while a search is pending', () => {
+    render(
+      <GroupSearchPanel
+        isPending
+        meetingOptions={[{ meetingId: 'meeting-1', title: 'Sprint 1' }]}
+        onSearch={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('form', { name: 'Tìm kiếm kiến thức nhóm' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Đang tìm' })).toBeDisabled();
+    expect(screen.getByText('Đang kiểm tra nguồn trong phạm vi đã chọn')).toBeInTheDocument();
+  });
+
+  it('directs the user when no approved meeting is available', () => {
+    render(<GroupSearchPanel meetingOptions={[]} onSearch={vi.fn()} />);
+
+    expect(screen.getByText('Chưa có cuộc họp đã duyệt để tìm kiếm.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tìm trong nguồn' })).toBeDisabled();
+  });
+});
+
+describe('MinutesDraftPreview', () => {
+  it('keeps decisions, action items and evidence visibly separated', () => {
+    const draft: MinutesDraft = {
+      meetingId: 'meeting-1',
+      summary: 'Nhóm thống nhất phạm vi bản demo.',
+      topics: [{ content: 'Phạm vi MVP', citations: [citation] }],
+      decisions: [{ content: 'Chỉ dùng Amazon Transcribe.', citations: [citation] }],
+      actionItems: [{ content: 'Hoàn thiện luồng upload.', citations: [citation] }],
+      citations: [citation],
+    };
+
+    render(<MinutesDraftPreview draft={draft} />);
+
+    expect(screen.getByRole('heading', { name: 'Biên bản nháp' })).toBeInTheDocument();
+    expect(screen.getByText('Chỉ dùng Amazon Transcribe.')).toBeInTheDocument();
+    expect(screen.getByText('Hoàn thiện luồng upload.')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Nguồn tham khảo' })).toBeInTheDocument();
   });
 });
 
@@ -132,12 +195,18 @@ describe('TaskProposalEditor', () => {
       status: 'PENDING',
     };
     const onComplete = vi.fn();
-    render(<TaskProposalEditor proposal={proposal} onComplete={onComplete} />);
+    render(
+      <TaskProposalEditor
+        proposal={proposal}
+        assigneeOptions={[{ userId: 'user-1', displayName: 'Lan Nguyễn' }]}
+        onComplete={onComplete}
+      />,
+    );
 
     const completeButton = screen.getByRole('button', { name: 'Hoàn tất thông tin' });
     expect(completeButton).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Người phụ trách'), {
-      target: { value: ' user-1 ' },
+      target: { value: 'user-1' },
     });
     fireEvent.change(screen.getByLabelText('Mức ưu tiên'), { target: { value: 'HIGH' } });
     fireEvent.click(completeButton);
@@ -161,8 +230,43 @@ describe('authorization-facing states', () => {
 
   it('does not expose progress analysis to a regular member', () => {
     render(<ProgressAnalysisPanel analysis={analysis} isGroupAdmin={false} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('Chỉ Quản trị viên nhóm');
+    expect(screen.getByRole('alert')).toHaveTextContent('Phân tích dành cho Quản trị viên nhóm');
     expect(screen.queryByText(analysis.summary)).not.toBeInTheDocument();
+  });
+
+  it('separates observations and risks for a group admin', () => {
+    render(<ProgressAnalysisPanel analysis={analysis} isGroupAdmin />);
+
+    expect(screen.getByRole('heading', { name: 'Tiến độ nhóm' })).toBeInTheDocument();
+    expect(screen.getByText('Ba tác vụ đã hoàn tất.')).toBeInTheDocument();
+    expect(screen.getByText('Một tác vụ quá hạn.')).toBeInTheDocument();
+    expect(screen.getByText('01/08/2026')).toHaveAttribute('datetime', '2026-08-01T01:00:00.000Z');
+  });
+
+  it('shows the grounded-processing state without exposing source content', () => {
+    render(<AIJobState isLoading />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Đang đối chiếu nguồn');
+    expect(screen.getByRole('status')).not.toHaveTextContent(citation.excerpt!);
+  });
+
+  it('distinguishes a queued job from an actively processing job', () => {
+    const queuedJob: AIJob = {
+      aiJobId: 'job-1',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      type: 'GENERATE_ANSWER',
+      status: 'QUEUED',
+      attempt: 0,
+      requestId: 'request-1',
+      createdAt: '2026-08-01T01:00:00.000Z',
+      updatedAt: '2026-08-01T01:00:00.000Z',
+    };
+
+    render(<AIJobState job={queuedJob} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Yêu cầu đang chờ xử lý');
+    expect(screen.getByRole('status')).not.toHaveTextContent('Đang đối chiếu nguồn');
   });
 
   it('shows a retry action after an AI job failure', () => {
