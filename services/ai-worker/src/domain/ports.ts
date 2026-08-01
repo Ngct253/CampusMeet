@@ -7,6 +7,7 @@ import type {
   GroundedAnswer,
   GroupProgressAnalysis,
   GroupProgressSnapshot,
+  IngestionStatus,
   KnowledgeScope,
   KnowledgeSource,
   KnowledgeSourceType,
@@ -20,16 +21,31 @@ export interface AIJobRecord {
   result?: unknown;
 }
 
-export interface AIJobRepository {
-  get(aiJobId: string): Promise<AIJobRecord | null>;
+export interface AIJobUpdater {
   markProcessing(aiJobId: string): Promise<void>;
   markCompleted(aiJobId: string, result: unknown): Promise<void>;
   markFailed(aiJobId: string, errorCode: string): Promise<void>;
 }
 
+export interface AIJobRepository extends AIJobUpdater {
+  get(aiJobId: string): Promise<AIJobRecord | null>;
+}
+
+export type SourceProvenance =
+  | {
+      kind: 'INDEXED';
+      approved: boolean;
+      ingestionStatus: IngestionStatus;
+    }
+  | {
+      kind: 'LIVE_TRANSCRIPT';
+      isFinal: boolean;
+    };
+
 export interface SourceChunk {
   text: string;
   citation: Citation;
+  provenance: SourceProvenance;
 }
 
 export interface RetrievalRequest {
@@ -38,6 +54,8 @@ export interface RetrievalRequest {
   scope: KnowledgeScope;
   meetingIds?: string[];
   approvedOnly: true;
+  ingestionStatus: 'READY';
+  sourceTypes: KnowledgeSourceType[];
 }
 
 export interface KnowledgeRetriever {

@@ -42,7 +42,11 @@ describe('AI request service', () => {
 
     expect(access.requireMember).toHaveBeenCalledWith('user-1', 'group-1');
     const payload = vi.mocked(jobs.enqueue).mock.calls[0]?.[0].payload as AIRequestPayload;
-    expect(payload).toMatchObject({ operation: 'MEETING_CHAT', groupId: 'group-1', meetingId: 'meeting-1' });
+    expect(payload).toMatchObject({
+      operation: 'MEETING_CHAT',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+    });
   });
 
   it('validates every selected meeting before enqueuing group search', async () => {
@@ -65,6 +69,44 @@ describe('AI request service', () => {
       'group-1',
     );
     expect(jobs.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('does not enqueue selected-meeting search when one meeting is outside the group', async () => {
+    const { meetings, jobs, service } = setup();
+    vi.mocked(meetings.requireMeetingsInGroup).mockRejectedValue(new Error('CROSS_GROUP_MEETING'));
+
+    await expect(
+      service.requestGroupSearch({
+        actorId: 'user-1',
+        groupId: 'group-1',
+        request: {
+          question: 'Tìm quyết định',
+          scope: 'SELECTED_MEETINGS',
+          meetingIds: ['meeting-1', 'meeting-from-another-group'],
+        },
+        idempotencyKey: 'idem-cross-group',
+        requestId: 'request-cross-group',
+      }),
+    ).rejects.toThrow('CROSS_GROUP_MEETING');
+
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('does not enqueue whole-group search when membership authorization fails', async () => {
+    const { access, jobs, service } = setup();
+    vi.mocked(access.requireMember).mockRejectedValue(new Error('FORBIDDEN'));
+
+    await expect(
+      service.requestGroupSearch({
+        actorId: 'outsider-1',
+        groupId: 'group-1',
+        request: { question: 'Tìm quyết định', scope: 'WHOLE_GROUP' },
+        idempotencyKey: 'idem-forbidden',
+        requestId: 'request-forbidden',
+      }),
+    ).rejects.toThrow('FORBIDDEN');
+
+    expect(jobs.enqueue).not.toHaveBeenCalled();
   });
 
   it('requires Group Admin before progress analysis', async () => {

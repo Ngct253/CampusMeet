@@ -5,6 +5,7 @@ import type {
   ConversationMessage,
   GroundedAnswer,
   KnowledgeSource,
+  KnowledgeSourceType,
   TaskProposal,
 } from '@campusmeet/shared';
 import {
@@ -45,6 +46,41 @@ export interface ExecutionDependencies {
 const safeErrorCode = (error: unknown) => {
   if (error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message)) return error.message;
   return 'AI_WORKER_FAILED';
+};
+
+const indexedSourceTypes: KnowledgeSourceType[] = ['ATTACHMENT', 'TRANSCRIPT', 'MINUTES'];
+
+const validateIndexedChunks = (
+  chunks: SourceChunk[],
+  expected: { groupId: string; meetingIds?: string[] },
+) => {
+  const meetingIds = expected.meetingIds ? new Set(expected.meetingIds) : undefined;
+  for (const chunk of chunks) {
+    if (!chunk.text.trim()) throw new Error('INVALID_RETRIEVAL_RESULT');
+    if (chunk.citation.groupId !== expected.groupId) throw new Error('CROSS_GROUP_RETRIEVAL');
+    if (meetingIds && !meetingIds.has(chunk.citation.meetingId)) {
+      throw new Error('CROSS_MEETING_RETRIEVAL');
+    }
+    if (
+      chunk.provenance.kind !== 'INDEXED' ||
+      !chunk.provenance.approved ||
+      chunk.provenance.ingestionStatus !== 'READY'
+    ) {
+      throw new Error('UNAPPROVED_RETRIEVAL_RESULT');
+    }
+  }
+};
+
+const validateFinalLiveChunks = (chunks: SourceChunk[], groupId: string, meetingId: string) => {
+  for (const chunk of chunks) {
+    if (!chunk.text.trim()) throw new Error('INVALID_LIVE_TRANSCRIPT_SEGMENT');
+    if (chunk.citation.groupId !== groupId) throw new Error('CROSS_GROUP_RETRIEVAL');
+    if (chunk.citation.meetingId !== meetingId) throw new Error('CROSS_MEETING_RETRIEVAL');
+    if (chunk.citation.sourceType !== 'TRANSCRIPT') throw new Error('INVALID_LIVE_SOURCE_TYPE');
+    if (chunk.provenance.kind !== 'LIVE_TRANSCRIPT' || !chunk.provenance.isFinal) {
+      throw new Error('PARTIAL_TRANSCRIPT_SEGMENT');
+    }
+  }
 };
 
 const canonicalizeCitations = (citations: Citation[], chunks: SourceChunk[]): Citation[] => {
@@ -103,15 +139,23 @@ export class AIExecutionService {
           payload.meetingId,
           payload.groupId,
         );
+        validateFinalLiveChunks(liveChunks, payload.groupId, payload.meetingId);
+        const retrievalRequest = {
+          question: payload.request.question,
+          groupId: payload.groupId,
+          scope: 'CURRENT_MEETING' as const,
+          meetingIds: [payload.meetingId],
+          approvedOnly: true as const,
+          ingestionStatus: 'READY' as const,
+          sourceTypes: indexedSourceTypes,
+        };
         const indexedChunks = lateJoin
           ? []
-          : await this.dependencies.retriever.retrieve({
-              question: payload.request.question,
-              groupId: payload.groupId,
-              scope: 'CURRENT_MEETING',
-              meetingIds: [payload.meetingId],
-              approvedOnly: true,
-            });
+          : await this.dependencies.retriever.retrieve(retrievalRequest);
+        validateIndexedChunks(indexedChunks, {
+          groupId: payload.groupId,
+          meetingIds: [payload.meetingId],
+        });
         const chunks = [...indexedChunks, ...liveChunks];
         const answer = chunks.length
           ? await this.dependencies.generator.answer({
@@ -126,18 +170,29 @@ export class AIExecutionService {
               scope: 'CURRENT_MEETING',
               insufficientContext: true,
             } satisfies GroundedAnswer);
+        answer.scope = 'CURRENT_MEETING';
         answer.citations = canonicalizeCitations(answer.citations, chunks);
+        if (!answer.insufficientContext && answer.citations.length === 0) {
+          throw new Error('UNGROUNDED_MODEL_OUTPUT');
+        }
         const validated = groundedAnswerSchema.parse(answer);
         await this.saveConversation(payload, validated);
         return validated;
       }
       case 'GROUP_SEARCH': {
-        const chunks = await this.dependencies.retriever.retrieve({
+        const retrievalRequest = {
           question: payload.request.question,
           groupId: payload.groupId,
           scope: payload.request.scope,
           ...(payload.request.meetingIds ? { meetingIds: payload.request.meetingIds } : {}),
-          approvedOnly: true,
+          approvedOnly: true as const,
+          ingestionStatus: 'READY' as const,
+          sourceTypes: indexedSourceTypes,
+        };
+        const chunks = await this.dependencies.retriever.retrieve(retrievalRequest);
+        validateIndexedChunks(chunks, {
+          groupId: payload.groupId,
+          ...(payload.request.meetingIds ? { meetingIds: payload.request.meetingIds } : {}),
         });
         const answer = chunks.length
           ? await this.dependencies.generator.answer({
@@ -152,18 +207,29 @@ export class AIExecutionService {
               scope: payload.request.scope,
               insufficientContext: true,
             } satisfies GroundedAnswer);
+        answer.scope = payload.request.scope;
         answer.citations = canonicalizeCitations(answer.citations, chunks);
+        if (!answer.insufficientContext && answer.citations.length === 0) {
+          throw new Error('UNGROUNDED_MODEL_OUTPUT');
+        }
         const validated = groundedAnswerSchema.parse(answer);
         await this.saveConversation(payload, validated);
         return validated;
       }
       case 'MINUTES_DRAFT': {
-        const chunks = await this.dependencies.retriever.retrieve({
+        const retrievalRequest = {
           question: 'Diễn biến, chủ đề, quyết định và action item đã được nêu trong cuộc họp',
           groupId: payload.groupId,
-          scope: 'CURRENT_MEETING',
+          scope: 'CURRENT_MEETING' as const,
           meetingIds: [payload.meetingId],
-          approvedOnly: true,
+          approvedOnly: true as const,
+          ingestionStatus: 'READY' as const,
+          sourceTypes: indexedSourceTypes,
+        };
+        const chunks = await this.dependencies.retriever.retrieve(retrievalRequest);
+        validateIndexedChunks(chunks, {
+          groupId: payload.groupId,
+          meetingIds: [payload.meetingId],
         });
         requireSources(chunks);
         const draft = await this.dependencies.generator.minutes({
@@ -178,12 +244,19 @@ export class AIExecutionService {
         return minutesDraftSchema.parse(draft);
       }
       case 'TASK_PROPOSALS': {
-        const chunks = await this.dependencies.retriever.retrieve({
+        const retrievalRequest = {
           question: 'Các action item hoặc công việc đã được nêu rõ trong cuộc họp',
           groupId: payload.groupId,
-          scope: 'CURRENT_MEETING',
+          scope: 'CURRENT_MEETING' as const,
           meetingIds: [payload.meetingId],
-          approvedOnly: true,
+          approvedOnly: true as const,
+          ingestionStatus: 'READY' as const,
+          sourceTypes: indexedSourceTypes,
+        };
+        const chunks = await this.dependencies.retriever.retrieve(retrievalRequest);
+        validateIndexedChunks(chunks, {
+          groupId: payload.groupId,
+          meetingIds: [payload.meetingId],
         });
         requireSources(chunks);
         const proposals = await this.dependencies.generator.taskProposals({
