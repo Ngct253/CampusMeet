@@ -24,13 +24,13 @@ Nhiều repository có thể dùng cùng một bảng nhưng vẫn tách theo do
 
 ## 3. Phân công trách nhiệm
 
-| Thành viên | Chức năng sở hữu                                                                       | Tỷ lệ | Đầu ra cho thành viên khác                                         |
-| ---------- | -------------------------------------------------------------------------------------- | ----: | ------------------------------------------------------------------ |
-| M1         | Identity, group, membership, invitation, authorization và notification inbox           |   20% | Membership lookup, authorization helper và notification repository |
-| M2         | Meeting, agenda, attendee, consent, live STT, recording và final transcript segment    |   20% | Meeting boundary và nguồn transcript ổn định                       |
-| M3         | Transcript editor, minutes, task, dashboard và xác nhận proposal                       |   20% | Task/Minutes API chuẩn; proposal chỉ gọi API này sau xác nhận      |
-| M4         | Google OAuth/Calendar/Meet, attachment upload, AIJob orchestration, reminder và email  |   20% | Approved source + AIJob cho M5; external references cho M2         |
-| M5         | KnowledgeSource, Bedrock ingestion, RAG nhiều meeting, chat, citation và sinh bản nháp |   20% | Grounded answer/draft có citation cho UI và M3                     |
+| Thành viên | Chức năng sở hữu                                                                       | Tỷ lệ | Đầu ra cho thành viên khác                                          |
+| ---------- | -------------------------------------------------------------------------------------- | ----: | ------------------------------------------------------------------- |
+| M1         | Identity, group, membership, invitation, authorization và notification inbox           |   20% | Membership lookup, authorization helper và notification repository  |
+| M2         | Meeting, agenda, attendee, consent, live STT, recording và final transcript segment    |   20% | Meeting boundary và nguồn transcript ổn định                        |
+| M3         | Transcript editor, minutes, task, dashboard và xác nhận proposal                       |   20% | Task/Minutes API chuẩn; proposal chỉ gọi API này sau xác nhận       |
+| M4         | Google OAuth/Calendar/Meet REST và Meet Add-on; upload, AIJob, reminder và email       |   20% | Add-on dùng chung API; approved source/AIJob và external references |
+| M5         | KnowledgeSource, Bedrock ingestion, RAG nhiều meeting, chat, citation và sinh bản nháp |   20% | Grounded answer/draft có citation cho UI và M3                      |
 
 Người phụ trách chịu trách nhiệm kết quả, không độc quyền tệp. Dữ liệu dùng chung, router, IAM và IaC luôn cần review chéo.
 
@@ -192,7 +192,7 @@ Meeting
 
 M5 không ghi task hoặc minutes chính thức trực tiếp. M5 tạo draft có citation; M3 sở hữu preview, xác nhận và gọi API nghiệp vụ chuẩn.
 
-## 8. M4 — Google, upload, AIJob và reminder
+## 8. M4 — Google, Meet Add-on, upload, AIJob và reminder
 
 ### Kết quả phải bàn giao
 
@@ -203,6 +203,9 @@ User kết nối Google
 → lưu googleSyncStatus + external refs
 → retry không tạo event trùng
 → artifact có thì đồng bộ reference, không có thì dùng upload fallback
+→ Meet Add-on side panel lấy meetingId/meetingCode và ánh xạ meeting nội bộ
+→ Add-on gọi cùng API, membership và authorization với CampusMeet web
+→ SDK/iframe/add-on lỗi thì mở đúng meeting trên CampusMeet web
 → upload file/audio trực tiếp S3
 → complete verification tạo đúng một AIJob
 → Step Functions xử lý bất đồng bộ
@@ -211,9 +214,15 @@ User kết nối Google
 
 ### Tệp và việc cần làm
 
-- Shared: Google integration, attachment, upload-complete, AIJob và reminder DTO trong `packages/shared/src/`.
-- Frontend: connect/disconnect/status/retry và upload progress/cancel/retry trong `apps/web/src/features/`.
-- Backend: OAuth/meeting sync, presigned upload/complete, AIJob status và reminder handlers/services trong `services/api/src/`.
+- Shared: Google integration, attachment, upload-complete, AIJob và reminder DTO trong `packages/shared/src/`; chỉ thêm DTO Add-on khi không tái sử dụng được meeting contract hiện có.
+- Frontend web: connect/disconnect/status/retry và upload progress/cancel/retry trong `apps/web/src/features/`.
+- Meet Add-on frontend:
+  - tạo route `/meet-addon/side-panel` tại `apps/web/src/routes/router.tsx`; route này không dùng `AppShell` hoặc sidebar dashboard;
+  - đặt giao diện tối giản tại `apps/web/src/features/meet-addon/MeetSidePanelPage.tsx`;
+  - cô lập Meet Add-ons SDK và `getMeetingInfo()` tại `apps/web/src/features/meet-addon/meet-addon-client.ts`;
+  - dùng `meetingId` làm external identifier chính; `meetingCode` chỉ hỗ trợ nhận context hiện tại, không lưu làm định danh dài hạn.
+- Meet Add-on deployment: tạo HTTP deployment manifest `integrations/google-meet-addon/deployment.json` với `sidePanelUrl`, `addOnOrigins`, logo và `supportsScreenSharing`; không đặt secret hoặc OAuth token trong manifest.
+- Backend: OAuth/meeting sync, ánh xạ Meet context sang meeting nội bộ, presigned upload/complete, AIJob status và reminder handlers/services trong `services/api/src/`; Add-on không có backend riêng.
 - Adapter: Google Calendar/Meet REST, S3, Step Functions, EventBridge Scheduler và SES.
 - Data:
   - integration reference/ciphertext secret reference trong `identity`;
@@ -228,6 +237,10 @@ User kết nối Google
 - Chỉ hiển thị Meet URL khi `READY`.
 - Retry dùng idempotency/request ID; không tạo event mới mù quáng.
 - Google artifact không có là kết quả hợp lệ, không làm mất meeting/minutes/task nội bộ.
+- Add-on là client surface trong Google Meet, không phải mục điều hướng của CampusMeet dashboard.
+- Add-on không bỏ qua Cognito, membership, role hoặc audit. M1 chỉ bàn giao auth/session và authorization helper; M4 sở hữu route, SDK, manifest, mapping và deployment Add-on.
+- Nếu Add-on chưa cài, SDK không khởi tạo, meeting chưa ánh xạ hoặc iframe không có phiên đăng nhập, hiển thị trạng thái rõ và nút mở meeting tương ứng trên CampusMeet web.
+- MVP dùng HTTP deployment chưa công bố trong Google Workspace Marketplace SDK để nhóm thử nghiệm; chưa làm private/public Marketplace trong work package này.
 
 ### Kiểm thử tối thiểu
 
@@ -238,6 +251,11 @@ User kết nối Google
 - Binary không đi qua API; complete upload retry chỉ tạo một AIJob.
 - Job success/failure/cancel/retry cập nhật trạng thái idempotent.
 - Email lỗi không rollback notification trong ứng dụng.
+- Manifest chỉ dùng HTTPS origin do nhóm sở hữu; origin của `sidePanelUrl` thuộc `addOnOrigins`.
+- Deployment chưa công bố cài được cho tài khoản test và mở đúng route side panel trong Google Meet.
+- `getMeetingInfo()` trả `meetingId`/`meetingCode`; meeting hợp lệ ánh xạ đúng bản ghi nội bộ, meeting lạ hiển thị trạng thái chưa liên kết.
+- Thành viên hợp lệ đọc được meeting qua cùng API; user không thuộc group nhận `403`, không lộ dữ liệu qua Add-on.
+- SDK không khả dụng, phiên đăng nhập iframe lỗi hoặc Add-on bị chặn đều mở được fallback CampusMeet web.
 
 ## 9. M5 — Knowledge, RAG và trợ lý AI
 
@@ -279,7 +297,7 @@ M4 sở hữu hạ tầng luồng vào; M5 sở hữu hạ tầng AI. M1 review 
 - change set;
 - shared dev deployment;
 - audit/backup/cleanup;
-- M4: S3 user-content, Scheduler, Step Functions orchestration và runtime API;
+- M4: S3 user-content, Scheduler, Step Functions orchestration, runtime API và `integrations/google-meet-addon/deployment.json`;
 - M5: Bedrock Knowledge Base, vector store, AI Worker, AI alarms/cost/cleanup.
 
 Developer workflow:
@@ -304,7 +322,7 @@ Không developer nào cần `DATABASE_URL`. Local AWS SDK dùng DynamoDB Local h
 3. M1 membership/authorization boundary.
 4. M2 meeting boundary.
 5. M3 minutes/task/dashboard core.
-6. M4 Google integration dựa trên meeting thật.
+6. M4 Google integration và Meet Add-on dựa trên meeting thật.
 7. M2 làm spike streaming song song; M4 làm upload/AIJob; M5 làm fake-provider ingestion/RAG theo contract approved source.
 8. Notification/reminder integration.
 9. Full smoke/security/cost/cleanup rehearsal.
@@ -318,7 +336,7 @@ M2/M4/M5 có thể dùng fake đúng port khi dependency chưa xong; deployment 
 | Data foundation   | 5 bảng deploy/verify, TTL/GSI/tag đúng contract                            |
 | Core 1            | Auth → group → invitation/membership                                       |
 | Core 2            | Group → meeting → minutes → task → dashboard                               |
-| Integration       | Google Calendar/Meet status/retry + reminder/notification                  |
+| Integration       | Google Calendar/Meet status/retry + Meet Add-on unpublished + reminder     |
 | AI source         | consent/upload/live segment/transcript editor/AIJob                        |
 | AI grounded       | KnowledgeSource ingestion + current/selected/whole-group RAG + citation    |
 | Proposal          | minutes/task proposal preview/confirm/idempotency                          |

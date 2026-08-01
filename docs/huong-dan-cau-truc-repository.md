@@ -8,22 +8,24 @@ Tài liệu này trả lời “file này dùng để làm gì?” và “tôi n
 - `services/` chứa backend/Lambda/worker.
 - `packages/shared/` chứa type, enum và DTO dùng chung.
 - `infra/` chứa AWS IaC.
+- `integrations/` chứa manifest/config triển khai cho nền tảng ngoài AWS; không chứa credential.
 - `scripts/` chứa helper validation/verification; script destructive phải explicit và review.
 - `docs/` chứa yêu cầu, quyết định kiến trúc và runbook.
 - Không đặt credential, OAuth token, presigned URL còn hiệu lực hoặc dữ liệu người dùng thật trong repo.
 
 ## 2. Bản đồ thư mục gốc
 
-| Đường dẫn             | Vai trò                                               |
-| --------------------- | ----------------------------------------------------- |
-| `apps/web/`           | React/Vite web và route Meet Add-on dùng chung assets |
-| `services/api/`       | API Lambda, application/domain/repository/integration |
-| `services/ai-worker/` | Tiến trình xử lý AI                                   |
-| `packages/shared/`    | DTO/types/enums/constants dùng chung                  |
-| `infra/`              | Auth stack, data stack và application stack           |
-| `scripts/`            | Validation, local/bootstrap helpers                   |
-| `docs/`               | SRS, architecture, API/data contract và runbook       |
-| `.github/`            | Kiểm tra CI                                           |
+| Đường dẫn             | Vai trò                                                 |
+| --------------------- | ------------------------------------------------------- |
+| `apps/web/`           | React/Vite web và route Meet Add-on dùng chung assets   |
+| `services/api/`       | API Lambda, application/domain/repository/integration   |
+| `services/ai-worker/` | Tiến trình xử lý AI                                     |
+| `packages/shared/`    | DTO/types/enums/constants dùng chung                    |
+| `infra/`              | Auth stack, data stack và application stack             |
+| `integrations/`       | Google Meet Add-on deployment/config, không chứa secret |
+| `scripts/`            | Validation, local/bootstrap helpers                     |
+| `docs/`               | SRS, architecture, API/data contract và runbook         |
+| `.github/`            | Kiểm tra CI                                             |
 
 ## 3. Frontend — `apps/web/src`
 
@@ -41,18 +43,19 @@ Tài liệu này trả lời “file này dùng để làm gì?” và “tôi n
 
 Các nhóm chức năng:
 
-| Feature         | Phạm vi                                      |
-| --------------- | -------------------------------------------- |
-| `auth`          | Cognito sign-up/sign-in/confirm/reset/logout |
-| `groups`        | Group, membership, invitation                |
-| `meetings`      | Meeting, attendee, agenda, Google status     |
-| `minutes`       | Minutes/decision/action-item UI              |
-| `tasks`         | Task và dashboard                            |
-| `notifications` | In-app notifications                         |
-| `integrations`  | Google connect/disconnect/status             |
-| `attachments`   | Upload state và file list                    |
-| `transcripts`   | Live status, editor, timestamp/citation UI   |
-| `ai`            | Chat, RAG scope, draft/proposal/citation UI  |
+| Feature         | Phạm vi                                            |
+| --------------- | -------------------------------------------------- |
+| `auth`          | Cognito sign-up/sign-in/confirm/reset/logout       |
+| `groups`        | Group, membership, invitation                      |
+| `meetings`      | Meeting, attendee, agenda, Google status           |
+| `minutes`       | Minutes/decision/action-item UI                    |
+| `tasks`         | Task và dashboard                                  |
+| `notifications` | In-app notifications                               |
+| `integrations`  | Google connect/disconnect/status                   |
+| `meet-addon`    | Route side panel, Meet Add-ons SDK và web fallback |
+| `attachments`   | Upload state và file list                          |
+| `transcripts`   | Live status, editor, timestamp/citation UI         |
+| `ai`            | Chat, RAG scope, draft/proposal/citation UI        |
 
 Frontend không gọi DynamoDB, S3 credential API, Transcribe hoặc Bedrock bằng credential dài hạn. Luồng dữ liệu nghiệp vụ:
 

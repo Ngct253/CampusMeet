@@ -6,6 +6,6 @@
 - Không commit `.env`, token, secret, AWS credential hoặc dữ liệu người dùng thật.
 - Dùng shared DTO/types thay vì copy contract giữa frontend và backend.
 - Không merge khi `lint`, `typecheck`, `test` hoặc `build` lỗi.
-- Infrastructure change phải được M5 review; API contract change phải phối hợp các owner liên quan.
+- Infrastructure change phải được owner phần hạ tầng liên quan review chéo; API contract change phải phối hợp các owner liên quan.
 
 Quy ước branch, commit và PR nằm trong [kế hoạch triển khai nhóm](docs/ke-hoach-trien-khai-nhom.md).
