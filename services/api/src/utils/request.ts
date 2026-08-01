@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import type { ZodType } from 'zod';
+import type { output, ZodTypeAny } from 'zod';
 import { BadRequestError } from './errors';
 
 export const getRequestId = (event: APIGatewayProxyEventV2): string =>
@@ -14,7 +14,10 @@ export function parseJson<T>(event: APIGatewayProxyEventV2): T | undefined {
   }
 }
 
-export function parseBody<T>(event: APIGatewayProxyEventV2, schema: ZodType<T>): T {
+export function parseBody<TSchema extends ZodTypeAny>(
+  event: APIGatewayProxyEventV2,
+  schema: TSchema,
+): output<TSchema> {
   const result = schema.safeParse(parseJson<unknown>(event));
   if (!result.success) {
     throw new BadRequestError(

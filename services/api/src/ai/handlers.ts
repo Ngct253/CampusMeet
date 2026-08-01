@@ -5,7 +5,6 @@ import {
   groupProgressAnalysisRequestSchema,
   meetingChatRequestSchema,
 } from '@campusmeet/shared';
-import type { MeetingChatRequest } from '@campusmeet/shared';
 import { handleError } from '../middleware/error-handler';
 import { UnauthorizedError } from '../utils/errors';
 import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
@@ -31,9 +30,14 @@ const getService = () => {
   return service;
 };
 
-const handler = (
-  action: (service: AIRequestService, event: APIGatewayProxyEventV2, requestId: string) => Promise<unknown>,
-): APIGatewayProxyHandlerV2 =>
+const handler =
+  (
+    action: (
+      service: AIRequestService,
+      event: APIGatewayProxyEventV2,
+      requestId: string,
+    ) => Promise<unknown>,
+  ): APIGatewayProxyHandlerV2 =>
   async (event) => {
     const requestId = getRequestId(event);
     try {
@@ -47,7 +51,7 @@ export const meetingChatHandler = handler((ai, event, requestId) =>
   ai.requestMeetingChat({
     actorId: actorId(event),
     meetingId: getPathParameter(event, 'meetingId'),
-    request: parseBody<MeetingChatRequest>(event, meetingChatRequestSchema),
+    request: parseBody(event, meetingChatRequestSchema),
     idempotencyKey: requireIdempotencyKey(event),
     requestId,
   }),
