@@ -111,7 +111,7 @@ Có thể đối chiếu Cognito:
 
 ## 5. Tạo cấu hình frontend
 
-Trong `apps/web`, sao chép `.env.example` thành `.env.local`, rồi điền giá trị thật:
+Trong `apps/web`, sao chép `.env.example` thành `.env`, rồi điền giá trị thật:
 
 ```dotenv
 VITE_COGNITO_USER_POOL_ID=ap-southeast-1_AbCdEf123
@@ -124,9 +124,9 @@ Quy tắc:
 - Không thêm dấu nháy nếu giá trị không chứa khoảng trắng.
 - Không thêm `/dev` khi dùng `infra/auth-integration.yaml`.
 - Không thêm dấu `/` cuối `VITE_API_BASE_URL`.
-- `.env.local` đã được `.gitignore`; không dùng `git add -f`.
+- `.env` đã được `.gitignore`; không dùng `git add -f`.
 - `VITE_*` là cấu hình public được đóng vào frontend, tuyệt đối không đặt password, token hoặc AWS credential ở đây.
-- Restart `npm run dev` sau khi sửa `.env.local`.
+- Restart `npm run dev` sau khi sửa `.env`.
 
 ## 6. Chạy và kiểm tra
 
@@ -168,13 +168,13 @@ Kỳ vọng `/health` trả `200`; `/me` không có token trả `401`. Frontend 
 
 ## 8. Lỗi thường gặp
 
-| Lỗi                                        | Kiểm tra                                                                  |
-| ------------------------------------------ | ------------------------------------------------------------------------- |
-| Frontend báo chưa kết nối AWS              | Đúng tên file `apps/web/.env.local`, đủ hai Cognito ID và đã restart Vite |
-| Cognito báo user pool/client không tồn tại | ID phải cùng Region và cùng stack; stack chưa bị xóa                      |
-| Đăng ký được nhưng không nhận email        | Kiểm tra spam, email nhập đúng và trạng thái user trong Cognito           |
-| `/me` trả `401` không token                | Đúng hành vi; endpoint này được JWT authorizer bảo vệ                     |
-| Browser báo CORS                           | `AllowedOrigin` phải đúng origin, gồm cả port và không có path            |
-| API trả 404 khi URL có `/dev`              | Xóa `/dev`; auth integration dùng stage `$default`                        |
+| Lỗi                                        | Kiểm tra                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------- |
+| Frontend báo chưa kết nối AWS              | Đúng tên file `apps/web/.env`, đủ hai Cognito ID và đã restart Vite |
+| Cognito báo user pool/client không tồn tại | ID phải cùng Region và cùng stack; stack chưa bị xóa                |
+| Đăng ký được nhưng không nhận email        | Kiểm tra spam, email nhập đúng và trạng thái user trong Cognito     |
+| `/me` trả `401` không token                | Đúng hành vi; endpoint này được JWT authorizer bảo vệ               |
+| Browser báo CORS                           | `AllowedOrigin` phải đúng origin, gồm cả port và không có path      |
+| API trả 404 khi URL có `/dev`              | Xóa `/dev`; auth integration dùng stage `$default`                  |
 
 Khi kết thúc môi trường thử nghiệm, người quản lý stack thực hiện cleanup theo [hướng dẫn triển khai AWS](huong-dan-trien-khai-aws.md).

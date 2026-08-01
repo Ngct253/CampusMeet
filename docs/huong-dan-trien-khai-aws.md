@@ -237,7 +237,7 @@ sam validate `
 npm run sam:build:auth
 ```
 
-Frontend dùng `UserPoolId`, `UserPoolClientId`, `ApiUrl` trong `.env.local`. Các giá trị này là public client config, không phải secret.
+Frontend dùng `UserPoolId`, `UserPoolClientId`, `ApiUrl` trong `.env`. Các giá trị này là public client config, không phải secret.
 
 ## 12. Hạ tầng upload/live transcript/AI
 
