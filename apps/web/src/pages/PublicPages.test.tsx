@@ -41,6 +41,7 @@ function renderPage(page: React.ReactNode, path: string) {
 describe('direct Cognito auth pages', () => {
   beforeEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.resetAllMocks();
     sessionStorage.clear();
     mockUseAuth.mockReturnValue(user);
@@ -84,7 +85,10 @@ describe('direct Cognito auth pages', () => {
   it('sign-up gọi signUp và chuyển tới xác nhận', async () => {
     authMocks.signUp.mockResolvedValue({
       isSignUpComplete: false,
-      nextStep: { signUpStep: 'CONFIRM_SIGN_UP' },
+      nextStep: {
+        signUpStep: 'CONFIRM_SIGN_UP',
+        codeDeliveryDetails: { destination: 'l***@e***.edu', deliveryMedium: 'EMAIL' },
+      },
     });
     renderPage(<SignUpPage />, '/sign-up');
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: ' Lan@Example.EDU ' } });
@@ -101,6 +105,7 @@ describe('direct Cognito auth pages', () => {
     );
     expect(await screen.findByText('Trang xác nhận')).toBeInTheDocument();
     expect(sessionStorage.getItem('campusmeet:pendingEmail')).toBe('lan@example.edu');
+    expect(sessionStorage.getItem('campusmeet:confirmationDestination')).toBe('l***@e***.edu');
   });
 
   it('hai mật khẩu sign-up toggle độc lập', () => {
@@ -128,6 +133,37 @@ describe('direct Cognito auth pages', () => {
         confirmationCode: '123456',
       }),
     );
+  });
+
+  it('confirm-sign-up hiển thị đích gửi, hạn mã và cooldown gửi lại', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-01T06:00:00Z'));
+    sessionStorage.setItem('campusmeet:pendingEmail', 'lan@example.edu');
+    sessionStorage.setItem('campusmeet:confirmationDestination', 'l***@e***.edu');
+    sessionStorage.setItem('campusmeet:resendAvailableAt', String(Date.now() + 60_000));
+
+    renderPage(<ConfirmSignUpPage />, '/confirm-sign-up');
+
+    expect(screen.getByText('Mã 6 số đã được gửi đến l***@e***.edu.')).toBeInTheDocument();
+    expect(screen.getByText(/Mã có hiệu lực 24 giờ/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gửi lại sau 60 giây' })).toBeDisabled();
+
+    vi.useRealTimers();
+  });
+
+  it('gửi lại mã hiển thị đích gửi và bắt đầu cooldown mới', async () => {
+    authMocks.resendSignUpCode.mockResolvedValue({
+      destination: 'l***@e***.edu',
+      deliveryMedium: 'EMAIL',
+    });
+    sessionStorage.setItem('campusmeet:pendingEmail', 'lan@example.edu');
+    renderPage(<ConfirmSignUpPage />, '/confirm-sign-up');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Gửi lại mã' }));
+
+    expect(await screen.findByText('Đã gửi mã mới đến l***@e***.edu.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gửi lại sau 60 giây' })).toBeDisabled();
+    expect(authMocks.resendSignUpCode).toHaveBeenCalledWith({ username: 'lan@example.edu' });
   });
 
   it('forgot-password gửi mã rồi đặt mật khẩu mới', async () => {
