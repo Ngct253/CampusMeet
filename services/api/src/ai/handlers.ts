@@ -5,21 +5,12 @@ import {
   groupProgressAnalysisRequestSchema,
   meetingChatRequestSchema,
 } from '@campusmeet/shared';
+import { authenticate } from '../middleware/authentication';
 import { handleError } from '../middleware/error-handler';
-import { UnauthorizedError } from '../utils/errors';
 import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
 import { accepted } from '../utils/response';
 import { createProductionAIRequestServiceAdapters } from './aws-adapters';
 import { AIRequestService } from './request-service';
-
-const actorId = (event: APIGatewayProxyEventV2): string => {
-  const requestContext = event.requestContext as typeof event.requestContext & {
-    authorizer?: { jwt?: { claims?: Record<string, unknown> } };
-  };
-  const sub = requestContext.authorizer?.jwt?.claims?.sub;
-  if (typeof sub !== 'string' || !sub) throw new UnauthorizedError();
-  return sub;
-};
 
 let productionService: AIRequestService | undefined;
 const getProductionService = () => {
@@ -49,7 +40,7 @@ export const createAIHandlers = (getService: () => AIRequestService) => {
   return {
     meetingChatHandler: handler(
       (event, requestId) => ({
-        actorId: actorId(event),
+        actorId: authenticate(event).userId,
         meetingId: getPathParameter(event, 'meetingId'),
         request: parseBody(event, meetingChatRequestSchema),
         idempotencyKey: requireIdempotencyKey(event),
@@ -59,7 +50,7 @@ export const createAIHandlers = (getService: () => AIRequestService) => {
     ),
     groupSearchHandler: handler(
       (event, requestId) => ({
-        actorId: actorId(event),
+        actorId: authenticate(event).userId,
         groupId: getPathParameter(event, 'groupId'),
         request: parseBody(event, groupKnowledgeQuerySchema),
         idempotencyKey: requireIdempotencyKey(event),
@@ -69,7 +60,7 @@ export const createAIHandlers = (getService: () => AIRequestService) => {
     ),
     minutesDraftHandler: handler(
       (event, requestId) => ({
-        actorId: actorId(event),
+        actorId: authenticate(event).userId,
         meetingId: getPathParameter(event, 'meetingId'),
         request: parseBody(event, generateMeetingDraftRequestSchema),
         idempotencyKey: requireIdempotencyKey(event),
@@ -79,7 +70,7 @@ export const createAIHandlers = (getService: () => AIRequestService) => {
     ),
     taskProposalsHandler: handler(
       (event, requestId) => ({
-        actorId: actorId(event),
+        actorId: authenticate(event).userId,
         meetingId: getPathParameter(event, 'meetingId'),
         request: parseBody(event, generateMeetingDraftRequestSchema),
         idempotencyKey: requireIdempotencyKey(event),
@@ -89,7 +80,7 @@ export const createAIHandlers = (getService: () => AIRequestService) => {
     ),
     progressAnalysisHandler: handler(
       (event, requestId) => ({
-        actorId: actorId(event),
+        actorId: authenticate(event).userId,
         groupId: getPathParameter(event, 'groupId'),
         request: parseBody(event, groupProgressAnalysisRequestSchema),
         idempotencyKey: requireIdempotencyKey(event),

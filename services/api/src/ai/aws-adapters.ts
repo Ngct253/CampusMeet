@@ -8,18 +8,14 @@ import {
   TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import type { AIJob } from '@campusmeet/shared';
+import { GroupRole, type AIJob } from '@campusmeet/shared';
+import { requireGroupMembership } from '../middleware/authorization';
 import { ForbiddenError, ResourceNotFoundError, ServiceConfigurationError } from '../utils/errors';
 import type { AIJobOrchestrator, MeetingScopeReader, MembershipAuthorizer } from './ports';
 
 interface MeetingRecord {
   groupId?: string;
   organizerId?: string;
-}
-
-interface MembershipRecord {
-  active?: boolean;
-  role?: string;
 }
 
 const requireValue = (value: string | undefined, name: string): string => {
@@ -30,30 +26,16 @@ const requireValue = (value: string | undefined, name: string): string => {
 export class DynamoAiAccessAdapter implements MembershipAuthorizer, MeetingScopeReader {
   constructor(
     private readonly database: DynamoDBDocumentClient,
-    private readonly collaborationTable: string,
     private readonly meetingTable: string,
+    private readonly authorizeGroup: typeof requireGroupMembership = requireGroupMembership,
   ) {}
 
-  private async membership(actorId: string, groupId: string): Promise<MembershipRecord> {
-    const result = await this.database.send(
-      new GetCommand({
-        TableName: this.collaborationTable,
-        Key: { PK: `GROUP#${groupId}`, SK: `MEMBER#${actorId}` },
-        ConsistentRead: true,
-      }),
-    );
-    const membership = result.Item as MembershipRecord | undefined;
-    if (!membership?.active) throw new ForbiddenError();
-    return membership;
-  }
-
   async requireMember(actorId: string, groupId: string): Promise<void> {
-    await this.membership(actorId, groupId);
+    await this.authorizeGroup(actorId, groupId);
   }
 
   async requireGroupAdmin(actorId: string, groupId: string): Promise<void> {
-    const membership = await this.membership(actorId, groupId);
-    if (membership.role !== 'GROUP_ADMIN') throw new ForbiddenError('Chỉ Quản trị viên nhóm được phép.');
+    await this.authorizeGroup(actorId, groupId, GroupRole.GROUP_ADMIN);
   }
 
   async requireMeetingOrganizerOrAdmin(actorId: string, meetingId: string): Promise<string> {
@@ -85,7 +67,10 @@ export class DynamoAiAccessAdapter implements MembershipAuthorizer, MeetingScope
       }),
     );
     const meetings = (result.Responses?.[this.meetingTable] ?? []) as MeetingRecord[];
-    if (meetings.length !== uniqueIds.length || meetings.some((meeting) => meeting.groupId !== groupId)) {
+    if (
+      meetings.length !== uniqueIds.length ||
+      meetings.some((meeting) => meeting.groupId !== groupId)
+    ) {
       throw new ForbiddenError('Mọi cuộc họp được chọn phải thuộc cùng nhóm.');
     }
   }
@@ -117,7 +102,9 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator {
     const now = new Date().toISOString();
     const aiJobId = `aij_${randomUUID()}`;
     const keyHash = createHash('sha256')
-      .update(`${input.actorId}:${input.groupId}:${input.payload.operation}:${input.idempotencyKey}`)
+      .update(
+        `${input.actorId}:${input.groupId}:${input.payload.operation}:${input.idempotencyKey}`,
+      )
       .digest('hex');
     const idempotencyKey = { PK: `IDEMPOTENCY#AI_REQUEST#${keyHash}`, SK: 'RESULT' };
     const job: AIJob = {
@@ -199,7 +186,8 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator {
         new UpdateCommand({
           TableName: this.tableName,
           Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
-          UpdateExpression: 'SET #status = :failed, errorCode = :code, updatedAt = :now, GSI2PK = :gsi',
+          UpdateExpression:
+            'SET #status = :failed, errorCode = :code, updatedAt = :now, GSI2PK = :gsi',
           ExpressionAttributeNames: { '#status': 'status' },
           ExpressionAttributeValues: {
             ':failed': 'FAILED',
@@ -231,12 +219,16 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator {
 }
 
 export const createProductionAIRequestServiceAdapters = () => {
-  const collaborationTable = requireValue(process.env.COLLABORATION_TABLE, 'COLLABORATION_TABLE');
   const meetingTable = requireValue(process.env.MEETING_DATA_TABLE, 'MEETING_DATA_TABLE');
   const aiWorkTable = requireValue(process.env.AI_WORK_TABLE, 'AI_WORK_TABLE');
   const stateMachineArn = requireValue(process.env.AI_STATE_MACHINE_ARN, 'AI_STATE_MACHINE_ARN');
   const database = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-  const access = new DynamoAiAccessAdapter(database, collaborationTable, meetingTable);
-  const jobs = new StepFunctionsAIJobOrchestrator(database, new SFNClient({}), aiWorkTable, stateMachineArn);
+  const access = new DynamoAiAccessAdapter(database, meetingTable);
+  const jobs = new StepFunctionsAIJobOrchestrator(
+    database,
+    new SFNClient({}),
+    aiWorkTable,
+    stateMachineArn,
+  );
   return { access, meetings: access, jobs };
 };
