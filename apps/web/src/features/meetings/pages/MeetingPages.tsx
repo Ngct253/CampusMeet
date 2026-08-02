@@ -53,18 +53,26 @@ function MeetingForm({
 }) {
   const [title, setTitle] = useState(initial?.title ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
-  const [startsAt, setStartsAt] = useState(initial ? toLocalInput(initial.startsAt) : '');
-  const [endsAt, setEndsAt] = useState(initial ? toLocalInput(initial.endsAt) : '');
+  const initialStart = toLocalInput(initial?.startsAt ?? new Date().toISOString());
+  const [meetingDate, setMeetingDate] = useState(initialStart.slice(0, 10));
+  const [startTime, setStartTime] = useState(initial ? initialStart.slice(11) : '');
+  const [endTime, setEndTime] = useState(initial ? toLocalInput(initial.endsAt).slice(11) : '');
+  const [timeError, setTimeError] = useState('');
   const [attendeeIds, setAttendeeIds] = useState(initial?.attendeeIds ?? []);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (endTime <= startTime) {
+      setTimeError('Giờ kết thúc phải sau giờ bắt đầu.');
+      return;
+    }
+    setTimeError('');
     onSubmit({
       title,
       ...(description.trim() ? { description } : {}),
       attendeeIds,
-      startsAt: new Date(startsAt).toISOString(),
-      endsAt: new Date(endsAt).toISOString(),
+      startsAt: new Date(`${meetingDate}T${startTime}`).toISOString(),
+      endsAt: new Date(`${meetingDate}T${endTime}`).toISOString(),
     });
   };
 
@@ -81,26 +89,46 @@ function MeetingForm({
         />
       </label>
       <div className="meeting-time-fields">
+        <label className="meeting-date-field">
+          Ngày họp
+          <input
+            type="date"
+            value={meetingDate}
+            onChange={(event) => setMeetingDate(event.target.value)}
+            required
+          />
+        </label>
         <label>
           Bắt đầu
           <input
-            type="datetime-local"
-            value={startsAt}
-            onChange={(event) => setStartsAt(event.target.value)}
+            type="time"
+            value={startTime}
+            onChange={(event) => {
+              setStartTime(event.target.value);
+              setTimeError('');
+            }}
             required
           />
         </label>
         <label>
           Kết thúc
           <input
-            type="datetime-local"
-            value={endsAt}
-            min={startsAt}
-            onChange={(event) => setEndsAt(event.target.value)}
+            type="time"
+            value={endTime}
+            min={startTime}
+            onChange={(event) => {
+              setEndTime(event.target.value);
+              setTimeError('');
+            }}
             required
           />
         </label>
       </div>
+      {timeError && (
+        <p className="meeting-field-error" role="alert">
+          {timeError}
+        </p>
+      )}
       <label>
         Nội dung <span>(không bắt buộc)</span>
         <textarea
@@ -176,6 +204,8 @@ export function GroupMeetingsPage() {
   );
   const history = meetings.filter((meeting) => !upcoming.includes(meeting));
   const isAdmin = groupQuery.data?.group.role === 'GROUP_ADMIN';
+  const serverNeedsUpdate =
+    meetingsQuery.isError && /(?:404|501)/.test(meetingsQuery.error.message);
 
   return (
     <FeaturePage
@@ -195,7 +225,7 @@ export function GroupMeetingsPage() {
               <span className="section-kicker">Lịch chung</span>
               <h2>Sắp tới</h2>
             </div>
-            {!meetingsQuery.isPending && (
+            {meetingsQuery.isSuccess && groupQuery.isSuccess && (
               <span className="meeting-count">{upcoming.length} cuộc họp</span>
             )}
           </div>
@@ -207,8 +237,16 @@ export function GroupMeetingsPage() {
             </div>
           ) : meetingsQuery.isError || groupQuery.isError ? (
             <div className="state state-error" role="alert">
-              <strong>Chưa tải được lịch họp</strong>
-              <p>Kiểm tra kết nối rồi thử lại.</p>
+              <strong>
+                {serverNeedsUpdate
+                  ? 'Máy chủ chưa có chức năng cuộc họp'
+                  : 'Chưa tải được lịch họp'}
+              </strong>
+              <p>
+                {serverNeedsUpdate
+                  ? 'Cần triển khai phiên bản CampusMeet mới lên AWS trước khi sử dụng.'
+                  : 'Kiểm tra kết nối rồi thử lại.'}
+              </p>
               <button
                 type="button"
                 onClick={() => void Promise.all([meetingsQuery.refetch(), groupQuery.refetch()])}
