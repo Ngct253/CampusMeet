@@ -57,3 +57,24 @@ it('giải thích đúng khi máy chủ AWS chưa có API cuộc họp', async (
   ).toBeInTheDocument();
   expect(screen.queryByText('0 cuộc họp')).not.toBeInTheDocument();
 });
+
+it('dùng giờ 24 tiếng không phụ thuộc CH hoặc SA', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [
+      {
+        membership: { userId: 'user-1' },
+        user: { displayName: 'Lan', email: 'lan@example.edu' },
+      },
+    ],
+  });
+  renderPage();
+  const start = (await screen.findByLabelText('Bắt đầu')) as HTMLSelectElement;
+  const end = screen.getByLabelText('Kết thúc') as HTMLSelectElement;
+  expect(start.value).toMatch(/^\d{2}:(?:00|15|30|45)$/);
+  expect(end.value).toMatch(/^\d{2}:(?:00|15|30|45)$/);
+  expect(screen.getAllByRole('option', { name: '13:30' })).toHaveLength(2);
+  expect(screen.getByText('Lan')).toBeInTheDocument();
+  expect(screen.getByText('lan@example.edu')).toBeInTheDocument();
+  expect(screen.queryByText(/\b(?:CH|SA)\b/)).not.toBeInTheDocument();
+});

@@ -5,8 +5,9 @@
 Repository đang chuyển từ scaffold sang các vertical slice thật:
 
 - Cognito authentication đã được triển khai và kiểm thử bằng stack integration riêng; stack kiểm thử trước đó đã cleanup.
-- Frontend nghiệp vụ vẫn còn mock ở nhiều màn hình.
-- API nghiệp vụ và DynamoDB repositories vẫn còn skeleton/TODO; việc bảng tồn tại không đồng nghĩa backend đã persistence thật.
+- Frontend auth, nhóm, lời mời, thông báo và CRUD cuộc họp đã gọi API thật; các domain còn lại vẫn đang hoàn thiện.
+- M1 và lõi cuộc họp đã có API/repository DynamoDB thật; các domain còn lại vẫn có skeleton/TODO. Việc bảng tồn tại không đồng nghĩa mọi domain đã persistence thật.
+- Mã nguồn/IaC của lõi cuộc họp chưa deploy lên account hiện tại và không tạo thêm bảng, index, Lambda, API Gateway hoặc Cognito.
 - Nhóm đã chốt luồng upload an toàn, live transcription, AIJob, transcript, Bedrock RAG nhiều meeting và citation.
 - Mô hình dữ liệu dùng 5 bảng vật lý đã deploy và verify, được định nghĩa tại `infra/data-foundation.yaml` và giải thích tại [Mô hình DynamoDB](dynamodb-data-model.md).
 

@@ -280,6 +280,12 @@ Source hiện tại đã bổ sung API tạo, xem, sửa và hủy cuộc họp.
 
 Thay đổi này **chưa được deploy lên account hiện tại**. Khi chuyển account, deployment owner deploy 5 bảng trước rồi deploy auth/API stack từ source mới nhất; không sửa policy thủ công trên Console. Sau deploy, kiểm tra tối thiểu một luồng Group Admin tạo/sửa/hủy cuộc họp và một Member chỉ xem được lịch trước khi dọn account cũ.
 
+Frontend không tạo thêm tài nguyên AWS. Giao diện cuộc họp dùng `VITE_API_BASE_URL` hiện có; trước khi stack mới được deploy, lỗi `404/501` được hiển thị là máy chủ chưa có chức năng cuộc họp. Sau deploy, tải lại web và kiểm tra:
+
+1. Group Admin tạo cuộc họp bằng giờ 24 tiếng, chọn người tham dự, sau đó sửa và hủy.
+2. Thành viên thấy lịch và chi tiết nhưng không thấy biểu mẫu tạo/sửa/hủy.
+3. Nhóm đông hiển thị danh sách người tham dự trong khung cuộn, không làm tràn trang.
+
 ## 10. Cấu hình frontend cho cả nhóm
 
 Mỗi thành viên tạo `apps/web/.env` từ `apps/web/.env.example` và điền output của cùng stack:
