@@ -1,4 +1,12 @@
-import type { InvitationDetails, MeetingMinutes, Notification, Task, User, Group, Meeting } from '../types';
+import type {
+  InvitationDetails,
+  MeetingMinutes,
+  Notification,
+  Task,
+  User,
+  Group,
+  Meeting,
+} from '../types';
 import type { Priority, TaskStatus } from '../enums';
 import { z } from 'zod';
 
@@ -7,20 +15,48 @@ export const groupInputSchema = z.object({
   description: z.string().trim().max(500).optional(),
 });
 export const invitationInputSchema = z.object({
-  email: z.string().trim().email('Email không hợp lệ.').max(254).transform((value) => value.toLowerCase()),
+  email: z
+    .string()
+    .trim()
+    .email('Email không hợp lệ.')
+    .max(254)
+    .transform((value) => value.toLowerCase()),
 });
 export const updateProfileSchema = z.object({
   displayName: z.string().trim().min(2, 'Tên hiển thị cần ít nhất 2 ký tự.').max(100),
-  timezone: z.string().trim().min(1).max(64).refine((value) => {
-    try {
-      Intl.DateTimeFormat('vi-VN', { timeZone: value });
-      return true;
-    } catch {
-      return false;
-    }
-  }, 'Múi giờ không hợp lệ.'),
+  timezone: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .refine((value) => {
+      try {
+        Intl.DateTimeFormat('vi-VN', { timeZone: value });
+        return true;
+      } catch {
+        return false;
+      }
+    }, 'Múi giờ không hợp lệ.'),
   emailNotificationsEnabled: z.boolean(),
 });
+const meetingFieldsSchema = z.object({
+  title: z.string().trim().min(2, 'Tiêu đề cần ít nhất 2 ký tự.').max(150),
+  description: z.string().trim().max(2000).optional(),
+  attendeeIds: z.array(z.string().trim().min(1)).max(100).default([]),
+  startsAt: z.string().datetime({ offset: true }),
+  endsAt: z.string().datetime({ offset: true }),
+});
+export const meetingInputSchema = meetingFieldsSchema.superRefine((value, context) => {
+  if (Date.parse(value.endsAt) <= Date.parse(value.startsAt)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['endsAt'],
+      message: 'Thời gian kết thúc phải sau thời gian bắt đầu.',
+    });
+  }
+});
+export const updateMeetingInputSchema = meetingFieldsSchema.partial();
+export const cancelMeetingInputSchema = z.object({ reason: z.string().trim().max(500).optional() });
 
 export interface CreateGroupRequest {
   name: string;
@@ -39,14 +75,13 @@ export interface UpdateProfileRequest {
   emailNotificationsEnabled: boolean;
 }
 export interface CreateMeetingRequest {
-  groupId: string;
   title: string;
-  organizerId: string;
+  description?: string;
   attendeeIds: string[];
   startsAt: string;
   endsAt: string;
 }
-export type UpdateMeetingRequest = Partial<Omit<CreateMeetingRequest, 'groupId'>>;
+export type UpdateMeetingRequest = Partial<CreateMeetingRequest>;
 export interface CancelMeetingRequest {
   reason?: string;
 }

@@ -71,7 +71,7 @@ Resources:
               - Effect: Allow
                 Action: [logs:CreateLogStream, logs:PutLogEvents]
                 Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-api:*'
-        - PolicyName: CampusMeetM1Data
+        - PolicyName: CampusMeetCoreData
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -90,6 +90,8 @@ Resources:
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity/index/*'
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-collaboration'
                   - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-collaboration/index/*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data/index/*'
               - Sid: ReadVerifiedCognitoEmail
                 Effect: Allow
                 Action: cognito-idp:AdminGetUser
@@ -116,6 +118,7 @@ Resources:
         Variables:
           IDENTITY_TABLE: !Sub '${DataTablePrefix}-identity'
           COLLABORATION_TABLE: !Sub '${DataTablePrefix}-collaboration'
+          MEETING_TABLE: !Sub '${DataTablePrefix}-meeting-data'
           USER_POOL_ID: !Ref UserPool
       Events:
         Health:
@@ -152,3 +155,4 @@ Outputs:
   ApiUrl: { Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}' }
   IdentityTableName: { Value: !Sub '${DataTablePrefix}-identity' }
   CollaborationTableName: { Value: !Sub '${DataTablePrefix}-collaboration' }
+  MeetingDataTableName: { Value: !Sub '${DataTablePrefix}-meeting-data' }

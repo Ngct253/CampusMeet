@@ -17,6 +17,12 @@ import {
   myInvitationsHandler,
 } from './handlers/invitations';
 import { notificationsHandler, readNotificationHandler } from './handlers/notifications';
+import {
+  cancelMeetingHandler,
+  groupMeetingsHandler,
+  meetingDetailHandler,
+  myMeetingsHandler,
+} from './handlers/meetings';
 import { createRouter } from './utils/router';
 
 const findRoute = createRouter([
@@ -32,6 +38,11 @@ const findRoute = createRouter([
     handler: revokeGroupInvitationHandler,
   },
   { method: 'DELETE', path: '/groups/:groupId/members/:userId', handler: groupMemberHandler },
+  { method: 'GET', path: '/groups/:groupId/meetings', handler: groupMeetingsHandler },
+  { method: 'POST', path: '/groups/:groupId/meetings', handler: groupMeetingsHandler },
+  { method: 'GET', path: '/meetings', handler: myMeetingsHandler },
+  { method: 'ANY', path: '/meetings/:meetingId', handler: meetingDetailHandler },
+  { method: 'POST', path: '/meetings/:meetingId/cancel', handler: cancelMeetingHandler },
   { method: 'GET', path: '/invitations', handler: myInvitationsHandler },
   {
     method: 'POST',

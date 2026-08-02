@@ -24,7 +24,12 @@ import {
   progressAnalysisHandler,
   taskProposalsHandler,
 } from './ai/handlers';
-import { meetingsHandler } from './handlers/meetings';
+import {
+  cancelMeetingHandler,
+  groupMeetingsHandler,
+  meetingDetailHandler,
+  myMeetingsHandler,
+} from './handlers/meetings';
 import { meHandler } from './handlers/me';
 import { minutesHandler } from './handlers/minutes';
 import { notificationsHandler, readNotificationHandler } from './handlers/notifications';
@@ -46,6 +51,11 @@ const findRoute = createRouter([
     handler: revokeGroupInvitationHandler,
   },
   { method: 'DELETE', path: '/groups/:groupId/members/:userId', handler: groupMemberHandler },
+  { method: 'GET', path: '/groups/:groupId/meetings', handler: groupMeetingsHandler },
+  { method: 'POST', path: '/groups/:groupId/meetings', handler: groupMeetingsHandler },
+  { method: 'GET', path: '/meetings', handler: myMeetingsHandler },
+  { method: 'ANY', path: '/meetings/:meetingId', handler: meetingDetailHandler },
+  { method: 'POST', path: '/meetings/:meetingId/cancel', handler: cancelMeetingHandler },
   { method: 'GET', path: '/invitations', handler: myInvitationsHandler },
   {
     method: 'POST',
@@ -60,7 +70,6 @@ const findRoute = createRouter([
   { method: 'GET', path: '/invitations/:token', handler: invitationDetailsHandler },
   { method: 'POST', path: '/invitations/:token/accept', handler: acceptInvitationHandler },
   { method: 'POST', path: '/invitations/:token/decline', handler: declineInvitationHandler },
-  { method: 'ANY', path: '/meetings', handler: meetingsHandler },
   { method: 'ANY', path: '/minutes', handler: minutesHandler },
   { method: 'ANY', path: '/tasks', handler: tasksHandler },
   { method: 'ANY', path: '/dashboard', handler: dashboardHandler },
