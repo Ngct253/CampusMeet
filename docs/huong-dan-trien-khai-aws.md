@@ -270,6 +270,16 @@ Tài nguyên không tự chuyển giữa hai account. Deployment owner thực hi
 5. Cognito user và dữ liệu DynamoDB của account cũ không tự xuất hiện ở account mới. Với môi trường dev chưa cần giữ dữ liệu, người dùng đăng ký lại; nếu cần giữ dữ liệu phải chốt phương án export/import trước khi xóa.
 6. Chỉ dọn tài nguyên account cũ sau khi đăng ký, nhóm và lời mời hoạt động trên account mới. Bảng có `DeletionPolicy: Retain` vẫn có thể phát sinh chi phí sau khi xóa stack và phải được kiểm tra riêng.
 
+### 9.3. Cập nhật lõi cuộc họp chưa triển khai AWS
+
+Source hiện tại đã bổ sung API tạo, xem, sửa và hủy cuộc họp. Thay đổi AWS nằm trong `infra/auth-integration.yaml`:
+
+- Lambda có thêm biến `MEETING_TABLE=campusmeet-dev-meeting-data`;
+- execution role có quyền `GetItem`, `Query`, `PutItem` và `UpdateItem` trên bảng `meeting-data` cùng các index của bảng;
+- không tạo bảng, index, Lambda, API Gateway hay Cognito mới.
+
+Thay đổi này **chưa được deploy lên account hiện tại**. Khi chuyển account, deployment owner deploy 5 bảng trước rồi deploy auth/API stack từ source mới nhất; không sửa policy thủ công trên Console. Sau deploy, kiểm tra tối thiểu một luồng Group Admin tạo/sửa/hủy cuộc họp và một Member chỉ xem được lịch trước khi dọn account cũ.
+
 ## 10. Cấu hình frontend cho cả nhóm
 
 Mỗi thành viên tạo `apps/web/.env` từ `apps/web/.env.example` và điền output của cùng stack:

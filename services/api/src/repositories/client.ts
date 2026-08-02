@@ -4,7 +4,7 @@ import { ServiceConfigurationError } from '../utils/errors';
 
 export const documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
-export const tableName = (name: 'COLLABORATION_TABLE' | 'IDENTITY_TABLE') => {
+export const tableName = (name: 'COLLABORATION_TABLE' | 'IDENTITY_TABLE' | 'MEETING_TABLE') => {
   const value = process.env[name];
   if (!value) throw new ServiceConfigurationError(`Thiếu cấu hình ${name}.`);
   return value;

@@ -13,7 +13,7 @@ vi.mock('../../../auth/AuthProvider', () => ({ useAuth: () => ({
   status: 'authenticated', user: { username: 'lan', signInDetails: { loginId: 'lan@example.edu' } },
 }) }));
 vi.mock('../../groups/service', () => ({ getGroups: services.getGroups }));
-vi.mock('../../meetings/service', () => ({ getMeetings: services.getMeetings }));
+vi.mock('../../meetings/service', () => ({ getMyMeetings: services.getMeetings }));
 vi.mock('../../notifications/service', () => ({ getNotifications: services.getNotifications }));
 vi.mock('../../settings/service', () => ({ getProfile: services.getProfile }));
 

@@ -2,7 +2,7 @@
 
 ## Trạng thái chung
 
-`GET /health` và phạm vi M1 đã có handler thật. M1 đọc danh tính từ JWT Cognito, lấy email đã xác minh từ User Pool, kiểm tra membership/role và thao tác trên hai bảng `identity`/`collaboration`. Các module M2–M5 chưa được owner triển khai vẫn có thể trả `501 Not Implemented`.
+`GET /health`, phạm vi M1 và lõi quản lý cuộc họp đã có handler thật. API đọc danh tính từ JWT Cognito, kiểm tra membership/role và thao tác trên các bảng đúng owner. Các module M2–M5 còn lại chưa được owner triển khai vẫn có thể trả `501 Not Implemented`.
 
 Request/response types phải import từ `@campusmeet/shared`, không copy interface giữa frontend và backend.
 
@@ -28,7 +28,10 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | GET                   | `/invitations/:token`                                          | `InvitationDetails`                                                    | M1 đã triển khai                               |
 | POST                  | `/invitations/:token/accept`                                   | `InvitationDetails`                                                    | M1 đã triển khai                               |
 | POST                  | `/invitations/:token/decline`                                  | `InvitationDetails`                                                    | M1 đã triển khai                               |
-| GET/POST/PATCH/DELETE | `/meetings`                                                    | `CreateMeetingRequest`, `UpdateMeetingRequest`, `CancelMeetingRequest` | Handler skeleton, trả 501                      |
+| GET                   | `/meetings`                                                    | `Meeting[]`                                                            | Đã triển khai, trả lịch của các nhóm người dùng đang tham gia |
+| GET/POST              | `/groups/:groupId/meetings`                                    | `Meeting[]`, `CreateMeetingRequest`                                    | Đã triển khai; POST yêu cầu Group Admin và `Idempotency-Key` |
+| GET/PATCH             | `/meetings/:meetingId`                                         | `Meeting`, `UpdateMeetingRequest`                                      | Đã triển khai; PATCH yêu cầu Group Admin       |
+| POST                  | `/meetings/:meetingId/cancel`                                  | `CancelMeetingRequest`, `Meeting`                                      | Đã triển khai; yêu cầu Group Admin              |
 | GET/POST              | `/minutes`                                                     | `CreateMinutesRequest`, `MeetingMinutes`                               | Handler skeleton, trả 501                      |
 | GET/POST/PATCH        | `/tasks`                                                       | `CreateTaskRequest`, `UpdateTaskStatusRequest`                         | Handler skeleton, trả 501                      |
 | GET                   | `/dashboard`                                                   | `DashboardResponse`                                                    | Handler skeleton, trả 501                      |
@@ -102,14 +105,14 @@ Health response:
 }
 ```
 
-Nghiệp vụ chưa triển khai:
+Nghiệp vụ khác chưa triển khai:
 
 ```json
 {
   "success": false,
   "error": {
     "code": "NOT_IMPLEMENTED",
-    "message": "Meetings mới chỉ có hợp đồng API."
+    "message": "Chức năng này chưa được triển khai."
   },
   "requestId": "request-id"
 }
