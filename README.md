@@ -8,15 +8,15 @@ CampusMeet không clone Google Meet. Google Meet là dịch vụ ngoài được
 
 Repository đang chuyển từ scaffold sang các vertical slice tích hợp thật.
 
-| Thành phần                | Trạng thái                                                                                       |
-| ------------------------- | ------------------------------------------------------------------------------------------------ |
-| Frontend                  | Có application shell, Cognito auth thật khi có env; nhiều màn hình nghiệp vụ vẫn dùng mock       |
-| Backend                   | Có `/health`, `/me` và handler skeleton; repository nghiệp vụ chưa hoàn thiện                    |
-| Cognito                   | Auth integration stack đã deploy/kiểm thử; có thể dựng lại theo runbook AWS                      |
-| DynamoDB                  | 5 bảng đã deploy và verify trong `ap-southeast-1`                                                |
-| Google Calendar/Meet      | Contract/kiến trúc đã chốt; adapter thật chưa hoàn thiện                                         |
-| Upload/live transcript/AI | Đã chốt contract và kiến trúc; phân công theo kế hoạch nhóm, chi tiết kỹ thuật trong tài liệu AI |
-| Full deployment           | Chưa production-ready; triển khai theo từng stack/giai đoạn                                      |
+| Thành phần                | Trạng thái                                                                                                     |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Frontend                  | Auth, nhóm, lời mời, thông báo và giao diện CRUD cuộc họp đã nối API; các domain còn lại tiếp tục hoàn thiện   |
+| Backend                   | M1 và lõi cuộc họp đã có handler/repository thật; consent, live STT và các domain sau cuộc họp chưa hoàn thiện |
+| Cognito                   | Auth integration stack đã deploy/kiểm thử; có thể dựng lại theo runbook AWS                                    |
+| DynamoDB                  | 5 bảng đã deploy và verify trong `ap-southeast-1`                                                              |
+| Google Calendar/Meet      | Contract/kiến trúc đã chốt; adapter thật chưa hoàn thiện                                                       |
+| Upload/live transcript/AI | Đã chốt contract và kiến trúc; phân công theo kế hoạch nhóm, chi tiết kỹ thuật trong tài liệu AI               |
+| Full deployment           | Lõi cuộc họp mới chưa deploy lên AWS; chưa production-ready                                                    |
 
 Việc bảng AWS tồn tại không có nghĩa backend đã kết nối persistence thật. Data layer chỉ hoàn thành khi repository, authorization, transaction và integration tests đạt.
 

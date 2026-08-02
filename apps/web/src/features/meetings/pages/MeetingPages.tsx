@@ -15,6 +15,14 @@ const statusLabel: Record<string, string> = {
   INTEGRATION_PENDING: 'Đang đồng bộ',
 };
 
+const timeOptions = Array.from({ length: 96 }, (_, index) => {
+  const hours = Math.floor(index / 4)
+    .toString()
+    .padStart(2, '0');
+  const minutes = ((index % 4) * 15).toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
+});
+
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat('vi-VN', {
     weekday: 'short',
@@ -29,6 +37,18 @@ const toLocalInput = (value: string) => {
   const date = new Date(value);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   return date.toISOString().slice(0, 16);
+};
+
+const defaultSchedule = () => {
+  const start = new Date();
+  start.setSeconds(0, 0);
+  start.setMinutes(Math.ceil((start.getMinutes() + 1) / 15) * 15);
+  if (start.getHours() === 0 || start.getHours() >= 23) {
+    start.setDate(start.getDate() + 1);
+    start.setHours(9, 0, 0, 0);
+  }
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
+  return { start: toLocalInput(start.toISOString()), end: toLocalInput(end.toISOString()) };
 };
 
 const memberLabel = (group: GroupDetails | undefined, userId: string) => {
@@ -53,10 +73,14 @@ function MeetingForm({
 }) {
   const [title, setTitle] = useState(initial?.title ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
-  const initialStart = toLocalInput(initial?.startsAt ?? new Date().toISOString());
-  const [meetingDate, setMeetingDate] = useState(initialStart.slice(0, 10));
-  const [startTime, setStartTime] = useState(initial ? initialStart.slice(11) : '');
-  const [endTime, setEndTime] = useState(initial ? toLocalInput(initial.endsAt).slice(11) : '');
+  const [schedule] = useState(() =>
+    initial
+      ? { start: toLocalInput(initial.startsAt), end: toLocalInput(initial.endsAt) }
+      : defaultSchedule(),
+  );
+  const [meetingDate, setMeetingDate] = useState(schedule.start.slice(0, 10));
+  const [startTime, setStartTime] = useState(schedule.start.slice(11));
+  const [endTime, setEndTime] = useState(schedule.end.slice(11));
   const [timeError, setTimeError] = useState('');
   const [attendeeIds, setAttendeeIds] = useState(initial?.attendeeIds ?? []);
 
@@ -100,28 +124,43 @@ function MeetingForm({
         </label>
         <label>
           Bắt đầu
-          <input
-            type="time"
+          <select
             value={startTime}
             onChange={(event) => {
               setStartTime(event.target.value);
               setTimeError('');
             }}
             required
-          />
+          >
+            {startTime && !timeOptions.includes(startTime) && (
+              <option value={startTime}>{startTime}</option>
+            )}
+            {timeOptions.map((time) => (
+              <option key={time} value={time}>
+                {time}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           Kết thúc
-          <input
-            type="time"
+          <select
             value={endTime}
-            min={startTime}
             onChange={(event) => {
               setEndTime(event.target.value);
               setTimeError('');
             }}
             required
-          />
+          >
+            {endTime && !timeOptions.includes(endTime) && (
+              <option value={endTime}>{endTime}</option>
+            )}
+            {timeOptions.map((time) => (
+              <option key={time} value={time}>
+                {time}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
       {timeError && (
@@ -141,22 +180,28 @@ function MeetingForm({
       <fieldset className="meeting-attendees">
         <legend>Người tham dự</legend>
         <div>
-          {group.members.map(({ membership, user }) => (
-            <label key={membership.userId}>
-              <input
-                type="checkbox"
-                checked={attendeeIds.includes(membership.userId)}
-                onChange={(event) =>
-                  setAttendeeIds((current) =>
-                    event.target.checked
-                      ? [...current, membership.userId]
-                      : current.filter((id) => id !== membership.userId),
-                  )
-                }
-              />
-              <span>{user?.displayName || user?.email || membership.userId}</span>
-            </label>
-          ))}
+          {group.members.map(({ membership, user }) => {
+            const name = user?.displayName || user?.email || membership.userId;
+            return (
+              <label className="meeting-attendee-option" key={membership.userId}>
+                <input
+                  type="checkbox"
+                  checked={attendeeIds.includes(membership.userId)}
+                  onChange={(event) =>
+                    setAttendeeIds((current) =>
+                      event.target.checked
+                        ? [...current, membership.userId]
+                        : current.filter((id) => id !== membership.userId),
+                    )
+                  }
+                />
+                <span className="meeting-attendee-copy">
+                  <strong>{name}</strong>
+                  {user?.email && user.email !== name && <small>{user.email}</small>}
+                </span>
+              </label>
+            );
+          })}
         </div>
       </fieldset>
       {error && (
@@ -219,7 +264,11 @@ export function GroupMeetingsPage() {
       backLabel="Quay lại"
     >
       <div className={`meeting-page-layout${isAdmin ? '' : ' meeting-page-layout-single'}`}>
-        <section className="app-panel meeting-directory">
+        <section
+          className={`app-panel meeting-directory${
+            meetingsQuery.isError || groupQuery.isError ? ' meeting-directory-error' : ''
+          }`}
+        >
           <div className="section-heading meeting-directory-heading">
             <div>
               <span className="section-kicker">Lịch chung</span>

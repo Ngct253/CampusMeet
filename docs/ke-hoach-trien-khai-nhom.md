@@ -24,13 +24,13 @@ Nhiều repository có thể dùng cùng một bảng nhưng vẫn tách theo do
 
 ## 3. Phân công trách nhiệm
 
-| Thành viên | Chức năng sở hữu                                                                       | Tỷ lệ | Đầu ra cho thành viên khác                                          |
-| ---------- | -------------------------------------------------------------------------------------- | ----: | ------------------------------------------------------------------- |
-| M1         | Identity, group, membership, invitation, authorization và notification inbox           |   20% | Membership lookup, authorization helper và notification repository  |
-| M2         | Meeting, agenda, attendee, consent, live Amazon STT, recording và final transcript      |   20% | Meeting boundary, live session/gap metadata và final segment        |
-| M3         | Transcript edit/approval, minutes, task, dashboard và xác nhận proposal                 |   20% | Approved transcript, Task/Minutes API và `GroupProgressSnapshot`    |
-| M4         | Google/Meet Add-on; upload, AIJob orchestration, reminder và email                      |   20% | Add-on dùng chung API; Attachment `READY`, AIJob và external refs   |
-| M5         | Contract AI, KnowledgeSource, Bedrock RAG, citation, late summary và AI draft/analysis  |   20% | Grounded answer/draft/analysis và nghiệm thu AI đầu-cuối            |
+| Thành viên | Chức năng sở hữu                                                                       | Tỷ lệ | Đầu ra cho thành viên khác                                         |
+| ---------- | -------------------------------------------------------------------------------------- | ----: | ------------------------------------------------------------------ |
+| M1         | Identity, group, membership, invitation, authorization và notification inbox           |   20% | Membership lookup, authorization helper và notification repository |
+| M2         | Meeting, agenda, attendee, consent, live Amazon STT, recording và final transcript     |   20% | Meeting boundary, live session/gap metadata và final segment       |
+| M3         | Transcript edit/approval, minutes, task, dashboard và xác nhận proposal                |   20% | Approved transcript, Task/Minutes API và `GroupProgressSnapshot`   |
+| M4         | Google/Meet Add-on; upload, AIJob orchestration, reminder và email                     |   20% | Add-on dùng chung API; Attachment `READY`, AIJob và external refs  |
+| M5         | Contract AI, KnowledgeSource, Bedrock RAG, citation, late summary và AI draft/analysis |   20% | Grounded answer/draft/analysis và nghiệm thu AI đầu-cuối           |
 
 Người phụ trách chịu trách nhiệm kết quả, không độc quyền tệp. Dữ liệu dùng chung, router, IAM và IaC luôn cần review chéo.
 
@@ -106,6 +106,13 @@ Put audit event
 - User không đọc/mark-read notification của người khác.
 
 ## 6. M2 — Meeting nội bộ
+
+### Trạng thái hiện tại
+
+- Đã có API/repository và giao diện tạo, xem, sửa, hủy cuộc họp; Group Admin có quyền ghi, thành viên chỉ xem.
+- Biểu mẫu dùng ngày và giờ 24 tiếng theo bước 15 phút, mặc định giờ bắt đầu gần nhất và kết thúc sau một giờ.
+- Danh sách người tham dự hiển thị gọn tên/email, cuộn trong khung khi nhóm đông; trạng thái tải, rỗng và lỗi đã có thông báo riêng.
+- Phần này chưa deploy lên AWS. M2 tiếp tục agenda, consent, live STT, recording và final transcript; không làm lại CRUD cuộc họp đã có.
 
 ### Kết quả phải bàn giao
 

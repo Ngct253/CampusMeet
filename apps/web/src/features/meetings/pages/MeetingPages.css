@@ -12,6 +12,15 @@
   min-height: 34rem;
   min-width: 0;
 }
+.meeting-directory-error {
+  min-height: 0;
+}
+.meeting-directory-error > .state-error {
+  min-height: 13rem;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+}
 .meeting-directory-heading h2,
 .create-meeting-panel h2 {
   margin: 0;
@@ -140,6 +149,9 @@
   margin: 0.4rem 0 1rem;
   color: var(--color-muted);
 }
+.create-meeting-panel .meeting-form > button {
+  width: 100%;
+}
 .meeting-time-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -151,9 +163,24 @@
 .meeting-form,
 .meeting-time-fields label,
 .meeting-form input,
+.meeting-form select,
 .meeting-form textarea {
   min-width: 0;
   max-width: 100%;
+}
+.meeting-form select {
+  width: 100%;
+  min-height: 2.75rem;
+  border: 1px solid #aab5c8;
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.75rem;
+  background: white;
+  color: var(--color-text);
+}
+.meeting-form select:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--color-primary);
 }
 .meeting-field-error {
   margin: -0.35rem 0 0;
@@ -177,22 +204,41 @@
   gap: 0.2rem;
   padding-right: 0.25rem;
 }
-.meeting-attendees label {
-  min-height: 2.5rem;
+.meeting-form .meeting-attendees label.meeting-attendee-option {
+  min-height: 2.75rem;
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  padding: 0.35rem 0.45rem;
+  gap: 0.7rem;
+  padding: 0.3rem 0.4rem;
   border-radius: 0.55rem;
   font-weight: 500;
 }
-.meeting-attendees label:hover {
+.meeting-form .meeting-attendees label.meeting-attendee-option:hover {
   background: #f7f9fe;
 }
-.meeting-attendees input {
+.meeting-form .meeting-attendees input {
   width: 1.15rem;
+  height: 1.15rem;
   min-height: 1.15rem;
+  max-width: 1.15rem;
+  flex: 0 0 1.15rem;
   margin: 0;
+  padding: 0;
+  border-radius: 0.25rem;
+  accent-color: var(--color-primary);
+}
+.meeting-attendee-copy {
+  min-width: 0;
+}
+.meeting-attendee-copy strong,
+.meeting-attendee-copy small {
+  display: block;
+}
+.meeting-attendee-copy small {
+  margin-top: 0.1rem;
+}
+.meeting-form .meeting-attendee-copy strong {
+  font-weight: 600;
 }
 .meeting-detail-layout {
   display: grid;
