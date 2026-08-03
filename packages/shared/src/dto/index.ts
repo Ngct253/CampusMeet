@@ -1,4 +1,5 @@
 import type {
+  AgendaItem,
   InvitationDetails,
   MeetingMinutes,
   Notification,
@@ -43,6 +44,17 @@ const meetingFieldsSchema = z.object({
   title: z.string().trim().min(2, 'Tiêu đề cần ít nhất 2 ký tự.').max(150),
   description: z.string().trim().max(2000).optional(),
   attendeeIds: z.array(z.string().trim().min(1)).max(100).default([]),
+  agenda: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).optional(),
+        order: z.number().int().nonnegative(),
+        title: z.string().trim().min(1).max(200),
+        description: z.string().trim().max(1000).optional(),
+      }),
+    )
+    .max(99)
+    .default([]),
   startsAt: z.string().datetime({ offset: true }),
   endsAt: z.string().datetime({ offset: true }),
 });
@@ -56,7 +68,10 @@ export const meetingInputSchema = meetingFieldsSchema.superRefine((value, contex
   }
 });
 export const updateMeetingInputSchema = meetingFieldsSchema.partial();
-export const cancelMeetingInputSchema = z.object({ reason: z.string().trim().max(500).optional() });
+export const cancelMeetingInputSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+  version: z.number().int().positive().optional(),
+});
 
 export interface CreateGroupRequest {
   name: string;
@@ -78,13 +93,28 @@ export interface CreateMeetingRequest {
   title: string;
   description?: string;
   attendeeIds: string[];
+  agenda?: Array<{ id?: string; order: number; title: string; description?: string }>;
   startsAt: string;
   endsAt: string;
 }
-export type UpdateMeetingRequest = Partial<CreateMeetingRequest>;
+export type UpdateMeetingRequest = Partial<CreateMeetingRequest> & { version?: number };
 export interface CancelMeetingRequest {
   reason?: string;
+  version?: number;
 }
+export interface MeetingResponse {
+  meeting: Meeting;
+}
+export interface MeetingDetailResponse extends MeetingResponse {
+  organizer: { userId: string };
+  attendees: Array<{ userId: string }>;
+  agenda: AgendaItem[];
+}
+export interface CursorPage<T> {
+  items: T[];
+  nextCursor?: string;
+}
+export type MeetingTimelineResponse = CursorPage<Meeting>;
 export interface CreateMinutesRequest {
   meetingId: string;
   summary: string;
