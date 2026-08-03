@@ -2,5 +2,9 @@
   "Environment": "dev",
   "DataTablePrefix": "campusmeet-dev",
   "DomainName": "campusmeet.example.com",
-  "GoogleSecretReference": "/campusmeet/dev/google-oauth"
+  "GoogleSecretReference": "/campusmeet/dev/google-oauth",
+  "UserContentBucketName": "replace-with-m4-user-content-bucket",
+  "BedrockKnowledgeBaseId": "REPLACEWITHKBID",
+  "BedrockDataSourceId": "REPLACEWITHDATASOURCEID",
+  "BedrockGenerationModelArn": "arn:aws:bedrock:ap-southeast-1::foundation-model/replace-with-approved-model-id"
 }
