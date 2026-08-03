@@ -360,3 +360,15 @@
     justify-content: flex-start;
   }
 }
+
+/* ── Group AI sections ───────────────────────────────────── */
+.group-ai-section,
+.group-ai-progress {
+  grid-column: 1 / -1;
+}
+.group-ai-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  align-items: flex-start;
+}

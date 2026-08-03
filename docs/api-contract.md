@@ -62,7 +62,7 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | POST                  | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                       | Phase 4A; yêu cầu Group Admin                  |
 | POST                  | `/groups/:groupId/ai/tool-proposals`                           | `CreateToolProposalRequest`, `ToolProposal`                            | Pha AI mở rộng; chưa implement                 |
 | POST                  | `/ai/tool-proposals/:id/confirm`                               | `ConfirmToolProposalRequest/Response`                                  | Pha AI mở rộng; chưa implement                 |
-| GET                   | `/ai/jobs/:aiJobId`                                            | `AIJob`                                                                | Đã chốt contract mục tiêu; chưa implement      |
+| GET                   | `/ai/jobs/:aiJobId`                                            | `AIJob`                                                                | M5 đã triển khai                               |
 
 ## Quy ước contract cho AI và artifact
 

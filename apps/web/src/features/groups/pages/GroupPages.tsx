@@ -4,6 +4,16 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../../auth/AuthProvider';
 import { FeaturePage } from '../../../components/FeaturePage';
 import {
+  AIJobState,
+  GroupSearchPanel,
+  ProgressAnalysisPanel,
+  createAIIdempotencyKey,
+  useAIJob,
+  useGroupSearchMutation,
+  useProgressAnalysisMutation,
+} from '../../ai';
+import { getMeetings } from '../../meetings/service';
+import {
   createGroup,
   getGroup,
   getGroupInvitations,
@@ -197,13 +207,23 @@ export function GroupDetailPage() {
     },
   });
 
+  const meetingsQuery = useQuery({
+    queryKey: ['groups', groupId, 'meetings'],
+    queryFn: () => getMeetings(groupId),
+    enabled: Boolean(groupId),
+  });
+  const [searchJobId, setSearchJobId] = useState<string | undefined>(undefined);
+  const [progressJobId, setProgressJobId] = useState<string | undefined>(undefined);
+  const searchMutation = useGroupSearchMutation();
+  const progressMutation = useProgressAnalysisMutation();
+  const searchJobQuery = useAIJob(searchJobId);
+  const progressJobQuery = useAIJob(progressJobId);
+
   if (query.isPending)
     return (
       <FeaturePage
         title="Chi tiết nhóm"
         description="Đang tải thông tin nhóm…"
-        backTo="/app/groups"
-        backLabel="Quay lại"
       >
         <div className="state">Đang tải…</div>
       </FeaturePage>
@@ -214,7 +234,6 @@ export function GroupDetailPage() {
         title="Chi tiết nhóm"
         description="Không thể mở nhóm."
         backTo="/app/groups"
-        backLabel="Quay lại"
       >
         <div className="state state-error" role="alert">
           <strong>{query.error.message}</strong>
@@ -230,8 +249,6 @@ export function GroupDetailPage() {
     <FeaturePage
       title={group.name}
       description={group.description || 'Không gian thành viên và cuộc họp của nhóm.'}
-      backTo="/app/groups"
-      backLabel="Quay lại"
     >
       <div className="group-detail-layout">
         <section className="app-panel group-members-panel">
@@ -294,6 +311,60 @@ export function GroupDetailPage() {
             Xem cuộc họp
           </Link>
         </section>
+
+        <section className="group-ai-section">
+          <GroupSearchPanel
+            meetingOptions={(meetingsQuery.data ?? []).map((m) => ({
+              meetingId: m.id,
+              title: m.title,
+            }))}
+            isPending={searchMutation.isPending}
+            onSearch={({ question, scope, meetingIds }) => {
+              const key = createAIIdempotencyKey();
+              const groupScope = scope === 'CURRENT_MEETING' ? 'SELECTED_MEETINGS' : scope;
+              searchMutation.mutate(
+                { groupId, request: { question, scope: groupScope, meetingIds }, idempotencyKey: key },
+                { onSuccess: (job) => setSearchJobId(job.aiJobId) },
+              );
+            }}
+          />
+          {searchJobId && (
+            <AIJobState
+              job={searchJobQuery.data}
+              isLoading={searchJobQuery.isLoading}
+              error={searchJobQuery.isError ? searchJobQuery.error : null}
+              onRetry={() => setSearchJobId(undefined)}
+            />
+          )}
+        </section>
+
+        {isAdmin && (
+          <section className="group-ai-progress">
+            <ProgressAnalysisPanel analysis={undefined} isGroupAdmin={isAdmin} />
+            <button
+              className="button"
+              disabled={progressMutation.isPending}
+              type="button"
+              onClick={() => {
+                const key = createAIIdempotencyKey();
+                progressMutation.mutate(
+                  { groupId, request: {}, idempotencyKey: key },
+                  { onSuccess: (job) => setProgressJobId(job.aiJobId) },
+                );
+              }}
+            >
+              {progressMutation.isPending ? 'Đang phân tích…' : 'Chạy phân tích tiến độ'}
+            </button>
+            {progressJobId && (
+              <AIJobState
+                job={progressJobQuery.data}
+                isLoading={progressJobQuery.isLoading}
+                error={progressJobQuery.isError ? progressJobQuery.error : null}
+                onRetry={() => setProgressJobId(undefined)}
+              />
+            )}
+          </section>
+        )}
 
         {isAdmin && (
           <section className="group-management-section">

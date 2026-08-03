@@ -412,7 +412,7 @@ export function GroupSearchPanel({
         description="Đối chiếu quyết định và nội dung đã duyệt, luôn giới hạn trong nhóm này."
         eyebrow="Group knowledge"
         icon="search"
-        title="Tìm trong trí nhớ của nhóm"
+        title="Tìm trong tài liệu của nhóm"
       />
       <div className="ai-field">
         <label htmlFor="ai-group-question">Câu hỏi cần đối chiếu</label>

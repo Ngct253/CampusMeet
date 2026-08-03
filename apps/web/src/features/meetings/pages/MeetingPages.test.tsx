@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { GroupMeetingsPage } from './MeetingPages';
+import { GroupMeetingsPage, MeetingDetailPage } from './MeetingPages';
 
 const services = vi.hoisted(() => ({ getGroup: vi.fn(), getMeetings: vi.fn() }));
 vi.mock('../../groups/service', () => ({
@@ -17,6 +17,26 @@ vi.mock('../service', () => ({
   updateMeeting: vi.fn(),
   cancelMeeting: vi.fn(),
 }));
+
+vi.mock('../../ai', () => ({
+  AIChatPanel: ({ onSubmit: _s }: { onSubmit: unknown }) => (
+    <div data-testid="ai-chat-panel">AI Chat</div>
+  ),
+  AIJobState: () => null,
+  createAIIdempotencyKey: () => 'key-test',
+  useAIJob: () => ({ data: undefined, isLoading: false, isError: false }),
+  useMeetingChatMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
+
+const meetingFixture = {
+  id: 'meeting-1',
+  groupId: 'group-1',
+  title: 'Cuộc họp Test',
+  status: 'SCHEDULED',
+  startsAt: '2026-09-01T09:00:00.000Z',
+  endsAt: '2026-09-01T10:00:00.000Z',
+  attendeeIds: ['user-1'],
+};
 
 afterEach(cleanup);
 
@@ -35,6 +55,21 @@ function renderPage() {
       <MemoryRouter initialEntries={['/app/groups/group-1/meetings']}>
         <Routes>
           <Route path="/app/groups/:groupId/meetings" element={<GroupMeetingsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+async function renderMeetingDetail(meetingId = 'meeting-1') {
+  const { getMeeting } = await import('../service');
+  (getMeeting as ReturnType<typeof vi.fn>).mockResolvedValue(meetingFixture);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/app/meetings/${meetingId}`]}>
+        <Routes>
+          <Route path="/app/meetings/:meetingId" element={<MeetingDetailPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -77,4 +112,16 @@ it('dùng giờ 24 tiếng không phụ thuộc CH hoặc SA', async () => {
   expect(screen.getByText('Lan')).toBeInTheDocument();
   expect(screen.getByText('lan@example.edu')).toBeInTheDocument();
   expect(screen.queryByText(/\b(?:CH|SA)\b/)).not.toBeInTheDocument();
+});
+
+it('nút Trợ lý AI hiện trong MeetingDetailPage', async () => {
+  await renderMeetingDetail();
+  expect(await screen.findByRole('button', { name: 'Mở trợ lý AI' })).toBeInTheDocument();
+});
+
+it('AIChatPanel hiện sau khi click nút Trợ lý AI', async () => {
+  await renderMeetingDetail();
+  const toggleBtn = await screen.findByRole('button', { name: 'Mở trợ lý AI' });
+  fireEvent.click(toggleBtn);
+  expect(await screen.findByTestId('ai-chat-panel')).toBeInTheDocument();
 });

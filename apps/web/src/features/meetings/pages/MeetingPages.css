@@ -351,3 +351,72 @@
     flex-direction: column;
   }
 }
+
+/* ── AI sidebar (IDE-style, toggle ẩn/hiện) ──────────────── */
+.meeting-detail-with-ai {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1.25rem;
+  align-items: start;
+}
+.meeting-ai-sidebar {
+  width: 2.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.75rem;
+  transition: width 220ms ease;
+  overflow: hidden;
+}
+.meeting-ai-sidebar--open {
+  width: 22rem;
+  min-width: 18rem;
+}
+.meeting-ai-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: white;
+  color: var(--color-primary-dark);
+  font-size: 0.85rem;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+.meeting-ai-toggle:hover {
+  background: #f4f7ff;
+  border-color: #aebfeb;
+  box-shadow: 0 2px 8px rgb(41 71 170 / 8%);
+}
+.meeting-ai-sidebar--open .meeting-ai-toggle {
+  background: var(--color-primary-soft);
+  border-color: #aebfeb;
+}
+.meeting-ai-panel {
+  position: sticky;
+  top: 1.5rem;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  width: 100%;
+}
+@media (max-width: 1100px) {
+  .meeting-detail-with-ai {
+    grid-template-columns: 1fr;
+  }
+  .meeting-ai-sidebar,
+  .meeting-ai-sidebar--open {
+    width: 100%;
+  }
+  .meeting-ai-panel {
+    position: static;
+    max-height: none;
+  }
+}

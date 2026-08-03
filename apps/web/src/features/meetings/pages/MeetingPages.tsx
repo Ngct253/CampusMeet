@@ -3,6 +3,13 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { CreateMeetingRequest, GroupDetails, Meeting } from '@campusmeet/shared';
 import { FeaturePage } from '../../../components/FeaturePage';
+import {
+  AIChatPanel,
+  AIJobState,
+  createAIIdempotencyKey,
+  useAIJob,
+  useMeetingChatMutation,
+} from '../../ai';
 import { getGroup } from '../../groups/service';
 import { cancelMeeting, createMeeting, getMeeting, getMeetings, updateMeeting } from '../service';
 import './MeetingPages.css';
@@ -260,8 +267,7 @@ export function GroupMeetingsPage() {
           ? `Lịch làm việc chung của ${groupQuery.data.group.name}.`
           : 'Lịch làm việc chung của nhóm.'
       }
-      backTo={`/app/groups/${groupId}`}
-      backLabel="Quay lại"
+
     >
       <div className={`meeting-page-layout${isAdmin ? '' : ' meeting-page-layout-single'}`}>
         <section
@@ -399,6 +405,11 @@ export function MeetingDetailPage() {
     },
   });
 
+  const [aiOpen, setAiOpen] = useState(false);
+  const [chatJobId, setChatJobId] = useState<string | undefined>(undefined);
+  const chatMutation = useMeetingChatMutation();
+  const jobQuery = useAIJob(chatJobId);
+
   if (query.isPending)
     return (
       <FeaturePage title="Cuộc họp" description="Đang tải thông tin…">
@@ -410,8 +421,6 @@ export function MeetingDetailPage() {
       <FeaturePage
         title="Cuộc họp"
         description="Không thể mở cuộc họp."
-        backTo="/app/groups"
-        backLabel="Quay lại"
       >
         <div className="state state-error" role="alert">
           <strong>{query.error.message}</strong>
@@ -428,82 +437,127 @@ export function MeetingDetailPage() {
     <FeaturePage
       title={meeting.title}
       description={formatDate(meeting.startsAt)}
-      backTo={`/app/groups/${meeting.groupId}/meetings`}
-      backLabel="Quay lại"
     >
-      <div className="meeting-detail-layout">
-        <section className="app-panel meeting-overview">
-          <div className="meeting-overview-heading">
-            <span className={`meeting-status meeting-status-${meeting.status.toLowerCase()}`}>
-              {statusLabel[meeting.status] ?? meeting.status}
-            </span>
-            <span>
-              {Math.max(
-                1,
-                Math.round((Date.parse(meeting.endsAt) - Date.parse(meeting.startsAt)) / 60000),
-              )}{' '}
-              phút
-            </span>
-          </div>
-          <div className="meeting-detail-grid">
-            <div>
-              <small>Bắt đầu</small>
-              <strong>{formatDate(meeting.startsAt)}</strong>
-            </div>
-            <div>
-              <small>Kết thúc</small>
-              <strong>{formatDate(meeting.endsAt)}</strong>
-            </div>
-          </div>
-          <div className="meeting-agenda">
-            <small>Nội dung</small>
-            <p>{meeting.description || 'Chưa có nội dung cho cuộc họp này.'}</p>
-          </div>
-        </section>
-        <aside className="app-panel meeting-attendee-panel">
-          <span className="section-kicker">Thành phần</span>
-          <h2>Người tham dự</h2>
-          <div className="meeting-attendee-list">
-            {meeting.attendeeIds.map((userId) => (
-              <span key={userId}>{memberLabel(groupQuery.data, userId)}</span>
-            ))}
-          </div>
-        </aside>
-        {isAdmin && groupQuery.data && meeting.status !== 'CANCELLED' && (
-          <details className="app-panel meeting-admin-panel">
-            <summary>Chỉnh sửa cuộc họp</summary>
-            <div className="meeting-admin-content">
-              <MeetingForm
-                key={`${meeting.id}-${meeting.startsAt}`}
-                group={groupQuery.data}
-                initial={meeting}
-                submitLabel="Lưu thay đổi"
-                pending={updateMutation.isPending}
-                error={updateMutation.isError ? updateMutation.error.message : undefined}
-                onSubmit={(input) => updateMutation.mutate(input)}
-              />
-              <div className="meeting-cancel-row">
-                <div>
-                  <strong>Hủy cuộc họp</strong>
-                  <p>Cuộc họp vẫn được giữ trong lịch sử.</p>
-                </div>
-                <button
-                  className="button-danger-quiet"
-                  type="button"
-                  disabled={cancelMutation.isPending}
-                  onClick={() => window.confirm('Hủy cuộc họp này?') && cancelMutation.mutate()}
-                >
-                  Hủy cuộc họp
-                </button>
+      <div className="meeting-detail-with-ai">
+        <div>
+          <div className="meeting-detail-layout">
+            <section className="app-panel meeting-overview">
+              <div className="meeting-overview-heading">
+                <span className={`meeting-status meeting-status-${meeting.status.toLowerCase()}`}>
+                  {statusLabel[meeting.status] ?? meeting.status}
+                </span>
+                <span>
+                  {Math.max(
+                    1,
+                    Math.round((Date.parse(meeting.endsAt) - Date.parse(meeting.startsAt)) / 60000),
+                  )}{' '}
+                  phút
+                </span>
               </div>
-              {cancelMutation.isError && (
-                <p className="error" role="alert">
-                  {cancelMutation.error.message}
-                </p>
+              <div className="meeting-detail-grid">
+                <div>
+                  <small>Bắt đầu</small>
+                  <strong>{formatDate(meeting.startsAt)}</strong>
+                </div>
+                <div>
+                  <small>Kết thúc</small>
+                  <strong>{formatDate(meeting.endsAt)}</strong>
+                </div>
+              </div>
+              <div className="meeting-agenda">
+                <small>Nội dung</small>
+                <p>{meeting.description || 'Chưa có nội dung cho cuộc họp này.'}</p>
+              </div>
+            </section>
+            <aside className="app-panel meeting-attendee-panel">
+              <span className="section-kicker">Thành phần</span>
+              <h2>Người tham dự</h2>
+              <div className="meeting-attendee-list">
+                {meeting.attendeeIds.map((userId) => (
+                  <span key={userId}>{memberLabel(groupQuery.data, userId)}</span>
+                ))}
+              </div>
+            </aside>
+            {isAdmin && groupQuery.data && meeting.status !== 'CANCELLED' && (
+              <details className="app-panel meeting-admin-panel">
+                <summary>Chỉnh sửa cuộc họp</summary>
+                <div className="meeting-admin-content">
+                  <MeetingForm
+                    key={`${meeting.id}-${meeting.startsAt}`}
+                    group={groupQuery.data}
+                    initial={meeting}
+                    submitLabel="Lưu thay đổi"
+                    pending={updateMutation.isPending}
+                    error={updateMutation.isError ? updateMutation.error.message : undefined}
+                    onSubmit={(input) => updateMutation.mutate(input)}
+                  />
+                  <div className="meeting-cancel-row">
+                    <div>
+                      <strong>Hủy cuộc họp</strong>
+                      <p>Cuộc họp vẫn được giữ trong lịch sử.</p>
+                    </div>
+                    <button
+                      className="button-danger-quiet"
+                      type="button"
+                      disabled={cancelMutation.isPending}
+                      onClick={() => window.confirm('Hủy cuộc họp này?') && cancelMutation.mutate()}
+                    >
+                      Hủy cuộc họp
+                    </button>
+                  </div>
+                  {cancelMutation.isError && (
+                    <p className="error" role="alert">
+                      {cancelMutation.error.message}
+                    </p>
+                  )}
+                </div>
+              </details>
+            )}
+          </div>
+        </div>
+
+        <div className={`meeting-ai-sidebar${aiOpen ? ' meeting-ai-sidebar--open' : ''}`}>
+          <button
+            aria-expanded={aiOpen}
+            aria-label={aiOpen ? 'Đóng trợ lý AI' : 'Mở trợ lý AI'}
+            className="meeting-ai-toggle"
+            type="button"
+            onClick={() => setAiOpen((prev) => !prev)}
+          >
+            <svg aria-hidden="true" fill="none" height="18" viewBox="0 0 24 24" width="18">
+              <g stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8">
+                <path d="m12 3 1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" />
+                <path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />
+              </g>
+            </svg>
+            {aiOpen ? 'Đóng trợ lý' : 'Trợ lý AI'}
+          </button>
+          {aiOpen && (
+            <aside className="meeting-ai-panel">
+              <AIChatPanel
+                isPending={
+                  chatMutation.isPending || jobQuery.data?.status === 'PROCESSING'
+                }
+                error={chatMutation.isError ? chatMutation.error : null}
+                onSubmit={({ question, intent }) => {
+                  const key = createAIIdempotencyKey();
+                  chatMutation.mutate(
+                    { meetingId, request: { question, intent }, idempotencyKey: key },
+                    { onSuccess: (job) => setChatJobId(job.aiJobId) },
+                  );
+                }}
+              />
+              {chatJobId && (
+                <AIJobState
+                  job={jobQuery.data}
+                  isLoading={jobQuery.isLoading}
+                  error={jobQuery.isError ? jobQuery.error : null}
+                  onRetry={() => setChatJobId(undefined)}
+                />
               )}
-            </div>
-          </details>
-        )}
+            </aside>
+          )}
+        </div>
       </div>
     </FeaturePage>
   );
