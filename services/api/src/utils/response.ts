@@ -14,6 +14,8 @@ export const ok = <T>(data: T, requestId: string, isMock = false) =>
     requestId,
     ...(isMock && { isMock: true }),
   } satisfies ApiSuccessResponse<T>);
+export const created = <T>(data: T, requestId: string) =>
+  json(201, { success: true, data, requestId } satisfies ApiSuccessResponse<T>);
 
 export const notImplemented = (requestId: string, module: string) =>
   json(501, {
@@ -22,9 +24,15 @@ export const notImplemented = (requestId: string, module: string) =>
     requestId,
   } satisfies ApiErrorResponse);
 
-export const failure = (requestId: string, message: string, statusCode = 500) =>
+export const failure = (
+  requestId: string,
+  message: string,
+  statusCode = 500,
+  code = 'INTERNAL_ERROR',
+  details?: unknown,
+) =>
   json(statusCode, {
     success: false,
-    error: { code: 'INTERNAL_ERROR', message },
+    error: { code, message, ...(details === undefined ? {} : { details }) },
     requestId,
   } satisfies ApiErrorResponse);

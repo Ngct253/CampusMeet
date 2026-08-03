@@ -3,6 +3,7 @@ import type {
   IntegrationStatus,
   InvitationStatus,
   MeetingStatus,
+  GoogleSyncStatus,
   NotificationType,
   Priority,
   TaskStatus,
@@ -43,6 +44,15 @@ export interface MeetingAttendee {
   userId: string;
   response?: 'PENDING' | 'ACCEPTED' | 'DECLINED';
 }
+export interface MeetingOrganizer {
+  userId: string;
+}
+export interface AgendaItem {
+  id: string;
+  order: number;
+  title: string;
+  description?: string;
+}
 export interface Meeting {
   id: string;
   groupId: string;
@@ -50,11 +60,22 @@ export interface Meeting {
   description?: string;
   organizerId: string;
   attendeeIds: string[];
+  agenda: AgendaItem[];
   startsAt: ISODateTime;
   endsAt: ISODateTime;
   status: MeetingStatus;
-  integrationStatus: IntegrationStatus;
+  googleSyncStatus: GoogleSyncStatus;
+  /** @deprecated Use googleSyncStatus. */
+  integrationStatus?: IntegrationStatus;
   meetUrl?: string;
+  createdAt: ISODateTime;
+  createdBy: string;
+  updatedAt: ISODateTime;
+  updatedBy: string;
+  version: number;
+  cancelledAt?: ISODateTime;
+  cancelledBy?: string;
+  cancellationReason?: string;
 }
 export interface Reminder {
   id: string;

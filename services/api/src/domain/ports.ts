@@ -1,10 +1,38 @@
-import type { Group, Meeting, Notification, Task } from '@campusmeet/shared';
+import type { Group, GroupRole, Meeting, Notification, Task } from '@campusmeet/shared';
 
 export interface GroupRepository {
   getById(id: string): Promise<Group | null>;
 }
+export interface MembershipRecord {
+  userId: string;
+  groupId: string;
+  role: GroupRole;
+  active: boolean;
+}
+export interface MembershipAuthorizer {
+  getMembership(groupId: string, userId: string): Promise<MembershipRecord | null>;
+}
+export interface MeetingPage {
+  items: Meeting[];
+  nextCursor?: string;
+}
 export interface MeetingRepository {
+  create(meeting: Meeting): Promise<Meeting>;
   getById(id: string): Promise<Meeting | null>;
+  resolveGroupId(id: string): Promise<string | null>;
+  listByGroup(groupId: string, limit: number, cursor?: string): Promise<MeetingPage>;
+  update(meeting: Meeting, expectedVersion: number): Promise<Meeting>;
+  cancel(
+    id: string,
+    actorId: string,
+    reason: string | undefined,
+    expectedVersion?: number,
+  ): Promise<Meeting>;
+}
+export interface MeetingAccessBoundary {
+  getMeeting(meetingId: string): Promise<Meeting | null>;
+  resolveMeetingGroup(meetingId: string): Promise<string | null>;
+  canViewMeeting(meetingId: string, userId: string): Promise<boolean>;
 }
 export interface TaskRepository {
   getById(id: string): Promise<Task | null>;

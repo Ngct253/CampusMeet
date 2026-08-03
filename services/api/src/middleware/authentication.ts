@@ -5,6 +5,14 @@ export interface AuthContext {
 }
 
 export function authenticate(_event: APIGatewayProxyEventV2): AuthContext {
-  // TODO(M3): verify the Cognito JWT authorizer claims and return a trusted user identity.
-  throw new Error('Authentication middleware is not implemented');
+  const context = _event.requestContext as typeof _event.requestContext & {
+    authorizer?: { jwt?: { claims?: Record<string, unknown> } };
+  };
+  const sub = context.authorizer?.jwt?.claims?.sub;
+  if (!sub)
+    throw new (class extends Error {
+      statusCode = 401;
+      code = 'UNAUTHORIZED';
+    })('Không tìm thấy JWT claims đã xác thực.');
+  return { userId: String(sub) };
 }

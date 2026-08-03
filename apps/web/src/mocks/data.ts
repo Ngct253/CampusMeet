@@ -1,6 +1,7 @@
 import {
   GroupRole,
   IntegrationStatus,
+  GoogleSyncStatus,
   MeetingStatus,
   NotificationType,
   Priority,
@@ -35,10 +36,17 @@ export const mockMeetings: Meeting[] = [
     title: 'Họp lập kế hoạch Sprint 1',
     organizerId: 'user-1',
     attendeeIds: ['user-1'],
+    agenda: [],
     startsAt: '2026-07-08T02:00:00Z',
     endsAt: '2026-07-08T03:00:00Z',
     status: MeetingStatus.SCHEDULED,
     integrationStatus: IntegrationStatus.PENDING,
+    googleSyncStatus: GoogleSyncStatus.PENDING,
+    createdAt: '2026-07-01T01:00:00Z',
+    createdBy: 'user-1',
+    updatedAt: '2026-07-01T01:00:00Z',
+    updatedBy: 'user-1',
+    version: 1,
   },
 ];
 export const mockTasks: Task[] = [

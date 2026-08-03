@@ -9,14 +9,14 @@ export function FeaturePage({
 }: {
   title: string;
   description: string;
-  todo: string;
+  todo?: string;
   children?: ReactNode;
 }) {
   return (
     <section>
       <PageHeader title={title} description={description} />
       {children ?? <EmptyState />}
-      <p className="todo">TODO: {todo}</p>
+      {todo && <p className="todo">TODO: {todo}</p>}
     </section>
   );
 }

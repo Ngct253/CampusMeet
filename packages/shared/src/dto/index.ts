@@ -1,5 +1,13 @@
-import type { MeetingMinutes, Notification, Task, User, Group, Meeting } from '../types';
-import type { Priority, TaskStatus } from '../enums';
+import type {
+  AgendaItem,
+  MeetingMinutes,
+  Notification,
+  Task,
+  User,
+  Group,
+  Meeting,
+} from '../types';
+import type { MeetingStatus, Priority, TaskStatus } from '../enums';
 
 export interface CreateGroupRequest {
   name: string;
@@ -14,13 +22,32 @@ export interface CreateMeetingRequest {
   title: string;
   organizerId: string;
   attendeeIds: string[];
+  description?: string;
+  agenda: Array<{ id?: string; order: number; title: string; description?: string }>;
   startsAt: string;
   endsAt: string;
+  status: MeetingStatus.DRAFT | MeetingStatus.SCHEDULED;
 }
-export type UpdateMeetingRequest = Partial<Omit<CreateMeetingRequest, 'groupId'>>;
+export type UpdateMeetingRequest = Partial<Omit<CreateMeetingRequest, 'groupId'>> & {
+  version: number;
+};
 export interface CancelMeetingRequest {
   reason?: string;
+  version?: number;
 }
+export interface MeetingResponse {
+  meeting: Meeting;
+}
+export interface MeetingDetailResponse extends MeetingResponse {
+  organizer: { userId: string };
+  attendees: Array<{ userId: string }>;
+  agenda: AgendaItem[];
+}
+export interface CursorPage<T> {
+  items: T[];
+  nextCursor?: string;
+}
+export type MeetingTimelineResponse = CursorPage<Meeting>;
 export interface CreateMinutesRequest {
   meetingId: string;
   summary: string;
