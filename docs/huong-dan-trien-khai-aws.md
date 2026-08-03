@@ -365,6 +365,31 @@ Không cấp `s3:*`, `transcribe:*` hoặc `bedrock:*` rộng cho API Lambda.
 
 Chi tiết: [Thiết kế kỹ thuật upload/live transcript/AI](thiet-ke-ky-thuat-upload-live-transcript-ai.md).
 
+### 14.1. Contract hạ tầng AI Worker M5-6A
+
+`infra/template.yaml` đã khai báo AI Worker Lambda, execution role riêng, log retention 14 ngày và alarm cho lỗi/thời lượng. Stack không tạo lại user-content bucket hoặc Step Functions của M4. M4 lấy output `AIWorkerFunctionArn` để cấp quyền `lambda:InvokeFunction` cho state machine của mình.
+
+Application stack yêu cầu các parameter sau và không có fallback/mock:
+
+| Parameter                   | Nguồn                  | Mục đích                                                                  |
+| --------------------------- | ---------------------- | ------------------------------------------------------------------------- |
+| `UserContentBucketName`     | Output stack M4        | Worker đọc source và chỉ ghi normalized source dưới `kb/*`                |
+| `BedrockKnowledgeBaseId`    | Resource M5-6B         | Retrieve và theo dõi ingestion trên đúng Knowledge Base                   |
+| `BedrockDataSourceId`       | Resource M5-6B         | Start/check ingestion trên đúng data source                               |
+| `BedrockGenerationModelArn` | Cấu hình dev đã review | Truyền vào `Converse` và giới hạn `bedrock:InvokeModel` vào đúng resource |
+
+`infra/parameters.example.json` chỉ chứa placeholder công khai. CloudFormation Rule từ chối change set nếu một trong các placeholder này chưa được thay. Model ARN có thể là foundation model hoặc inference profile được phép dùng trong account; không hard-code account ID hoặc model ARN thật vào Git.
+
+Kiểm tra local, không deploy:
+
+```powershell
+npm.cmd run infra:validate
+npm.cmd run sam:validate:app -- --region ap-southeast-1
+npm.cmd run sam:build:app
+```
+
+Outputs phục vụ tích hợp gồm `AIWorkerFunctionName`, `AIWorkerFunctionArn`, `AIWorkerRoleArn`, log group, hai alarm, alarm topic và các ID/bucket đã cấu hình. AI Worker chỉ có quyền DynamoDB theo từng bảng/thao tác, `s3:GetObject` trên bucket được cấp, `s3:PutObject` dưới `kb/*`, retrieve/ingestion trên đúng Knowledge Base và invoke đúng model ARN.
+
 ## 15. Chi phí
 
 - On-demand vẫn tính phí request/storage/index/backup.

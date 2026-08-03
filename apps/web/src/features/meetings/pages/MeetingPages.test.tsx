@@ -24,14 +24,48 @@ vi.mock('../service', () => ({
   updateMeeting: services.updateMeeting,
   cancelMeeting: services.cancelMeeting,
 }));
+
+const authMock = vi.hoisted(() => ({ userId: 'user-1' }));
+vi.mock('../../../auth/AuthProvider', () => ({
+  useAuth: () => ({ status: 'authenticated', user: { userId: authMock.userId } }),
+}));
+
+vi.mock('../../ai', () => ({
+  MeetingAIWorkspace: ({ meetingId }: { meetingId: string }) => (
+    <div data-testid="meeting-ai-workspace">AI workspace {meetingId}</div>
+  ),
+}));
 afterEach(cleanup);
 
+const meetingFixture = (meetingId = 'meeting-1', organizerId = 'admin') => ({
+  id: meetingId,
+  groupId: 'group-1',
+  title: 'Planning',
+  description: 'Agenda overview',
+  organizerId,
+  attendeeIds: ['admin'],
+  agenda: [],
+  startsAt: '2030-01-01T10:00:00.000Z',
+  endsAt: '2030-01-01T11:00:00.000Z',
+  status: 'SCHEDULED',
+  googleSyncStatus: 'NOT_REQUESTED',
+  integrationStatus: 'NOT_CONNECTED',
+  createdAt: '2029-01-01T00:00:00.000Z',
+  createdBy: 'admin',
+  updatedAt: '2029-01-01T00:00:00.000Z',
+  updatedBy: 'admin',
+  version: 1,
+});
+
 beforeEach(() => {
+  vi.clearAllMocks();
+  authMock.userId = 'user-1';
   services.getGroup.mockResolvedValue({
     group: { id: 'group-1', name: 'Nhóm A', role: 'MEMBER' },
     members: [],
   });
   services.getMeetings.mockResolvedValue([]);
+  services.getMeeting.mockResolvedValue(meetingFixture());
   services.createMeeting.mockResolvedValue({ id: 'meeting-created' });
   services.updateMeeting.mockResolvedValue({});
   services.cancelMeeting.mockResolvedValue({});
@@ -85,25 +119,6 @@ it('validate form và submit create thành công', async () => {
 });
 
 it('render detail, submit edit và xác nhận cancel', async () => {
-  services.getMeeting.mockResolvedValue({
-    id: 'meeting-1',
-    groupId: 'group-1',
-    title: 'Planning',
-    description: 'Agenda overview',
-    organizerId: 'admin',
-    attendeeIds: ['admin'],
-    agenda: [],
-    startsAt: '2030-01-01T10:00:00.000Z',
-    endsAt: '2030-01-01T11:00:00.000Z',
-    status: 'SCHEDULED',
-    googleSyncStatus: 'NOT_REQUESTED',
-    integrationStatus: 'NOT_CONNECTED',
-    createdAt: '2029-01-01T00:00:00.000Z',
-    createdBy: 'admin',
-    updatedAt: '2029-01-01T00:00:00.000Z',
-    updatedBy: 'admin',
-    version: 1,
-  });
   services.getGroup.mockResolvedValue({
     group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
     members: [{ membership: { userId: 'admin' }, user: { displayName: 'Admin' } }],
@@ -171,3 +186,17 @@ it('dùng giờ 24 tiếng không phụ thuộc CH hoặc SA', async () => {
   expect(screen.queryByText(/\b(?:CH|SA)\b/)).not.toBeInTheDocument();
 });
 
+it('không hiển thị thao tác sinh output cho thành viên không phải organizer', async () => {
+  services.getMeeting.mockResolvedValue(meetingFixture('meeting-1', 'admin'));
+  renderDetail();
+
+  expect(await screen.findByText('Agenda overview')).toBeInTheDocument();
+  expect(screen.queryByTestId('meeting-ai-workspace')).not.toBeInTheDocument();
+});
+
+it('cho phép organizer tạo output dù không phải Group Admin', async () => {
+  services.getMeeting.mockResolvedValue(meetingFixture('meeting-1', 'user-1'));
+  renderDetail();
+
+  expect(await screen.findByTestId('meeting-ai-workspace')).toHaveTextContent('meeting-1');
+});

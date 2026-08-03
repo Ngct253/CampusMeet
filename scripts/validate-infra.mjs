@@ -33,7 +33,11 @@ assert.deepEqual(
 for (const [logicalId, contract] of expected) {
   const resource = resources[logicalId];
   assert.equal(resource.Type, 'AWS::DynamoDB::Table', `${logicalId} must be DynamoDB.`);
-  assert.equal(resource.DeletionPolicy, 'Retain', `${logicalId} must retain data on stack deletion.`);
+  assert.equal(
+    resource.DeletionPolicy,
+    'Retain',
+    `${logicalId} must retain data on stack deletion.`,
+  );
   assert.equal(
     resource.UpdateReplacePolicy,
     'Retain',
@@ -80,7 +84,11 @@ for (const variable of [
   'TASK_DATA_TABLE',
   'AI_WORK_TABLE',
 ]) {
-  assert.equal(appTemplate.includes(variable), true, `Application template is missing ${variable}.`);
+  assert.equal(
+    appTemplate.includes(variable),
+    true,
+    `Application template is missing ${variable}.`,
+  );
 }
 
 for (const invalidAction of ['dynamodb:TransactGetItems', 'dynamodb:TransactWriteItems']) {
@@ -91,7 +99,66 @@ for (const invalidAction of ['dynamodb:TransactGetItems', 'dynamodb:TransactWrit
   );
 }
 
-assert.equal(appTemplate.includes('USER_POOL_ID: !Ref UserPool'), true, 'API must receive the Cognito User Pool id.');
-assert.equal(appTemplate.includes('cognito-idp:AdminGetUser'), true, 'API role must be able to read verified Cognito attributes.');
+for (const parameter of [
+  'UserContentBucketName',
+  'BedrockKnowledgeBaseId',
+  'BedrockDataSourceId',
+  'BedrockGenerationModelArn',
+]) {
+  assert.equal(
+    appTemplate.includes(`  ${parameter}:`),
+    true,
+    `Application template is missing required AI parameter ${parameter}.`,
+  );
+}
 
-console.log('Infrastructure contract validation passed: five-table DynamoDB model.');
+for (const marker of [
+  'AIWorkerRole:',
+  'AIWorkerFunction:',
+  'Handler: services/ai-worker/src/index.handler',
+  'EntryPoints: [services/ai-worker/src/index.ts]',
+  'USER_CONTENT_BUCKET: !Ref UserContentBucketName',
+  'BEDROCK_KNOWLEDGE_BASE_ID: !Ref BedrockKnowledgeBaseId',
+  'BEDROCK_DATA_SOURCE_ID: !Ref BedrockDataSourceId',
+  'BEDROCK_GENERATION_MODEL_ID: !Ref BedrockGenerationModelArn',
+  'RequireResolvedAIInfrastructure:',
+  'bedrock:Retrieve',
+  'bedrock:StartIngestionJob',
+  'bedrock:GetIngestionJob',
+  'bedrock:InvokeModel',
+  'AIWorkerLogGroup:',
+  'AIWorkerErrorAlarm:',
+  'AIWorkerDurationAlarm:',
+  'AIWorkerFunctionArn:',
+]) {
+  assert.equal(appTemplate.includes(marker), true, `Application template is missing ${marker}.`);
+}
+
+assert.equal(
+  appTemplate.includes('UserContentBucket:\n'),
+  false,
+  'M5 must consume the M4-owned user-content bucket instead of creating one.',
+);
+assert.equal(
+  appTemplate.includes('Type: AWS::Serverless::StateMachine'),
+  false,
+  'M5 must not create the M4-owned Step Functions state machine.',
+);
+assert.equal(
+  appTemplate.includes('Type: AWS::StepFunctions::StateMachine'),
+  false,
+  'M5 must not create the M4-owned Step Functions state machine.',
+);
+
+assert.equal(
+  appTemplate.includes('USER_POOL_ID: !Ref UserPool'),
+  true,
+  'API must receive the Cognito User Pool id.',
+);
+assert.equal(
+  appTemplate.includes('cognito-idp:AdminGetUser'),
+  true,
+  'API role must be able to read verified Cognito attributes.',
+);
+
+console.log('Infrastructure contract validation passed: data foundation and M5 AI Worker.');
