@@ -82,4 +82,35 @@ describe('DynamoKnowledgeSourceRepository', () => {
 
     await expect(repository.saveVersion(source)).rejects.toThrow('ConditionalCheckFailedException');
   });
+
+  it('marks old versions stale, gives them a TTL, and returns normalized keys for cleanup', async () => {
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        Items: [
+          {
+            PK: 'SOURCE#source-1',
+            SK: 'VERSION#0000000001',
+            normalizedObjectKey: 'kb/group-1/meeting-1/source-1/v1/content.txt',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({});
+    const repository = new DynamoKnowledgeSourceRepository(
+      { send } as unknown as DynamoDBDocumentClient,
+      'ai-work',
+    );
+
+    await expect(repository.markOlderVersionsStale('source-1', 2)).resolves.toEqual([
+      'kb/group-1/meeting-1/source-1/v1/content.txt',
+    ]);
+
+    expect(send.mock.calls[1]![0].input).toMatchObject({
+      UpdateExpression: 'SET ingestionStatus = :stale, updatedAt = :now, expiresAtEpoch = :expires',
+      ExpressionAttributeValues: expect.objectContaining({
+        ':stale': 'STALE',
+        ':expires': expect.any(Number),
+      }),
+    });
+  });
 });
