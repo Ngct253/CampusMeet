@@ -33,7 +33,7 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | GET/PATCH             | `/meetings/:meetingId`                                         | `Meeting`, `UpdateMeetingRequest`                                      | Đã triển khai; PATCH yêu cầu Group Admin       |
 | POST                  | `/meetings/:meetingId/cancel`                                  | `CancelMeetingRequest`, `Meeting`                                      | Đã triển khai; yêu cầu Group Admin              |
 | GET/POST              | `/minutes`                                                     | `CreateMinutesRequest`, `MeetingMinutes`                               | Handler skeleton, trả 501                      |
-| GET/POST/PATCH        | `/tasks`                                                       | `CreateTaskRequest`, `UpdateTaskStatusRequest`                         | Handler skeleton, trả 501                      |
+| GET                   | `/tasks`                                                       | `Task[]`                                                               | Đã triển khai; trả toàn bộ task có `assigneeId` bằng user từ JWT |
 | GET                   | `/dashboard`                                                   | `DashboardResponse`                                                    | Handler skeleton, trả 501                      |
 | GET                   | `/notifications`                                               | `Notification[]`                                                       | M1 đã triển khai                               |
 | POST                  | `/notifications/:notificationId/read`                          | `{read:true}`                                                          | M1 đã triển khai                               |
@@ -90,6 +90,8 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 - Google artifact sync lưu trạng thái `POLLING|AVAILABLE|UNAVAILABLE|ACTION_REQUIRED|FAILED`; `UNAVAILABLE` là kết quả hợp lệ và phải dẫn tới fallback upload/capture.
 
 ## Response format hiện có
+
+`GET /tasks` không nhận `userId` từ query, path hoặc body. Backend chỉ dùng `sub` từ JWT và tự đọc hết các trang DynamoDB qua GSI2. API chưa expose pagination trong MVP hiện tại; `limit`/`cursor` sẽ dùng cursor contract chung sau khi contract list endpoint được chốt.
 
 Health response:
 

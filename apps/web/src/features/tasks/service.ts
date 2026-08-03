@@ -1,7 +1,6 @@
-import { mockTasks } from '../../mocks/data';
-export const getMockTasks = async () => ({
-  success: true as const,
-  isMock: true as const,
-  requestId: 'mock-request',
-  data: mockTasks,
-});
+import type { ApiSuccessResponse, Task } from '@campusmeet/shared';
+import { apiClient } from '../../lib/api-client';
+
+export async function getTasks(): Promise<Task[]> {
+  return (await apiClient.request<ApiSuccessResponse<Task[]>>('/tasks')).data;
+}

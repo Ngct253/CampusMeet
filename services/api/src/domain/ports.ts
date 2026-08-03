@@ -7,7 +7,7 @@ export interface MeetingRepository {
   getById(id: string): Promise<Meeting | null>;
 }
 export interface TaskRepository {
-  getById(id: string): Promise<Task | null>;
+  listByAssignee(userId: string): Promise<Task[]>;
 }
 export interface NotificationRepository {
   create(notification: Notification): Promise<void>;
