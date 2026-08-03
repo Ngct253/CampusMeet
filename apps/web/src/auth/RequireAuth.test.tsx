@@ -3,6 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RequireAuth } from './RequireAuth';
 
 const mockUseAuth = vi.hoisted(() => vi.fn());
@@ -12,10 +13,17 @@ function renderGuard(path: string, status: string) {
   mockUseAuth.mockReturnValue(status === 'authenticated'
     ? { status, user: { username: 'lan' }, signOut: vi.fn() }
     : { status, user: null, error: status === 'configuration-error' ? 'unavailable' : null });
-  render(<MemoryRouter initialEntries={[path]}><Routes>
-    <Route path={'*'} element={<RequireAuth />} />
-    <Route path={'/sign-in'} element={<p>Trang đăng nhập</p>} />
-  </Routes></MemoryRouter>);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path={'*'} element={<RequireAuth />} />
+          <Route path={'/sign-in'} element={<p>Trang đăng nhập</p>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
 }
 
 describe('RequireAuth', () => {

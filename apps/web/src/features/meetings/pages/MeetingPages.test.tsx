@@ -18,15 +18,6 @@ vi.mock('../service', () => ({
   cancelMeeting: vi.fn(),
 }));
 
-vi.mock('../../ai', () => ({
-  AIChatPanel: ({ onSubmit: _s }: { onSubmit: unknown }) => (
-    <div data-testid="ai-chat-panel">AI Chat</div>
-  ),
-  AIJobState: () => null,
-  createAIIdempotencyKey: () => 'key-test',
-  useAIJob: () => ({ data: undefined, isLoading: false, isError: false }),
-  useMeetingChatMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
-}));
 
 const meetingFixture = {
   id: 'meeting-1',
@@ -114,14 +105,3 @@ it('dùng giờ 24 tiếng không phụ thuộc CH hoặc SA', async () => {
   expect(screen.queryByText(/\b(?:CH|SA)\b/)).not.toBeInTheDocument();
 });
 
-it('nút Trợ lý AI hiện trong MeetingDetailPage', async () => {
-  await renderMeetingDetail();
-  expect(await screen.findByRole('button', { name: 'Mở trợ lý AI' })).toBeInTheDocument();
-});
-
-it('AIChatPanel hiện sau khi click nút Trợ lý AI', async () => {
-  await renderMeetingDetail();
-  const toggleBtn = await screen.findByRole('button', { name: 'Mở trợ lý AI' });
-  fireEvent.click(toggleBtn);
-  expect(await screen.findByTestId('ai-chat-panel')).toBeInTheDocument();
-});

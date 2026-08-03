@@ -3,13 +3,6 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { CreateMeetingRequest, GroupDetails, Meeting } from '@campusmeet/shared';
 import { FeaturePage } from '../../../components/FeaturePage';
-import {
-  AIChatPanel,
-  AIJobState,
-  createAIIdempotencyKey,
-  useAIJob,
-  useMeetingChatMutation,
-} from '../../ai';
 import { getGroup } from '../../groups/service';
 import { cancelMeeting, createMeeting, getMeeting, getMeetings, updateMeeting } from '../service';
 import './MeetingPages.css';
@@ -405,11 +398,6 @@ export function MeetingDetailPage() {
     },
   });
 
-  const [aiOpen, setAiOpen] = useState(false);
-  const [chatJobId, setChatJobId] = useState<string | undefined>(undefined);
-  const chatMutation = useMeetingChatMutation();
-  const jobQuery = useAIJob(chatJobId);
-
   if (query.isPending)
     return (
       <FeaturePage title="Cuộc họp" description="Đang tải thông tin…">
@@ -438,9 +426,7 @@ export function MeetingDetailPage() {
       title={meeting.title}
       description={formatDate(meeting.startsAt)}
     >
-      <div className="meeting-detail-with-ai">
-        <div>
-          <div className="meeting-detail-layout">
+      <div className="meeting-detail-layout">
             <section className="app-panel meeting-overview">
               <div className="meeting-overview-heading">
                 <span className={`meeting-status meeting-status-${meeting.status.toLowerCase()}`}>
@@ -514,51 +500,6 @@ export function MeetingDetailPage() {
               </details>
             )}
           </div>
-        </div>
-
-        <div className={`meeting-ai-sidebar${aiOpen ? ' meeting-ai-sidebar--open' : ''}`}>
-          <button
-            aria-expanded={aiOpen}
-            aria-label={aiOpen ? 'Đóng trợ lý AI' : 'Mở trợ lý AI'}
-            className="meeting-ai-toggle"
-            type="button"
-            onClick={() => setAiOpen((prev) => !prev)}
-          >
-            <svg aria-hidden="true" fill="none" height="18" viewBox="0 0 24 24" width="18">
-              <g stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8">
-                <path d="m12 3 1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" />
-                <path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />
-              </g>
-            </svg>
-            {aiOpen ? 'Đóng trợ lý' : 'Trợ lý AI'}
-          </button>
-          {aiOpen && (
-            <aside className="meeting-ai-panel">
-              <AIChatPanel
-                isPending={
-                  chatMutation.isPending || jobQuery.data?.status === 'PROCESSING'
-                }
-                error={chatMutation.isError ? chatMutation.error : null}
-                onSubmit={({ question, intent }) => {
-                  const key = createAIIdempotencyKey();
-                  chatMutation.mutate(
-                    { meetingId, request: { question, intent }, idempotencyKey: key },
-                    { onSuccess: (job) => setChatJobId(job.aiJobId) },
-                  );
-                }}
-              />
-              {chatJobId && (
-                <AIJobState
-                  job={jobQuery.data}
-                  isLoading={jobQuery.isLoading}
-                  error={jobQuery.isError ? jobQuery.error : null}
-                  onRetry={() => setChatJobId(undefined)}
-                />
-              )}
-            </aside>
-          )}
-        </div>
-      </div>
     </FeaturePage>
   );
 }
