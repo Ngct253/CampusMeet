@@ -4,28 +4,72 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { GroundedAnswer } from '@campusmeet/shared';
 import { AppShell } from './AppShell';
 
-vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({
-  status: 'authenticated', user: { username: 'lan', userId: 'user-1' },
-  signOut: vi.fn(), error: null,
-}) }));
+vi.mock('../auth/AuthProvider', () => ({
+  useAuth: () => ({
+    status: 'authenticated',
+    user: { username: 'lan', userId: 'user-1' },
+    signOut: vi.fn(),
+    error: null,
+  }),
+}));
 
 const mockMeetingMutate = vi.fn();
 const mockGroupMutate = vi.fn();
+const mockMeetingReset = vi.fn();
+const mockGroupReset = vi.fn();
+
+type ChatSubmitInput = {
+  question: string;
+  intent: 'QUESTION_ANSWER' | 'LATE_JOIN_SUMMARY';
+};
+
+const answer: GroundedAnswer = {
+  answer: 'Câu trả lời có căn cứ',
+  citations: [],
+  scope: 'CURRENT_MEETING',
+  insufficientContext: true,
+};
 
 vi.mock('../features/ai', () => ({
-  AIChatPanel: ({ onSubmit }: { onSubmit: (val: any) => void }) => (
-    <div data-testid="ai-chat-panel">
+  AIChatPanel: ({
+    answer: groundedAnswer,
+    context,
+    onSubmit,
+  }: {
+    answer?: GroundedAnswer;
+    context?: 'meeting' | 'group';
+    onSubmit: (value: ChatSubmitInput) => void;
+  }) => (
+    <div data-context={context} data-testid="ai-chat-panel">
       AI Chat
-      <button onClick={() => onSubmit({ question: 'test question', intent: 'QUESTION_ANSWER' })}>Submit Mock</button>
+      {groundedAnswer?.answer}
+      <button onClick={() => onSubmit({ question: 'test question', intent: 'QUESTION_ANSWER' })}>
+        Submit Mock
+      </button>
     </div>
   ),
   AIJobState: () => <div data-testid="ai-job-state">Job State</div>,
   createAIIdempotencyKey: () => 'key-test',
-  useAIJob: () => ({ data: { status: 'COMPLETED' }, isLoading: false, isError: false }),
-  useMeetingChatMutation: () => ({ mutate: mockMeetingMutate, isPending: false, isError: false }),
-  useGroupSearchMutation: () => ({ mutate: mockGroupMutate, isPending: false, isError: false }),
+  useAIJob: () => ({
+    data: { status: 'COMPLETED', result: answer },
+    isLoading: false,
+    isError: false,
+  }),
+  useMeetingChatMutation: () => ({
+    mutate: mockMeetingMutate,
+    reset: mockMeetingReset,
+    isPending: false,
+    isError: false,
+  }),
+  useGroupSearchMutation: () => ({
+    mutate: mockGroupMutate,
+    reset: mockGroupReset,
+    isPending: false,
+    isError: false,
+  }),
 }));
 
 afterEach(() => {
@@ -62,33 +106,42 @@ describe('AppShell', () => {
     renderShell();
     const toggleBtn = screen.getByRole('button', { name: /Trợ lý AI/i });
     expect(toggleBtn).toBeInTheDocument();
-    
-    // Mở panel
     fireEvent.click(toggleBtn);
     expect(screen.getByText('Trợ lý điều phối')).toBeInTheDocument();
     expect(screen.getByText('Chưa chọn không gian làm việc')).toBeInTheDocument();
   });
 
   it('chuyển đổi context đúng khi ở các trang có params', async () => {
-    // 1. Khi ở trang Meeting
     const { unmount } = renderShell('/app/meetings/meeting-1');
     let toggleBtn = screen.getByRole('button', { name: /Trợ lý AI/i });
     fireEvent.click(toggleBtn);
 
-    // Render AIChatPanel của meeting
-    expect(screen.getByTestId('ai-chat-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('ai-chat-panel')).toHaveAttribute('data-context', 'meeting');
+    expect(screen.getByTestId('ai-chat-panel')).toHaveTextContent(answer.answer);
     fireEvent.click(screen.getByText('Submit Mock'));
-    expect(mockMeetingMutate).toHaveBeenCalled();
+    expect(mockMeetingMutate).toHaveBeenCalledWith(
+      {
+        meetingId: 'meeting-1',
+        request: { question: 'test question', intent: 'QUESTION_ANSWER' },
+        idempotencyKey: 'key-test',
+      },
+      expect.any(Object),
+    );
     unmount();
 
-    // 2. Khi ở trang Group
     renderShell('/app/groups/group-1');
     toggleBtn = screen.getByRole('button', { name: /Trợ lý AI/i });
     fireEvent.click(toggleBtn);
 
-    expect(screen.getByTestId('ai-chat-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('ai-chat-panel')).toHaveAttribute('data-context', 'group');
     fireEvent.click(screen.getByText('Submit Mock'));
-    expect(mockGroupMutate).toHaveBeenCalled();
+    expect(mockGroupMutate).toHaveBeenCalledWith(
+      {
+        groupId: 'group-1',
+        request: { question: 'test question', scope: 'WHOLE_GROUP' },
+        idempotencyKey: 'key-test',
+      },
+      expect.any(Object),
+    );
   });
 });
-

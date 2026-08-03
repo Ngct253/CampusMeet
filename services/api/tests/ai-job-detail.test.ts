@@ -52,6 +52,11 @@ describe('GET /ai/jobs/:aiJobId', () => {
   beforeEach(async () => {
     process.env.AI_WORK_TABLE = 'test-ai-work-table';
     const { documentClient } = await import('../src/repositories/client');
+    const { requireGroupMembership } = await import('../src/middleware/authorization');
+    vi.mocked(requireGroupMembership).mockResolvedValue({
+      userId: 'user-1',
+      groupId: 'group-1',
+    } as never);
     vi.mocked(documentClient.send).mockResolvedValue({
       Item: {
         PK: `AIJOB#${queuedJob.aiJobId}`,
@@ -69,6 +74,33 @@ describe('GET /ai/jobs/:aiJobId', () => {
     expect(bodyOf(response)).toMatchObject({
       success: true,
       data: { aiJobId: queuedJob.aiJobId, status: 'QUEUED', groupId: 'group-1' },
+    });
+  });
+
+  it('returns a validated grounded result for a completed chat job', async () => {
+    const { documentClient } = await import('../src/repositories/client');
+    vi.mocked(documentClient.send).mockResolvedValue({
+      Item: {
+        ...queuedJob,
+        status: 'COMPLETED',
+        result: {
+          answer: 'Không có đủ nguồn để trả lời.',
+          citations: [],
+          scope: 'CURRENT_MEETING',
+          insufficientContext: true,
+        },
+      },
+    } as never);
+
+    const response = await invoke(authenticatedGetEvent(queuedJob.aiJobId));
+
+    expect(response.statusCode).toBe(200);
+    expect(bodyOf(response)).toMatchObject({
+      success: true,
+      data: {
+        status: 'COMPLETED',
+        result: { scope: 'CURRENT_MEETING', insufficientContext: true },
+      },
     });
   });
 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useParams } from 'react-router-dom';
+import { groundedAnswerSchema } from '@campusmeet/shared';
 import { useAuth } from '../auth/AuthProvider';
 import {
   AIChatPanel,
@@ -126,19 +127,28 @@ export function AppShell() {
   const meetingMutation = useMeetingChatMutation();
   const groupMutation = useGroupSearchMutation();
   const jobQuery = useAIJob(chatJobId);
+  const resetMeetingMutation = meetingMutation.reset;
+  const resetGroupMutation = groupMutation.reset;
 
   useEffect(() => {
     setChatJobId(undefined);
-  }, [meetingId, groupId]);
+    resetMeetingMutation();
+    resetGroupMutation();
+  }, [meetingId, groupId, resetMeetingMutation, resetGroupMutation]);
+
+  const answerResult = groundedAnswerSchema.safeParse(jobQuery.data?.result);
+  const answer = answerResult.success ? answerResult.data : undefined;
 
   const isPending =
-    meetingMutation.isPending ||
-    groupMutation.isPending ||
-    jobQuery.data?.status === 'PROCESSING';
+    meetingMutation.isPending || groupMutation.isPending || jobQuery.data?.status === 'PROCESSING';
 
   const chatError = meetingId
-    ? (meetingMutation.isError ? meetingMutation.error : null)
-    : (groupMutation.isError ? groupMutation.error : null);
+    ? meetingMutation.isError
+      ? meetingMutation.error
+      : null
+    : groupMutation.isError
+      ? groupMutation.error
+      : null;
 
   return (
     <div className="app-shell">
@@ -164,16 +174,16 @@ export function AppShell() {
               <path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />
             </g>
           </svg>
-          <span className="meeting-ai-toggle-text">
-            {aiOpen ? 'Đóng trợ lý' : 'Trợ lý AI'}
-          </span>
+          <span className="meeting-ai-toggle-text">{aiOpen ? 'Đóng trợ lý' : 'Trợ lý AI'}</span>
         </button>
         {aiOpen && (
           <>
             {meetingId || groupId ? (
               <aside className="meeting-ai-panel">
                 <AIChatPanel
-                  answer={(jobQuery.data as any)?.result?.answer ? (jobQuery.data as any).result : undefined}
+                  key={meetingId ? `meeting-${meetingId}` : `group-${groupId}`}
+                  answer={answer}
+                  context={meetingId ? 'meeting' : 'group'}
                   isPending={isPending}
                   error={chatError}
                   onSubmit={({ question, intent }) => {
@@ -185,7 +195,11 @@ export function AppShell() {
                       );
                     } else if (groupId) {
                       groupMutation.mutate(
-                        { groupId, request: { question, scope: 'WHOLE_GROUP' }, idempotencyKey: key },
+                        {
+                          groupId,
+                          request: { question, scope: 'WHOLE_GROUP' },
+                          idempotencyKey: key,
+                        },
                         { onSuccess: (job) => setChatJobId(job.aiJobId) },
                       );
                     }
@@ -205,8 +219,20 @@ export function AppShell() {
                 <div className="ai-surface ai-chat-panel">
                   <header className="ai-panel-header">
                     <div className="ai-panel-header__mark">
-                      <svg aria-hidden="true" fill="none" height="21" viewBox="0 0 24 24" width="21" stroke="currentColor" strokeWidth="1.8">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="m12 3 1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" />
+                      <svg
+                        aria-hidden="true"
+                        fill="none"
+                        height="21"
+                        viewBox="0 0 24 24"
+                        width="21"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="m12 3 1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"
+                        />
                       </svg>
                     </div>
                     <div className="ai-panel-header__copy">
@@ -215,17 +241,43 @@ export function AppShell() {
                       <p>Hỏi đáp thông tin và tóm tắt tiến độ công việc.</p>
                     </div>
                   </header>
-                  <div className="ai-feedback ai-feedback--empty" role="status" style={{ marginTop: '1.5rem', borderLeft: '3px solid var(--ai-muted)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', height: '1.7rem', marginRight: '0.5rem' }}>
-                      <svg aria-hidden="true" fill="none" height="18" viewBox="0 0 24 24" width="18" stroke="currentColor" strokeWidth="1.8">
+                  <div
+                    className="ai-feedback ai-feedback--empty"
+                    role="status"
+                    style={{ marginTop: '1.5rem', borderLeft: '3px solid var(--ai-muted)' }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        height: '1.7rem',
+                        marginRight: '0.5rem',
+                      }}
+                    >
+                      <svg
+                        aria-hidden="true"
+                        fill="none"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        width="18"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                      >
                         <circle cx="12" cy="12" r="9" />
                         <path d="M12 7v5l3 2" />
                       </svg>
                     </div>
                     <div>
                       <strong>Chưa chọn không gian làm việc</strong>
-                      <p style={{ marginTop: '0.2rem', fontSize: '0.86rem', color: 'var(--ai-muted)' }}>
-                        Vui lòng truy cập chi tiết một **Nhóm** hoặc **Cuộc họp** từ menu bên trái để sử dụng trợ lý AI.
+                      <p
+                        style={{
+                          marginTop: '0.2rem',
+                          fontSize: '0.86rem',
+                          color: 'var(--ai-muted)',
+                        }}
+                      >
+                        Vui lòng truy cập chi tiết một Nhóm hoặc Cuộc họp từ menu bên trái để sử
+                        dụng trợ lý AI.
                       </p>
                     </div>
                   </div>

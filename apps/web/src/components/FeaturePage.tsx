@@ -6,6 +6,8 @@ export function FeaturePage({
   title,
   description,
   todo,
+  backTo,
+  backLabel = 'Quay lại',
   children,
 }: {
   title: string;
@@ -19,7 +21,11 @@ export function FeaturePage({
     <section className="feature-page">
       <div className="feature-page-heading">
         <PageHeader title={title} description={description} />
-        
+        {backTo && (
+          <Link className="page-back-link" to={backTo}>
+            {backLabel}
+          </Link>
+        )}
       </div>
       {children ?? <EmptyState />}
       {todo && <p className="todo">TODO: {todo}</p>}

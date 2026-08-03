@@ -1,6 +1,6 @@
 import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import { GetCommand } from '@aws-sdk/lib-dynamodb';
-import type { AIJob } from '@campusmeet/shared';
+import { aiJobDetailSchema } from '@campusmeet/shared';
 import { authenticate } from '../middleware/authentication';
 import { requireGroupMembership } from '../middleware/authorization';
 import { handleError } from '../middleware/error-handler';
@@ -27,8 +27,8 @@ export const aiJobDetailHandler: APIGatewayProxyHandlerV2 = async (event) => {
         Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
         ConsistentRead: true,
         ProjectionExpression:
-          'aiJobId, groupId, meetingId, #type, #status, attempt, requestId, provider, errorCode, createdAt, updatedAt',
-        ExpressionAttributeNames: { '#type': 'type', '#status': 'status' },
+          'aiJobId, groupId, meetingId, #type, #status, attempt, requestId, provider, errorCode, createdAt, updatedAt, #result',
+        ExpressionAttributeNames: { '#type': 'type', '#status': 'status', '#result': 'result' },
       }),
     );
 
@@ -40,19 +40,20 @@ export const aiJobDetailHandler: APIGatewayProxyHandlerV2 = async (event) => {
 
     await requireGroupMembership(userId, groupId);
 
-    const job: AIJob = {
+    const job = aiJobDetailSchema.parse({
       aiJobId: String(item.aiJobId),
       groupId,
       ...(typeof item.meetingId === 'string' ? { meetingId: item.meetingId } : {}),
-      type: item.type as AIJob['type'],
-      status: item.status as AIJob['status'],
+      type: item.type,
+      status: item.status,
       attempt: typeof item.attempt === 'number' ? item.attempt : 0,
       requestId: typeof item.requestId === 'string' ? item.requestId : requestId,
-      ...(item.provider ? { provider: item.provider as AIJob['provider'] } : {}),
+      ...(item.provider ? { provider: item.provider } : {}),
       ...(typeof item.errorCode === 'string' ? { errorCode: item.errorCode } : {}),
+      ...(item.result === undefined ? {} : { result: item.result }),
       createdAt: String(item.createdAt),
       updatedAt: String(item.updatedAt),
-    };
+    });
 
     return ok(job, requestId);
   } catch (error) {
