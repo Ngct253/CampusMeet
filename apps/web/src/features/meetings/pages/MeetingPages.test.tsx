@@ -24,7 +24,6 @@ vi.mock('../service', () => ({
   updateMeeting: services.updateMeeting,
   cancelMeeting: services.cancelMeeting,
 }));
-
 afterEach(cleanup);
 
 beforeEach(() => {
@@ -135,14 +134,12 @@ it('hiển thị server validation error khi create thất bại', async () => {
   fireEvent.click(screen.getByRole('button', { name: /tạo cuộc họp/i }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Tiêu đề không hợp lệ');
 });
-
 it('hiển thị trạng thái rỗng rõ ràng và ẩn biểu mẫu tạo với thành viên thường', async () => {
   renderPage();
   expect(await screen.findByText('Chưa có cuộc họp sắp tới')).toBeInTheDocument();
   expect(screen.getByText('Quản trị viên nhóm chưa tạo lịch mới.')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Tạo cuộc họp' })).not.toBeInTheDocument();
 });
-
 it('giải thích đúng khi máy chủ AWS chưa có API cuộc họp', async () => {
   services.getMeetings.mockRejectedValue(new Error('API CampusMeet trả lỗi 404.'));
   renderPage();
@@ -173,3 +170,4 @@ it('dùng giờ 24 tiếng không phụ thuộc CH hoặc SA', async () => {
   expect(screen.getByText('lan@example.edu')).toBeInTheDocument();
   expect(screen.queryByText(/\b(?:CH|SA)\b/)).not.toBeInTheDocument();
 });
+

@@ -175,6 +175,24 @@ export const groupProgressAnalysisSchema = z.object({
 });
 export type GroupProgressAnalysis = z.infer<typeof groupProgressAnalysisSchema>;
 
+export const aiJobResultSchema = z.union([
+  groundedAnswerSchema,
+  minutesDraftSchema,
+  z.array(taskProposalSchema),
+  groupProgressAnalysisSchema,
+  z.object({
+    pending: z.boolean(),
+    ingestionJobId: z.string().min(1),
+    status: z.string().min(1),
+  }),
+]);
+export type AIJobResult = z.infer<typeof aiJobResultSchema>;
+
+export const aiJobDetailSchema = aiJobSchema.extend({
+  result: aiJobResultSchema.optional(),
+});
+export type AIJobDetail = z.infer<typeof aiJobDetailSchema>;
+
 export const meetingChatRequestSchema = z.object({
   question: z.string().trim().min(1).max(4_000),
   conversationId: z.string().min(1).optional(),

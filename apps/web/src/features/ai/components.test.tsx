@@ -68,6 +68,14 @@ describe('AIChatPanel', () => {
     expect(screen.getByRole('button', { name: 'Tóm tắt phần đã lỡ' })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('Đang đối chiếu nguồn');
   });
+
+  it('uses group wording and hides the meeting-only late-join action in group context', () => {
+    render(<AIChatPanel context="group" onSubmit={vi.fn()} />);
+
+    expect(screen.getByRole('region', { name: 'Trợ lý nhóm' })).toBeInTheDocument();
+    expect(screen.getByText('Đối chiếu kiến thức nhóm')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Tóm tắt phần đã lỡ' })).not.toBeInTheDocument();
+  });
 });
 
 describe('grounded output', () => {

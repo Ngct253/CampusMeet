@@ -59,10 +59,16 @@ describe('AI service', () => {
   });
 
   it('polls a job without adding a mutation header', async () => {
+    const result = {
+      answer: 'Không có đủ nguồn để trả lời.',
+      citations: [],
+      scope: 'CURRENT_MEETING' as const,
+      insufficientContext: true,
+    };
     const fetcher = vi.fn(async () =>
       jsonResponse({
         success: true,
-        data: { ...job, status: 'COMPLETED' },
+        data: { ...job, status: 'COMPLETED', result },
         requestId: 'request-1',
       }),
     );
@@ -72,7 +78,7 @@ describe('AI service', () => {
       getAccessToken: async () => 'access-token',
     });
 
-    await service.getJob('job/one');
+    await expect(service.getJob('job/one')).resolves.toMatchObject({ result });
 
     expect(fetcher).toHaveBeenCalledWith(
       'https://api.example.test/ai/jobs/job%2Fone',
