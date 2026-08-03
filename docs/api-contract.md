@@ -34,6 +34,7 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | POST                  | `/meetings/:meetingId/cancel`                                  | `CancelMeetingRequest`, `Meeting`                                      | Đã triển khai; yêu cầu Group Admin              |
 | GET/POST              | `/minutes`                                                     | `CreateMinutesRequest`, `MeetingMinutes`                               | Handler skeleton, trả 501                      |
 | GET                   | `/tasks`                                                       | `Task[]`                                                               | Đã triển khai; trả toàn bộ task có `assigneeId` bằng user từ JWT |
+| POST                  | `/tasks`                                                       | `CreateTaskRequest`, `Task`                                             | Group Admin; bắt buộc `Idempotency-Key`         |
 | GET                   | `/dashboard`                                                   | `DashboardResponse`                                                    | Handler skeleton, trả 501                      |
 | GET                   | `/notifications`                                               | `Notification[]`                                                       | M1 đã triển khai                               |
 | POST                  | `/notifications/:notificationId/read`                          | `{read:true}`                                                          | M1 đã triển khai                               |
@@ -92,6 +93,8 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 ## Response format hiện có
 
 `GET /tasks` không nhận `userId` từ query, path hoặc body. Backend chỉ dùng `sub` từ JWT và tự đọc hết các trang DynamoDB qua GSI2. API chưa expose pagination trong MVP hiện tại; `limit`/`cursor` sẽ dùng cursor contract chung sau khi contract list endpoint được chốt.
+
+`POST /tasks` yêu cầu active Group Admin, lấy `createdBy` từ JWT, kiểm tra assignee là active member cùng group và kiểm tra `sourceMeetingId` thuộc group khi có. Retry cùng actor/key/payload trả task cũ; dùng cùng key với payload khác trả `409`.
 
 Health response:
 

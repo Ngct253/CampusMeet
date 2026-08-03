@@ -182,6 +182,8 @@ Access patterns:
 - Liệt kê task sinh từ meeting: query `GSI3`.
 - Update status dùng conditional expression để tránh ghi đè version cũ.
 
+Với task không có `dueAt`, item không lưu trường `dueAt`; riêng `GSI1SK` và `GSI2SK` dùng sentinel `9999-12-31T23:59:59.999Z` tại vị trí `<dueAt>`. Sentinel là data-key contract để task không hạn nằm sau task có hạn và không được trả ra API.
+
 ## 8. AI-work table
 
 ### 8.1 Item types

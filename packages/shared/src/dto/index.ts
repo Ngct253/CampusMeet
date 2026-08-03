@@ -7,7 +7,7 @@ import type {
   Group,
   Meeting,
 } from '../types';
-import type { Priority, TaskStatus } from '../enums';
+import { Priority, type TaskStatus } from '../enums';
 import { z } from 'zod';
 
 export const groupInputSchema = z.object({
@@ -57,6 +57,16 @@ export const meetingInputSchema = meetingFieldsSchema.superRefine((value, contex
 });
 export const updateMeetingInputSchema = meetingFieldsSchema.partial();
 export const cancelMeetingInputSchema = z.object({ reason: z.string().trim().max(500).optional() });
+export const taskInputSchema = z
+  .object({
+    groupId: z.string().trim().min(1),
+    title: z.string().trim().min(1).max(200),
+    assigneeId: z.string().trim().min(1),
+    priority: z.nativeEnum(Priority),
+    dueAt: z.string().datetime({ offset: true }).optional(),
+    sourceMeetingId: z.string().trim().min(1).optional(),
+  })
+  .strict();
 
 export interface CreateGroupRequest {
   name: string;
@@ -91,13 +101,7 @@ export interface CreateMinutesRequest {
   decisions: string[];
   actionItems: Array<{ content: string; assigneeId?: string }>;
 }
-export interface CreateTaskRequest {
-  groupId: string;
-  title: string;
-  assigneeId: string;
-  priority: Priority;
-  dueAt?: string;
-}
+export type CreateTaskRequest = z.infer<typeof taskInputSchema>;
 export interface UpdateTaskStatusRequest {
   status: TaskStatus;
 }

@@ -1,4 +1,4 @@
-import type { Group, Meeting, Notification, Task } from '@campusmeet/shared';
+import type { CreateTaskRequest, Group, Meeting, Notification, Task } from '@campusmeet/shared';
 
 export interface GroupRepository {
   getById(id: string): Promise<Group | null>;
@@ -8,6 +8,7 @@ export interface MeetingRepository {
 }
 export interface TaskRepository {
   listByAssignee(userId: string): Promise<Task[]>;
+  create(actorId: string, input: CreateTaskRequest, idempotencyKey: string): Promise<Task>;
 }
 export interface NotificationRepository {
   create(notification: Notification): Promise<void>;

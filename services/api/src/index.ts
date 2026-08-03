@@ -72,6 +72,7 @@ const findRoute = createRouter([
   { method: 'POST', path: '/invitations/:token/decline', handler: declineInvitationHandler },
   { method: 'ANY', path: '/minutes', handler: minutesHandler },
   { method: 'GET', path: '/tasks', handler: tasksHandler },
+  { method: 'POST', path: '/tasks', handler: tasksHandler },
   { method: 'ANY', path: '/dashboard', handler: dashboardHandler },
   { method: 'ANY', path: '/notifications', handler: notificationsHandler },
   { method: 'POST', path: '/notifications/:notificationId/read', handler: readNotificationHandler },

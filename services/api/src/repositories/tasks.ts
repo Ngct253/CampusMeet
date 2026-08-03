@@ -1,8 +1,19 @@
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { Priority, TaskStatus, type Task } from '@campusmeet/shared';
+import { GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  Priority,
+  TaskStatus,
+  type CreateTaskRequest,
+  type Task,
+} from '@campusmeet/shared';
 import type { TaskRepository } from '../domain/ports';
+import { ConflictError } from '../utils/errors';
 import { documentClient, stringValue, tableName, type DynamoItem } from './client';
+
+const NO_DUE_DATE_SORT_VALUE = '9999-12-31T23:59:59.999Z';
+type PersistedTask = Task &
+  Required<Pick<Task, 'createdBy' | 'createdAt' | 'updatedAt' | 'version'>>;
 
 const toTask = (item: DynamoItem): Task | undefined => {
   const id = stringValue(item, 'id') ?? stringValue(item, 'PK')?.replace(/^TASK#/, '');
@@ -11,7 +22,13 @@ const toTask = (item: DynamoItem): Task | undefined => {
   const assigneeId = stringValue(item, 'assigneeId');
   const status = stringValue(item, 'status') as TaskStatus | undefined;
   const priority = stringValue(item, 'priority') as Priority | undefined;
-  if (!id || !groupId || !title || !assigneeId || !status || !priority) return undefined;
+  const createdBy = stringValue(item, 'createdBy');
+  const createdAt = stringValue(item, 'createdAt');
+  const updatedAt = stringValue(item, 'updatedAt');
+  const version = typeof item.version === 'number' ? item.version : undefined;
+  if (!id || !groupId || !title || !assigneeId || !status || !priority) {
+    return undefined;
+  }
 
   return {
     id,
@@ -24,10 +41,116 @@ const toTask = (item: DynamoItem): Task | undefined => {
     ...(stringValue(item, 'sourceMeetingId')
       ? { sourceMeetingId: stringValue(item, 'sourceMeetingId') }
       : {}),
+    ...(createdBy ? { createdBy } : {}),
+    ...(createdAt ? { createdAt } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
+    ...(version !== undefined ? { version } : {}),
+  };
+};
+
+const taskIdFor = (actorId: string, idempotencyKey: string) =>
+  createHash('sha256')
+    .update(`CREATE_TASK:${actorId}:${idempotencyKey}`)
+    .digest('hex')
+    .slice(0, 32);
+
+const payloadHashFor = (input: CreateTaskRequest) =>
+  createHash('sha256')
+    .update(
+      JSON.stringify({
+        groupId: input.groupId,
+        title: input.title,
+        assigneeId: input.assigneeId,
+        priority: input.priority,
+        dueAt: input.dueAt ? new Date(input.dueAt).toISOString() : null,
+        sourceMeetingId: input.sourceMeetingId ?? null,
+      }),
+    )
+    .digest('hex');
+
+const taskItem = (task: PersistedTask, idempotencyPayloadHash: string) => {
+  const dueSortValue = task.dueAt ?? NO_DUE_DATE_SORT_VALUE;
+  return {
+    PK: `TASK#${task.id}`,
+    SK: 'META',
+    entityType: 'TASK',
+    ...task,
+    idempotencyPayloadHash,
+    GSI1PK: `GROUP#${task.groupId}`,
+    GSI1SK: `STATUS#${task.status}#DUE#${dueSortValue}#TASK#${task.id}`,
+    GSI2PK: `USER#${task.assigneeId}`,
+    GSI2SK: `DUE#${dueSortValue}#TASK#${task.id}`,
+    ...(task.sourceMeetingId
+      ? {
+          GSI3PK: `MEETING#${task.sourceMeetingId}`,
+          GSI3SK: `TASK#${task.createdAt}#${task.id}`,
+        }
+      : {}),
   };
 };
 
 export class DynamoDbTaskRepository implements TaskRepository {
+  private async getItem(id: string): Promise<DynamoItem | undefined> {
+    const result = await documentClient.send(
+      new GetCommand({
+        TableName: tableName('TASK_DATA_TABLE'),
+        Key: { PK: `TASK#${id}`, SK: 'META' },
+        ConsistentRead: true,
+      }),
+    );
+    return result.Item;
+  }
+
+  async create(
+    actorId: string,
+    input: CreateTaskRequest,
+    idempotencyKey: string,
+  ): Promise<Task> {
+    const id = taskIdFor(actorId, idempotencyKey);
+    const idempotencyPayloadHash = payloadHashFor(input);
+    const createdAt = new Date().toISOString();
+    const task: PersistedTask = {
+      id,
+      groupId: input.groupId,
+      title: input.title,
+      assigneeId: input.assigneeId,
+      status: TaskStatus.TODO,
+      priority: input.priority,
+      ...(input.dueAt ? { dueAt: input.dueAt } : {}),
+      ...(input.sourceMeetingId ? { sourceMeetingId: input.sourceMeetingId } : {}),
+      createdBy: actorId,
+      createdAt,
+      updatedAt: createdAt,
+      version: 1,
+    };
+
+    try {
+      await documentClient.send(
+        new PutCommand({
+          TableName: tableName('TASK_DATA_TABLE'),
+          Item: taskItem(task, idempotencyPayloadHash),
+          ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+        }),
+      );
+      return task;
+    } catch (error) {
+      if ((error as { name?: string }).name !== 'ConditionalCheckFailedException') throw error;
+      const existingItem = await this.getItem(id);
+      if (!existingItem) throw error;
+      const existingTask = toTask(existingItem);
+      const existingCreatedBy = stringValue(existingItem, 'createdBy');
+      const existingPayloadHash = stringValue(existingItem, 'idempotencyPayloadHash');
+      if (
+        existingTask &&
+        existingCreatedBy === actorId &&
+        existingPayloadHash === idempotencyPayloadHash
+      ) {
+        return existingTask;
+      }
+      throw new ConflictError('Idempotency-Key đã được dùng với dữ liệu task khác.');
+    }
+  }
+
   async listByAssignee(userId: string): Promise<Task[]> {
     const tasks: Task[] = [];
     let exclusiveStartKey: Record<string, unknown> | undefined;
