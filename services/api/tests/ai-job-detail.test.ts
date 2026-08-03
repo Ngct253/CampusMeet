@@ -104,6 +104,32 @@ describe('GET /ai/jobs/:aiJobId', () => {
     });
   });
 
+  it('returns a safe internal error when the stored result does not match the job type', async () => {
+    const { documentClient } = await import('../src/repositories/client');
+    vi.mocked(documentClient.send).mockResolvedValue({
+      Item: {
+        ...queuedJob,
+        status: 'COMPLETED',
+        type: 'PROGRESS_ANALYSIS',
+        result: {
+          answer: 'Kết quả sai loại.',
+          citations: [],
+          scope: 'WHOLE_GROUP',
+          insufficientContext: false,
+        },
+      },
+    } as never);
+
+    const response = await invoke(authenticatedGetEvent(queuedJob.aiJobId));
+
+    expect(response.statusCode).toBe(500);
+    expect(bodyOf(response)).toMatchObject({
+      success: false,
+      error: { message: 'Đã xảy ra lỗi nội bộ.' },
+    });
+    expect(response.body).not.toContain('result does not match');
+  });
+
   it('returns 404 when the job does not exist', async () => {
     const { documentClient } = await import('../src/repositories/client');
     vi.mocked(documentClient.send).mockResolvedValue({ Item: undefined } as never);

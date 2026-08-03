@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { groundedAnswerSchema, groupProgressAnalysisSchema } from '@campusmeet/shared';
 import { useAuth } from '../../../auth/AuthProvider';
 import { FeaturePage } from '../../../components/FeaturePage';
 import {
   AIJobState,
+  GroundedAnswerView,
   GroupSearchPanel,
   ProgressAnalysisPanel,
   createAIIdempotencyKey,
@@ -218,23 +220,62 @@ export function GroupDetailPage() {
   const progressMutation = useProgressAnalysisMutation();
   const searchJobQuery = useAIJob(searchJobId);
   const progressJobQuery = useAIJob(progressJobId);
+  const resetSearchMutation = searchMutation.reset;
+  const resetProgressMutation = progressMutation.reset;
+
+  useEffect(() => {
+    setSearchJobId(undefined);
+    setProgressJobId(undefined);
+    resetSearchMutation();
+    resetProgressMutation();
+  }, [groupId, resetProgressMutation, resetSearchMutation]);
+
+  const searchResult = groundedAnswerSchema.safeParse(searchJobQuery.data?.result);
+  const progressResult = groupProgressAnalysisSchema.safeParse(progressJobQuery.data?.result);
+  const searchAnswer =
+    searchJobQuery.data?.type === 'GENERATE_ANSWER' && searchResult.success
+      ? searchResult.data
+      : undefined;
+  const progressAnalysis =
+    progressJobQuery.data?.type === 'PROGRESS_ANALYSIS' && progressResult.success
+      ? progressResult.data
+      : undefined;
+  const searchResultInvalid =
+    searchJobQuery.data?.status === 'COMPLETED' && searchAnswer === undefined;
+  const progressResultInvalid =
+    progressJobQuery.data?.status === 'COMPLETED' && progressAnalysis === undefined;
+  const searchError = searchMutation.isError
+    ? searchMutation.error
+    : searchJobQuery.isError
+      ? searchJobQuery.error
+      : searchResultInvalid
+        ? new Error('Kết quả tìm kiếm AI không hợp lệ.')
+        : null;
+  const progressError = progressMutation.isError
+    ? progressMutation.error
+    : progressJobQuery.isError
+      ? progressJobQuery.error
+      : progressResultInvalid
+        ? new Error('Kết quả phân tích tiến độ không hợp lệ.')
+        : null;
+  const searchIsWorking =
+    searchMutation.isPending ||
+    searchJobQuery.data?.status === 'QUEUED' ||
+    searchJobQuery.data?.status === 'PROCESSING';
+  const progressIsWorking =
+    progressMutation.isPending ||
+    progressJobQuery.data?.status === 'QUEUED' ||
+    progressJobQuery.data?.status === 'PROCESSING';
 
   if (query.isPending)
     return (
-      <FeaturePage
-        title="Chi tiết nhóm"
-        description="Đang tải thông tin nhóm…"
-      >
+      <FeaturePage title="Chi tiết nhóm" description="Đang tải thông tin nhóm…">
         <div className="state">Đang tải…</div>
       </FeaturePage>
     );
   if (query.isError)
     return (
-      <FeaturePage
-        title="Chi tiết nhóm"
-        description="Không thể mở nhóm."
-        backTo="/app/groups"
-      >
+      <FeaturePage title="Chi tiết nhóm" description="Không thể mở nhóm." backTo="/app/groups">
         <div className="state state-error" role="alert">
           <strong>{query.error.message}</strong>
           <button type="button" onClick={() => void query.refetch()}>
@@ -318,49 +359,65 @@ export function GroupDetailPage() {
               meetingId: m.id,
               title: m.title,
             }))}
-            isPending={searchMutation.isPending}
+            isPending={searchIsWorking}
             onSearch={({ question, scope, meetingIds }) => {
               const key = createAIIdempotencyKey();
               const groupScope = scope === 'CURRENT_MEETING' ? 'SELECTED_MEETINGS' : scope;
+              searchMutation.reset();
+              setSearchJobId(undefined);
               searchMutation.mutate(
-                { groupId, request: { question, scope: groupScope, meetingIds }, idempotencyKey: key },
+                {
+                  groupId,
+                  request: { question, scope: groupScope, meetingIds },
+                  idempotencyKey: key,
+                },
                 { onSuccess: (job) => setSearchJobId(job.aiJobId) },
               );
             }}
           />
-          {searchJobId && (
+          {(searchJobId || searchError) && (
             <AIJobState
               job={searchJobQuery.data}
               isLoading={searchJobQuery.isLoading}
-              error={searchJobQuery.isError ? searchJobQuery.error : null}
-              onRetry={() => setSearchJobId(undefined)}
-            />
+              error={searchError}
+              onRetry={() => {
+                searchMutation.reset();
+                setSearchJobId(undefined);
+              }}
+            >
+              {searchAnswer && <GroundedAnswerView answer={searchAnswer} />}
+            </AIJobState>
           )}
         </section>
 
         {isAdmin && (
           <section className="group-ai-progress">
-            <ProgressAnalysisPanel analysis={undefined} isGroupAdmin={isAdmin} />
+            <ProgressAnalysisPanel analysis={progressAnalysis} isGroupAdmin={isAdmin} />
             <button
               className="button"
-              disabled={progressMutation.isPending}
+              disabled={progressIsWorking}
               type="button"
               onClick={() => {
                 const key = createAIIdempotencyKey();
+                progressMutation.reset();
+                setProgressJobId(undefined);
                 progressMutation.mutate(
                   { groupId, request: {}, idempotencyKey: key },
                   { onSuccess: (job) => setProgressJobId(job.aiJobId) },
                 );
               }}
             >
-              {progressMutation.isPending ? 'Đang phân tích…' : 'Chạy phân tích tiến độ'}
+              {progressIsWorking ? 'Đang phân tích…' : 'Chạy phân tích tiến độ'}
             </button>
-            {progressJobId && (
+            {(progressJobId || progressError) && (
               <AIJobState
                 job={progressJobQuery.data}
                 isLoading={progressJobQuery.isLoading}
-                error={progressJobQuery.isError ? progressJobQuery.error : null}
-                onRetry={() => setProgressJobId(undefined)}
+                error={progressError}
+                onRetry={() => {
+                  progressMutation.reset();
+                  setProgressJobId(undefined);
+                }}
               />
             )}
           </section>
