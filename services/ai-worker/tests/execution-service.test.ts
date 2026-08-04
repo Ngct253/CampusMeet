@@ -100,6 +100,7 @@ const setup = (payload: AIRequestPayload, chunks: SourceChunk[] = []) => {
   const objects: SourceObjectStore = {
     read: vi.fn().mockRejectedValue(new Error('NOT_USED')),
     writeNormalized: vi.fn().mockRejectedValue(new Error('NOT_USED')),
+    deleteNormalized: vi.fn().mockRejectedValue(new Error('NOT_USED')),
   };
   const knowledgeSources: KnowledgeSourceRepository = {
     saveVersion: vi.fn().mockRejectedValue(new Error('NOT_USED')),

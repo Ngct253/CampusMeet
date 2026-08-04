@@ -105,11 +105,12 @@ export interface SourceObjectStore {
     text: string;
     metadata: Record<string, string | number | boolean>;
   }): Promise<void>;
+  deleteNormalized(key: string): Promise<void>;
 }
 
 export interface KnowledgeSourceRepository {
   saveVersion(source: KnowledgeSource): Promise<KnowledgeSource>;
-  markOlderVersionsStale(sourceId: string, currentVersion: number): Promise<void>;
+  markOlderVersionsStale(sourceId: string, currentVersion: number): Promise<string[]>;
   markIngestionStatus(
     sourceId: string,
     version: number,

@@ -39,7 +39,7 @@ const setup = (status: 'COMPLETE' | 'FAILED' | 'IN_PROGRESS') => {
     },
     knowledgeSources: {
       saveVersion: vi.fn(),
-      markOlderVersionsStale: vi.fn(),
+      markOlderVersionsStale: vi.fn().mockResolvedValue([]),
       markIngestionStatus: vi.fn(),
     },
     ingestion: { start: vi.fn(), status: vi.fn().mockResolvedValue(status) },
@@ -54,13 +54,39 @@ const setup = (status: 'COMPLETE' | 'FAILED' | 'IN_PROGRESS') => {
     conversations: { saveExchange: vi.fn() },
     proposals: { save: vi.fn() },
     progressSnapshots: { get: vi.fn() },
-    objects: { read: vi.fn(), writeNormalized: vi.fn() },
+    objects: { read: vi.fn(), writeNormalized: vi.fn(), deleteNormalized: vi.fn() },
     normalizer: { normalize: vi.fn() },
   } satisfies ExecutionDependencies;
   return { dependencies, service: new AIExecutionService(dependencies) };
 };
 
 describe('knowledge base ingestion lifecycle', () => {
+  it('removes stale normalized versions before starting the next ingestion', async () => {
+    const { dependencies, service } = setup('IN_PROGRESS');
+    dependencies.jobs.get.mockResolvedValue({
+      job: { ...job, status: 'QUEUED' },
+      payload: { ...payload, sourceVersion: 2 },
+    });
+    dependencies.objects.read.mockResolvedValue(new TextEncoder().encode('source'));
+    dependencies.normalizer.normalize.mockResolvedValue('normalized source');
+    dependencies.knowledgeSources.markOlderVersionsStale.mockResolvedValue([
+      'kb/group-1/meeting-1/source-1/v1/content.txt',
+    ]);
+    dependencies.ingestion.start.mockResolvedValue('ingestion-2');
+
+    await expect(service.execute('job-1')).resolves.toMatchObject({
+      pending: true,
+      ingestionJobId: 'ingestion-2',
+    });
+
+    expect(dependencies.objects.deleteNormalized).toHaveBeenCalledWith(
+      'kb/group-1/meeting-1/source-1/v1/content.txt',
+    );
+    expect(dependencies.objects.deleteNormalized.mock.invocationCallOrder[0]).toBeLessThan(
+      dependencies.ingestion.start.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it('marks the source READY only after Bedrock completes ingestion', async () => {
     const { dependencies, service } = setup('COMPLETE');
 
