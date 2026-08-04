@@ -101,8 +101,8 @@ for (const invalidAction of ['dynamodb:TransactGetItems', 'dynamodb:TransactWrit
 
 for (const parameter of [
   'UserContentBucketName',
-  'BedrockKnowledgeBaseId',
-  'BedrockDataSourceId',
+  'BedrockEmbeddingModelId',
+  'BedrockEmbeddingDimensions',
   'BedrockGenerationModelArn',
 ]) {
   assert.equal(
@@ -118,10 +118,34 @@ for (const marker of [
   'Handler: services/ai-worker/src/index.handler',
   'EntryPoints: [services/ai-worker/src/index.ts]',
   'USER_CONTENT_BUCKET: !Ref UserContentBucketName',
-  'BEDROCK_KNOWLEDGE_BASE_ID: !Ref BedrockKnowledgeBaseId',
-  'BEDROCK_DATA_SOURCE_ID: !Ref BedrockDataSourceId',
+  'BEDROCK_KNOWLEDGE_BASE_ID: !Ref CampusMeetKnowledgeBase',
+  'BEDROCK_DATA_SOURCE_ID: !GetAtt CampusMeetKnowledgeDataSource.DataSourceId',
   'BEDROCK_GENERATION_MODEL_ID: !Ref BedrockGenerationModelArn',
   'RequireResolvedAIInfrastructure:',
+  'KnowledgeVectorBucket:',
+  'Type: AWS::S3Vectors::VectorBucket',
+  'KnowledgeVectorIndex:',
+  'Type: AWS::S3Vectors::Index',
+  'Dimension: !Ref BedrockEmbeddingDimensions',
+  'DistanceMetric: cosine',
+  'KnowledgeBaseRole:',
+  'Principal: { Service: bedrock.amazonaws.com }',
+  'CampusMeetKnowledgeBase:',
+  'Type: AWS::Bedrock::KnowledgeBase',
+  'EmbeddingDataType: FLOAT32',
+  'Type: S3_VECTORS',
+  'CampusMeetKnowledgeDataSource:',
+  'Type: AWS::Bedrock::DataSource',
+  'DataDeletionPolicy: DELETE',
+  'InclusionPrefixes: [kb/]',
+  'MaxTokens: 300',
+  'OverlapPercentage: 20',
+  's3vectors:PutVectors',
+  's3vectors:GetVectors',
+  's3vectors:DeleteVectors',
+  's3vectors:QueryVectors',
+  's3vectors:GetIndex',
+  's3:DeleteObject',
   'bedrock:Retrieve',
   'bedrock:StartIngestionJob',
   'bedrock:GetIngestionJob',
@@ -130,8 +154,20 @@ for (const marker of [
   'AIWorkerErrorAlarm:',
   'AIWorkerDurationAlarm:',
   'AIWorkerFunctionArn:',
+  'KnowledgeBaseId:',
+  'KnowledgeDataSourceId:',
+  'KnowledgeVectorBucketArn:',
+  'KnowledgeVectorIndexArn:',
 ]) {
   assert.equal(appTemplate.includes(marker), true, `Application template is missing ${marker}.`);
+}
+
+for (const removedExternalParameter of ['BedrockKnowledgeBaseId:', 'BedrockDataSourceId:']) {
+  assert.equal(
+    appTemplate.includes(`  ${removedExternalParameter}`),
+    false,
+    `${removedExternalParameter} must be created by M5-6B instead of supplied externally.`,
+  );
 }
 
 assert.equal(
@@ -161,4 +197,6 @@ assert.equal(
   'API role must be able to read verified Cognito attributes.',
 );
 
-console.log('Infrastructure contract validation passed: data foundation and M5 AI Worker.');
+console.log(
+  'Infrastructure contract validation passed: data foundation, M5 AI Worker, Knowledge Base, and S3 Vectors.',
+);

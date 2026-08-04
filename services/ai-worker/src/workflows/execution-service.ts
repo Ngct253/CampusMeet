@@ -381,9 +381,12 @@ export class AIExecutionService {
       updatedAt: now,
     };
     await this.dependencies.knowledgeSources.saveVersion(source);
-    await this.dependencies.knowledgeSources.markOlderVersionsStale(
+    const staleObjectKeys = await this.dependencies.knowledgeSources.markOlderVersionsStale(
       payload.sourceId,
       payload.sourceVersion,
+    );
+    await Promise.all(
+      staleObjectKeys.map((key) => this.dependencies.objects.deleteNormalized(key)),
     );
     const ingestionJobId = await this.dependencies.ingestion.start(aiJobId);
     return { pending: true, ingestionJobId, source };

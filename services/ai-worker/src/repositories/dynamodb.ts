@@ -150,7 +150,7 @@ export class DynamoKnowledgeSourceRepository implements KnowledgeSourceRepositor
     }
   }
 
-  async markOlderVersionsStale(sourceId: string, currentVersion: number): Promise<void> {
+  async markOlderVersionsStale(sourceId: string, currentVersion: number): Promise<string[]> {
     const response = await this.database.send(
       new QueryCommand({
         TableName: this.tableName,
@@ -159,23 +159,32 @@ export class DynamoKnowledgeSourceRepository implements KnowledgeSourceRepositor
           ':pk': `SOURCE#${sourceId}`,
           ':current': versionKey(currentVersion),
         },
-        ProjectionExpression: 'PK, SK',
+        ProjectionExpression: 'PK, SK, normalizedObjectKey',
       }),
     );
+    const staleItems = response.Items ?? [];
+    const expiresAtEpoch = expiresIn30Days();
     await Promise.all(
-      (response.Items ?? []).map((item) =>
+      staleItems.map((item) =>
         this.database.send(
           new UpdateCommand({
             TableName: this.tableName,
             Key: { PK: item.PK, SK: item.SK },
-            UpdateExpression: 'SET ingestionStatus = :stale, updatedAt = :now',
+            UpdateExpression:
+              'SET ingestionStatus = :stale, updatedAt = :now, expiresAtEpoch = :expires',
             ExpressionAttributeValues: {
               ':stale': 'STALE',
               ':now': new Date().toISOString(),
+              ':expires': expiresAtEpoch,
             },
           }),
         ),
       ),
+    );
+    return staleItems.flatMap((item) =>
+      typeof item.normalizedObjectKey === 'string' && item.normalizedObjectKey.startsWith('kb/')
+        ? [item.normalizedObjectKey]
+        : [],
     );
   }
 

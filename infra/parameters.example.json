@@ -4,7 +4,7 @@
   "DomainName": "campusmeet.example.com",
   "GoogleSecretReference": "/campusmeet/dev/google-oauth",
   "UserContentBucketName": "replace-with-m4-user-content-bucket",
-  "BedrockKnowledgeBaseId": "REPLACEWITHKBID",
-  "BedrockDataSourceId": "REPLACEWITHDATASOURCEID",
+  "BedrockEmbeddingModelId": "cohere.embed-multilingual-v3",
+  "BedrockEmbeddingDimensions": 1024,
   "BedrockGenerationModelArn": "arn:aws:bedrock:ap-southeast-1::foundation-model/replace-with-approved-model-id"
 }

@@ -25,16 +25,16 @@ Parameters:
     Type: String
     AllowedPattern: '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
     Description: Name of the M4-owned private user-content bucket; this stack does not create it.
-  BedrockKnowledgeBaseId:
+  BedrockEmbeddingModelId:
     Type: String
-    MinLength: 1
-    AllowedPattern: '^[A-Za-z0-9]+$'
-    Description: Existing Bedrock Knowledge Base id supplied by the M5-6B infrastructure.
-  BedrockDataSourceId:
-    Type: String
-    MinLength: 1
-    AllowedPattern: '^[A-Za-z0-9]+$'
-    Description: Existing Bedrock Knowledge Base data source id supplied by M5-6B.
+    Default: cohere.embed-multilingual-v3
+    AllowedValues: [cohere.embed-multilingual-v3]
+    Description: Multilingual embedding model configured for the M5 knowledge base.
+  BedrockEmbeddingDimensions:
+    Type: Number
+    Default: 1024
+    AllowedValues: [1024]
+    Description: Vector dimension required by Cohere Embed Multilingual v3.
   BedrockGenerationModelArn:
     Type: String
     AllowedPattern: '^arn:[^:]+:bedrock:[^:]+:[^:]*:(foundation-model|inference-profile|application-inference-profile)/.+$'
@@ -45,10 +45,6 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref UserContentBucketName, replace-with-m4-user-content-bucket]]
         AssertDescription: UserContentBucketName must be the real M4 stack output.
-      - Assert: !Not [!Equals [!Ref BedrockKnowledgeBaseId, REPLACEWITHKBID]]
-        AssertDescription: BedrockKnowledgeBaseId must reference the real M5-6B resource.
-      - Assert: !Not [!Equals [!Ref BedrockDataSourceId, REPLACEWITHDATASOURCEID]]
-        AssertDescription: BedrockDataSourceId must reference the real M5-6B resource.
       - Assert:
           !Not [
             !Equals [
@@ -252,6 +248,138 @@ Resources:
             Auth: { Authorizer: CognitoAuthorizer }
       Tags: *SamTags
 
+  KnowledgeVectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+        - { Key: Component, Value: AI }
+        - { Key: Module, Value: M5 }
+
+  KnowledgeVectorIndex:
+    Type: AWS::S3Vectors::Index
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      VectorBucketArn: !GetAtt KnowledgeVectorBucket.VectorBucketArn
+      DataType: float32
+      Dimension: !Ref BedrockEmbeddingDimensions
+      DistanceMetric: cosine
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+        - { Key: Component, Value: AI }
+        - { Key: Module, Value: M5 }
+
+  KnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-knowledge-base'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: bedrock.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*'
+      Policies:
+        - PolicyName: CampusMeetKnowledgeBaseEmbedding
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: InvokeConfiguredEmbeddingModel
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockEmbeddingModelId}'
+        - PolicyName: CampusMeetKnowledgeBaseSource
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ListNormalizedKnowledgeSources
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}'
+                Condition:
+                  StringLike:
+                    s3:prefix: [kb, 'kb/*']
+              - Sid: ReadNormalizedKnowledgeSources
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/kb/*'
+        - PolicyName: CampusMeetKnowledgeBaseVectorIndex
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadWriteConfiguredVectorIndex
+                Effect: Allow
+                Action:
+                  - s3vectors:PutVectors
+                  - s3vectors:GetVectors
+                  - s3vectors:DeleteVectors
+                  - s3vectors:QueryVectors
+                  - s3vectors:GetIndex
+                Resource: !GetAtt KnowledgeVectorIndex.IndexArn
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+        - { Key: Component, Value: AI }
+        - { Key: Module, Value: M5 }
+
+  CampusMeetKnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub 'campusmeet-${Environment}-knowledge'
+      Description: Group-scoped CampusMeet sources with filterable authorization metadata.
+      RoleArn: !GetAtt KnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockEmbeddingModelId}'
+          EmbeddingModelConfiguration:
+            BedrockEmbeddingModelConfiguration:
+              Dimensions: !Ref BedrockEmbeddingDimensions
+              EmbeddingDataType: FLOAT32
+      StorageConfiguration:
+        Type: S3_VECTORS
+        S3VectorsConfiguration:
+          IndexArn: !GetAtt KnowledgeVectorIndex.IndexArn
+      Tags:
+        Project: CampusMeet
+        Environment: !Ref Environment
+        ManagedBy: IaC
+        Component: AI
+        Module: M5
+
+  CampusMeetKnowledgeDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      Name: !Sub 'campusmeet-${Environment}-sources'
+      Description: Approved normalized CampusMeet sources under the M5 knowledge prefix.
+      KnowledgeBaseId: !Ref CampusMeetKnowledgeBase
+      DataDeletionPolicy: DELETE
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}'
+          BucketOwnerAccountId: !Ref AWS::AccountId
+          InclusionPrefixes: [kb/]
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 300
+            OverlapPercentage: 20
+
   AIWorkerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -297,7 +425,9 @@ Resources:
                 Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/*'
               - Sid: WriteNormalizedKnowledgeSources
                 Effect: Allow
-                Action: s3:PutObject
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
                 Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/kb/*'
         - PolicyName: CampusMeetAIWorkerBedrockAccess
           PolicyDocument:
@@ -306,13 +436,13 @@ Resources:
               - Sid: RetrieveFromConfiguredKnowledgeBase
                 Effect: Allow
                 Action: bedrock:Retrieve
-                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseId}'
+                Resource: !GetAtt CampusMeetKnowledgeBase.KnowledgeBaseArn
               - Sid: ManageConfiguredDataSourceIngestion
                 Effect: Allow
                 Action:
                   - bedrock:StartIngestionJob
                   - bedrock:GetIngestionJob
-                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${BedrockKnowledgeBaseId}'
+                Resource: !GetAtt CampusMeetKnowledgeBase.KnowledgeBaseArn
               - Sid: InvokeConfiguredGenerationModel
                 Effect: Allow
                 Action: bedrock:InvokeModel
@@ -345,8 +475,8 @@ Resources:
           MEETING_DATA_TABLE: !Sub '${DataTablePrefix}-meeting-data'
           TASK_DATA_TABLE: !Sub '${DataTablePrefix}-task-data'
           USER_CONTENT_BUCKET: !Ref UserContentBucketName
-          BEDROCK_KNOWLEDGE_BASE_ID: !Ref BedrockKnowledgeBaseId
-          BEDROCK_DATA_SOURCE_ID: !Ref BedrockDataSourceId
+          BEDROCK_KNOWLEDGE_BASE_ID: !Ref CampusMeetKnowledgeBase
+          BEDROCK_DATA_SOURCE_ID: !GetAtt CampusMeetKnowledgeDataSource.DataSourceId
           BEDROCK_GENERATION_MODEL_ID: !Ref BedrockGenerationModelArn
           NODE_OPTIONS: --enable-source-maps
       Tags:
@@ -598,6 +728,11 @@ Outputs:
   AIWorkerDurationAlarmName: { Value: !Ref AIWorkerDurationAlarm }
   AlarmTopicArn: { Value: !Ref AlarmTopic }
   ConfiguredUserContentBucketName: { Value: !Ref UserContentBucketName }
-  ConfiguredBedrockKnowledgeBaseId: { Value: !Ref BedrockKnowledgeBaseId }
-  ConfiguredBedrockDataSourceId: { Value: !Ref BedrockDataSourceId }
+  KnowledgeBaseId: { Value: !Ref CampusMeetKnowledgeBase }
+  KnowledgeBaseArn: { Value: !GetAtt CampusMeetKnowledgeBase.KnowledgeBaseArn }
+  KnowledgeDataSourceId: { Value: !GetAtt CampusMeetKnowledgeDataSource.DataSourceId }
+  KnowledgeVectorBucketArn: { Value: !GetAtt KnowledgeVectorBucket.VectorBucketArn }
+  KnowledgeVectorIndexArn: { Value: !GetAtt KnowledgeVectorIndex.IndexArn }
+  KnowledgeBaseRoleArn: { Value: !GetAtt KnowledgeBaseRole.Arn }
+  ConfiguredEmbeddingModelId: { Value: !Ref BedrockEmbeddingModelId }
   ConfiguredDomainPlaceholder: { Value: !Ref DomainName }
