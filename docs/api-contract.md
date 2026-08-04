@@ -35,6 +35,7 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | GET/POST              | `/minutes`                                                     | `CreateMinutesRequest`, `MeetingMinutes`                               | Handler skeleton, trả 501                      |
 | GET                   | `/tasks`                                                       | `Task[]`                                                               | Đã triển khai; trả toàn bộ task có `assigneeId` bằng user từ JWT |
 | POST                  | `/tasks`                                                       | `CreateTaskRequest`, `Task`                                             | Group Admin; bắt buộc `Idempotency-Key`         |
+| PATCH                 | `/tasks/:taskId/status`                                        | `UpdateTaskStatusRequest`, `Task`                                       | Assignee hoặc active Group Admin; optimistic version |
 | GET                   | `/dashboard`                                                   | `DashboardResponse`                                                    | Handler skeleton, trả 501                      |
 | GET                   | `/notifications`                                               | `Notification[]`                                                       | M1 đã triển khai                               |
 | POST                  | `/notifications/:notificationId/read`                          | `{read:true}`                                                          | M1 đã triển khai                               |
@@ -95,6 +96,8 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 `GET /tasks` không nhận `userId` từ query, path hoặc body. Backend chỉ dùng `sub` từ JWT và tự đọc hết các trang DynamoDB qua GSI2. API chưa expose pagination trong MVP hiện tại; `limit`/`cursor` sẽ dùng cursor contract chung sau khi contract list endpoint được chốt.
 
 `POST /tasks` yêu cầu active Group Admin, lấy `createdBy` từ JWT, kiểm tra assignee là active member cùng group và kiểm tra `sourceMeetingId` thuộc group khi có. Retry cùng actor/key/payload trả task cũ; dùng cùng key với payload khác trả `409`.
+
+`PATCH /tasks/:taskId/status` nhận `{ status, expectedVersion }` và chỉ cho assignee hoặc active Group Admin của task cập nhật. API dùng `TODO|DOING|DONE`, cho phép `TODO→DOING|DONE`, `DOING→TODO|DONE`, `DONE→DOING`; `DONE→TODO` trả `422`. Same-status trả task hiện tại nhưng vẫn kiểm tra version, không tăng version và không ghi history. Task legacy thiếu `version` được xem là version `0`. Version cũ trả `409`; PATCH này không yêu cầu `Idempotency-Key`.
 
 Health response:
 

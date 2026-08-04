@@ -2,8 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   GroupRole,
   Priority,
+  TaskStatus,
   type CreateTaskRequest,
   type GroupDetails,
+  type Task,
 } from '@campusmeet/shared';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { FeaturePage } from '../../../components/FeaturePage';
@@ -11,7 +13,7 @@ import { StatusBadge } from '../../../components/ui';
 import { getGroup, getGroups } from '../../groups/service';
 import { getMeetings } from '../../meetings/service';
 import { ApiClientError } from '../../../lib/api-client';
-import { createTask, getTasks } from '../service';
+import { createTask, getTasks, updateTaskStatus } from '../service';
 import './TasksPage.css';
 
 type CreateAttempt = { key: string; normalizedInput: CreateTaskRequest };
@@ -23,6 +25,18 @@ const memberLabel = (group: GroupDetails | undefined, userId: string) => {
 
 const sameInput = (left: CreateTaskRequest, right: CreateTaskRequest) =>
   JSON.stringify(left) === JSON.stringify(right);
+
+const statusActions: Record<TaskStatus, Array<{ label: string; status: TaskStatus }>> = {
+  [TaskStatus.TODO]: [
+    { label: 'Bắt đầu', status: TaskStatus.DOING },
+    { label: 'Hoàn thành', status: TaskStatus.DONE },
+  ],
+  [TaskStatus.DOING]: [
+    { label: 'Hoàn thành', status: TaskStatus.DONE },
+    { label: 'Đưa về TODO', status: TaskStatus.TODO },
+  ],
+  [TaskStatus.DONE]: [{ label: 'Mở lại', status: TaskStatus.DOING }],
+};
 
 export const TasksPage = () => {
   const queryClient = useQueryClient();
@@ -40,9 +54,11 @@ export const TasksPage = () => {
   const [sourceMeetingId, setSourceMeetingId] = useState('');
   const [formError, setFormError] = useState('');
   const [meetingError, setMeetingError] = useState('');
+  const [statusError, setStatusError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const attemptRef = useRef<CreateAttempt | undefined>(undefined);
   const submittingRef = useRef(false);
+  const statusSubmittingRef = useRef(false);
 
   useEffect(() => {
     if (!groupsQuery.isSuccess) return;
@@ -62,7 +78,7 @@ export const TasksPage = () => {
     enabled: Boolean(groupId),
   });
 
-  const mutation = useMutation({
+  const createMutation = useMutation({
     mutationFn: ({ input, key }: { input: CreateTaskRequest; key: string }) =>
       createTask(input, key),
     onSuccess: async (task) => {
@@ -114,6 +130,37 @@ export const TasksPage = () => {
     },
   });
 
+  const statusMutation = useMutation({
+    mutationFn: ({ task, status }: { task: Task; status: TaskStatus }) =>
+      updateTaskStatus(task.id, { status, expectedVersion: task.version ?? 0 }),
+    onMutate: () => setStatusError(''),
+    onSuccess: async () => {
+      setStatusError('');
+      await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiClientError && error.status === 409) {
+        setStatusError('Công việc đã được cập nhật ở nơi khác. Danh sách đang được làm mới.');
+        await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      } else if (error instanceof ApiClientError && error.status === 403) {
+        setStatusError('Bạn không có quyền cập nhật công việc này.');
+      } else if (error instanceof ApiClientError && error.status === 422) {
+        setStatusError('Không thể chuyển sang trạng thái công việc đã chọn.');
+      } else {
+        setStatusError(error.message);
+      }
+    },
+    onSettled: () => {
+      statusSubmittingRef.current = false;
+    },
+  });
+
+  const changeTaskStatus = (task: Task, status: TaskStatus) => {
+    if (statusSubmittingRef.current || statusMutation.isPending) return;
+    statusSubmittingRef.current = true;
+    statusMutation.mutate({ task, status });
+  };
+
   const changeGroup = (nextGroupId: string) => {
     setGroupId(nextGroupId);
     setAssigneeId('');
@@ -126,7 +173,7 @@ export const TasksPage = () => {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (submittingRef.current || mutation.isPending) return;
+    if (submittingRef.current || createMutation.isPending) return;
     setMeetingError('');
     const normalizedTitle = title.trim();
     const normalizedGroupId = groupId.trim();
@@ -152,7 +199,7 @@ export const TasksPage = () => {
     submittingRef.current = true;
     setFormError('');
     setSuccessMessage('');
-    mutation.mutate({ input: normalizedInput, key: attempt.key });
+    createMutation.mutate({ input: normalizedInput, key: attempt.key });
   };
 
   return (
@@ -266,8 +313,11 @@ export const TasksPage = () => {
                   {successMessage}
                 </p>
               )}
-              <button type="submit" disabled={mutation.isPending || groupQuery.isPending || groupQuery.isError}>
-                {mutation.isPending ? 'Đang tạo…' : 'Tạo công việc'}
+              <button
+                type="submit"
+                disabled={createMutation.isPending || groupQuery.isPending || groupQuery.isError}
+              >
+                {createMutation.isPending ? 'Đang tạo…' : 'Tạo công việc'}
               </button>
             </form>
           )}
@@ -276,6 +326,11 @@ export const TasksPage = () => {
         <section className="app-panel assigned-task-panel">
           <span className="section-kicker">Cá nhân</span>
           <h2>Công việc được giao cho tôi</h2>
+          {statusError && (
+            <p className="error" role="alert">
+              {statusError}
+            </p>
+          )}
           {tasksQuery.isPending ? (
             <p role="status">Đang tải công việc…</p>
           ) : tasksQuery.isError ? (
@@ -293,12 +348,28 @@ export const TasksPage = () => {
             </div>
           ) : (
             <div className="list">
-              {tasksQuery.data.map((task) => (
-                <article key={task.id}>
-                  <strong>{task.title}</strong> <StatusBadge>{task.status}</StatusBadge>
-                  <p>Ưu tiên: {task.priority}</p>
-                </article>
-              ))}
+              {tasksQuery.data.map((task) => {
+                const updatingThisTask =
+                  statusMutation.isPending && statusMutation.variables?.task.id === task.id;
+                return (
+                  <article key={task.id}>
+                    <strong>{task.title}</strong> <StatusBadge>{task.status}</StatusBadge>
+                    <p>Ưu tiên: {task.priority}</p>
+                    <div className="task-status-actions">
+                      {statusActions[task.status].map((action) => (
+                        <button
+                          key={action.status}
+                          type="button"
+                          disabled={statusMutation.isPending}
+                          onClick={() => changeTaskStatus(task, action.status)}
+                        >
+                          {updatingThisTask ? 'Đang cập nhật…' : action.label}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>

@@ -111,6 +111,7 @@ export interface Task {
   createdBy?: string;
   createdAt?: ISODateTime;
   updatedAt?: ISODateTime;
+  completedAt?: ISODateTime;
   version?: number;
 }
 export interface Notification {

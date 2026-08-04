@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const request = vi.hoisted(() => vi.fn());
 vi.mock('../../lib/api-client', () => ({ apiClient: { request } }));
 
-import { Priority, type CreateTaskRequest } from '@campusmeet/shared';
-import { createTask, getTasks } from './service';
+import { Priority, TaskStatus, type CreateTaskRequest } from '@campusmeet/shared';
+import { createTask, getTasks, updateTaskStatus } from './service';
 
 describe('task service', () => {
   beforeEach(() => request.mockReset());
@@ -60,5 +60,26 @@ describe('task service', () => {
     expect(sentBody).not.toHaveProperty('version');
     expect(sentBody).not.toHaveProperty('createdAt');
     expect(sentBody).not.toHaveProperty('updatedAt');
+  });
+
+  it('updates task status with the shared expectedVersion request', async () => {
+    const updated = {
+      id: 'task/1',
+      groupId: 'group-1',
+      title: 'Hoàn thiện báo cáo',
+      assigneeId: 'user-1',
+      priority: Priority.HIGH,
+      status: TaskStatus.DONE,
+      version: 2,
+    };
+    request.mockResolvedValue({ success: true, data: updated, requestId: 'request-1' });
+
+    await expect(
+      updateTaskStatus('task/1', { status: TaskStatus.DONE, expectedVersion: 1 }),
+    ).resolves.toEqual(updated);
+    expect(request).toHaveBeenCalledWith('/tasks/task%2F1/status', {
+      method: 'PATCH',
+      body: JSON.stringify({ status: TaskStatus.DONE, expectedVersion: 1 }),
+    });
   });
 });

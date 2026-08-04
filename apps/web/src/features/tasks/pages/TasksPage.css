@@ -47,6 +47,18 @@
   color: var(--color-muted);
 }
 
+.task-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.task-status-actions button {
+  min-height: 2.25rem;
+  padding: 0.45rem 0.75rem;
+}
+
 @media (max-width: 760px) {
   .task-page-layout {
     grid-template-columns: 1fr;

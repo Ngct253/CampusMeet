@@ -1,12 +1,17 @@
 import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
-import { taskInputSchema } from '@campusmeet/shared';
+import { taskInputSchema, updateTaskStatusInputSchema } from '@campusmeet/shared';
 import { authenticate } from '../middleware/authentication';
 import { handleError } from '../middleware/error-handler';
 import { DynamoDbCollaborationRepository } from '../repositories/collaboration';
 import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
 import { DynamoDbTaskRepository } from '../repositories/tasks';
 import { TaskService } from '../services/task-service';
-import { getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
+import {
+  getPathParameter,
+  getRequestId,
+  parseBody,
+  requireIdempotencyKey,
+} from '../utils/request';
 import { failure, ok } from '../utils/response';
 
 const tasks = new DynamoDbTaskRepository();
@@ -34,6 +39,26 @@ export const tasksHandler: APIGatewayProxyHandlerV2 = async (event) => {
       );
     }
     return failure(requestId, 'Phương thức chưa được hỗ trợ.', 405, 'METHOD_NOT_ALLOWED');
+  } catch (error) {
+    return handleError(error, requestId);
+  }
+};
+
+export const taskStatusHandler: APIGatewayProxyHandlerV2 = async (event) => {
+  const requestId = getRequestId(event);
+  try {
+    const { userId } = authenticate(event);
+    if (event.requestContext.http.method !== 'PATCH') {
+      return failure(requestId, 'Phương thức chưa được hỗ trợ.', 405, 'METHOD_NOT_ALLOWED');
+    }
+    return ok(
+      await taskService.updateTaskStatus(
+        userId,
+        getPathParameter(event, 'taskId'),
+        parseBody(event, updateTaskStatusInputSchema),
+      ),
+      requestId,
+    );
   } catch (error) {
     return handleError(error, requestId);
   }

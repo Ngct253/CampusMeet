@@ -1,6 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+  TransactWriteCommand,
+} from '@aws-sdk/lib-dynamodb';
 import {
   Priority,
   TaskStatus,
@@ -8,7 +13,7 @@ import {
   type Task,
 } from '@campusmeet/shared';
 import type { TaskRepository } from '../domain/ports';
-import { ConflictError } from '../utils/errors';
+import { ConflictError, ResourceNotFoundError } from '../utils/errors';
 import { documentClient, stringValue, tableName, type DynamoItem } from './client';
 
 const NO_DUE_DATE_SORT_VALUE = '9999-12-31T23:59:59.999Z';
@@ -25,6 +30,7 @@ const toTask = (item: DynamoItem): Task | undefined => {
   const createdBy = stringValue(item, 'createdBy');
   const createdAt = stringValue(item, 'createdAt');
   const updatedAt = stringValue(item, 'updatedAt');
+  const completedAt = stringValue(item, 'completedAt');
   const version = typeof item.version === 'number' ? item.version : undefined;
   if (!id || !groupId || !title || !assigneeId || !status || !priority) {
     return undefined;
@@ -44,6 +50,7 @@ const toTask = (item: DynamoItem): Task | undefined => {
     ...(createdBy ? { createdBy } : {}),
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),
+    ...(completedAt ? { completedAt } : {}),
     ...(version !== undefined ? { version } : {}),
   };
 };
@@ -99,6 +106,11 @@ export class DynamoDbTaskRepository implements TaskRepository {
       }),
     );
     return result.Item;
+  }
+
+  async getById(id: string): Promise<Task | undefined> {
+    const item = await this.getItem(id);
+    return item ? toTask(item) : undefined;
   }
 
   async create(
@@ -183,5 +195,98 @@ export class DynamoDbTaskRepository implements TaskRepository {
     } while (exclusiveStartKey);
 
     return tasks;
+  }
+
+  async updateStatus(
+    task: Task,
+    actorId: string,
+    status: TaskStatus,
+    expectedVersion: number,
+    isLegacyVersion: boolean,
+  ): Promise<Task> {
+    const updatedAt = new Date().toISOString();
+    const nextVersion = expectedVersion + 1;
+    const dueSortValue = task.dueAt ?? NO_DUE_DATE_SORT_VALUE;
+    const eventId = randomUUID();
+    const isCompleting = status === TaskStatus.DONE;
+    const isReopening = task.status === TaskStatus.DONE && status === TaskStatus.DOING;
+    const updateExpression = isCompleting
+      ? 'SET #status = :status, updatedAt = :updatedAt, #version = :nextVersion, GSI1SK = :gsi1sk, completedAt = :completedAt'
+      : isReopening
+        ? 'SET #status = :status, updatedAt = :updatedAt, #version = :nextVersion, GSI1SK = :gsi1sk REMOVE completedAt'
+        : 'SET #status = :status, updatedAt = :updatedAt, #version = :nextVersion, GSI1SK = :gsi1sk';
+    const versionCondition = isLegacyVersion
+      ? 'attribute_not_exists(#version)'
+      : '#version = :expectedVersion';
+
+    try {
+      await documentClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Update: {
+                TableName: tableName('TASK_DATA_TABLE'),
+                Key: { PK: `TASK#${task.id}`, SK: 'META' },
+                UpdateExpression: updateExpression,
+                ConditionExpression: `attribute_exists(PK) AND ${versionCondition} AND #status = :fromStatus`,
+                ExpressionAttributeNames: { '#status': 'status', '#version': 'version' },
+                ExpressionAttributeValues: {
+                  ':status': status,
+                  ':fromStatus': task.status,
+                  ':updatedAt': updatedAt,
+                  ':nextVersion': nextVersion,
+                  ':gsi1sk': `STATUS#${status}#DUE#${dueSortValue}#TASK#${task.id}`,
+                  ...(isLegacyVersion ? {} : { ':expectedVersion': expectedVersion }),
+                  ...(isCompleting ? { ':completedAt': updatedAt } : {}),
+                },
+              },
+            },
+            {
+              Put: {
+                TableName: tableName('TASK_DATA_TABLE'),
+                Item: {
+                  PK: `TASK#${task.id}`,
+                  SK: `EVENT#${updatedAt}#${eventId}`,
+                  entityType: 'TASK_EVENT',
+                  eventType: 'STATUS_CHANGED',
+                  taskId: task.id,
+                  groupId: task.groupId,
+                  actorId,
+                  fromStatus: task.status,
+                  toStatus: status,
+                  createdAt: updatedAt,
+                  version: nextVersion,
+                },
+                ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+              },
+            },
+          ],
+        }),
+      );
+    } catch (error) {
+      if ((error as { name?: string }).name !== 'TransactionCanceledException') throw error;
+      const current = await this.getById(task.id);
+      if (!current) throw new ResourceNotFoundError('Không tìm thấy công việc.');
+      const currentIsLegacyVersion = current.version === undefined;
+      if (
+        (current.version !== undefined && current.version < 1) ||
+        currentIsLegacyVersion !== isLegacyVersion ||
+        (current.version !== undefined && current.version !== expectedVersion) ||
+        current.status !== task.status
+      ) {
+        throw new ConflictError('Công việc đã được cập nhật bởi yêu cầu khác.');
+      }
+      throw error;
+    }
+
+    const updatedTask: Task = {
+      ...task,
+      status,
+      updatedAt,
+      version: nextVersion,
+      ...(isCompleting ? { completedAt: updatedAt } : {}),
+    };
+    if (isReopening) delete updatedTask.completedAt;
+    return updatedTask;
   }
 }

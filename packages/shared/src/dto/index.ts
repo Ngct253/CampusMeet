@@ -7,7 +7,7 @@ import type {
   Group,
   Meeting,
 } from '../types';
-import { Priority, type TaskStatus } from '../enums';
+import { Priority, TaskStatus } from '../enums';
 import { z } from 'zod';
 
 export const groupInputSchema = z.object({
@@ -67,6 +67,12 @@ export const taskInputSchema = z
     sourceMeetingId: z.string().trim().min(1).optional(),
   })
   .strict();
+export const updateTaskStatusInputSchema = z
+  .object({
+    status: z.nativeEnum(TaskStatus),
+    expectedVersion: z.number().int().nonnegative(),
+  })
+  .strict();
 
 export interface CreateGroupRequest {
   name: string;
@@ -102,9 +108,7 @@ export interface CreateMinutesRequest {
   actionItems: Array<{ content: string; assigneeId?: string }>;
 }
 export type CreateTaskRequest = z.infer<typeof taskInputSchema>;
-export interface UpdateTaskStatusRequest {
-  status: TaskStatus;
-}
+export type UpdateTaskStatusRequest = z.infer<typeof updateTaskStatusInputSchema>;
 export interface DashboardResponse {
   user: User;
   groups: Group[];

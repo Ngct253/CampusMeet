@@ -10,11 +10,16 @@ import { TasksPage } from './TasksPage';
 const services = vi.hoisted(() => ({
   getTasks: vi.fn(),
   createTask: vi.fn(),
+  updateTaskStatus: vi.fn(),
   getGroups: vi.fn(),
   getGroup: vi.fn(),
   getMeetings: vi.fn(),
 }));
-vi.mock('../service', () => ({ getTasks: services.getTasks, createTask: services.createTask }));
+vi.mock('../service', () => ({
+  getTasks: services.getTasks,
+  createTask: services.createTask,
+  updateTaskStatus: services.updateTaskStatus,
+}));
 vi.mock('../../groups/service', () => ({
   getGroups: services.getGroups,
   getGroup: services.getGroup,
@@ -103,6 +108,7 @@ describe('TasksPage', () => {
   beforeEach(() => {
     services.getTasks.mockReset().mockResolvedValue([]);
     services.createTask.mockReset();
+    services.updateTaskStatus.mockReset();
     services.getGroups.mockReset().mockResolvedValue([]);
     services.getGroup.mockReset();
     services.getMeetings.mockReset();
@@ -146,6 +152,109 @@ describe('TasksPage', () => {
     renderPage();
     expect(await screen.findByText('Hoàn thiện báo cáo')).toBeInTheDocument();
     expect(screen.getByText('Ưu tiên: HIGH')).toBeInTheDocument();
+  });
+
+  it('shows status actions allowed for TODO, DOING, and DONE', async () => {
+    services.getTasks.mockResolvedValue([
+      {
+        id: 'task-todo', groupId: 'group-1', title: 'Task TODO', assigneeId: 'admin-1',
+        status: 'TODO', priority: 'HIGH', version: 1,
+      },
+      {
+        id: 'task-doing', groupId: 'group-1', title: 'Task DOING', assigneeId: 'admin-1',
+        status: 'DOING', priority: 'MEDIUM', version: 2,
+      },
+      {
+        id: 'task-done', groupId: 'group-1', title: 'Task DONE', assigneeId: 'admin-1',
+        status: 'DONE', priority: 'LOW', version: 3,
+      },
+    ]);
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: 'Bắt đầu' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Hoàn thành' })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Đưa về TODO' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mở lại' })).toBeInTheDocument();
+  });
+
+  it('sends legacy version 0 and prevents a double status update while pending', async () => {
+    services.getTasks.mockResolvedValue([
+      {
+        id: 'task-1', groupId: 'group-1', title: 'Task TODO', assigneeId: 'admin-1',
+        status: 'TODO', priority: 'HIGH',
+      },
+    ]);
+    services.updateTaskStatus.mockReturnValue(new Promise(() => undefined));
+    renderPage();
+
+    const startButton = await screen.findByRole('button', { name: 'Bắt đầu' });
+    fireEvent.click(startButton);
+    fireEvent.click(startButton);
+    await waitFor(() =>
+      expect(services.updateTaskStatus).toHaveBeenCalledWith('task-1', {
+        status: 'DOING',
+        expectedVersion: 0,
+      }),
+    );
+    expect(services.updateTaskStatus).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByRole('button', { name: 'Đang cập nhật…' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Đang cập nhật…' })[0]).toBeDisabled();
+  });
+
+  it('invalidates tasks after a successful status update', async () => {
+    const todo = {
+      id: 'task-1', groupId: 'group-1', title: 'Task TODO', assigneeId: 'admin-1',
+      status: 'TODO', priority: 'HIGH', version: 1,
+    };
+    services.getTasks.mockResolvedValue([todo]);
+    services.updateTaskStatus.mockResolvedValue({ ...todo, status: 'DOING', version: 2 });
+    const { client } = renderPage();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bắt đầu' }));
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tasks'] }),
+    );
+  });
+
+  it('refetches after a 409 and keeps the rendered status unchanged', async () => {
+    const todo = {
+      id: 'task-1', groupId: 'group-1', title: 'Task TODO', assigneeId: 'admin-1',
+      status: 'TODO', priority: 'HIGH', version: 1,
+    };
+    services.getTasks.mockResolvedValue([todo]);
+    services.updateTaskStatus.mockRejectedValue(
+      new ApiClientError('conflict', 409, 'CONFLICT'),
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Bắt đầu' }));
+    expect(
+      await screen.findByText('Công việc đã được cập nhật ở nơi khác. Danh sách đang được làm mới.'),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(services.getTasks.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.getByText('TODO')).toBeInTheDocument();
+  });
+
+  it.each([
+    [403, 'Bạn không có quyền cập nhật công việc này.'],
+    [422, 'Không thể chuyển sang trạng thái công việc đã chọn.'],
+  ])('shows status error %s without applying an optimistic status', async (status, message) => {
+    services.getTasks.mockResolvedValue([
+      {
+        id: 'task-1', groupId: 'group-1', title: 'Task TODO', assigneeId: 'admin-1',
+        status: 'TODO', priority: 'HIGH', version: 1,
+      },
+    ]);
+    services.updateTaskStatus.mockRejectedValue(
+      new ApiClientError('status error', status, `ERROR_${status}`),
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Hoàn thành' }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.getByText('TODO')).toBeInTheDocument();
+    expect(screen.queryByText('DONE')).not.toBeInTheDocument();
   });
 
   it('only offers GROUP_ADMIN groups and hides the form without one', async () => {

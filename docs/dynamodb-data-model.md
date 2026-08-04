@@ -182,6 +182,10 @@ Access patterns:
 - Liệt kê task sinh từ meeting: query `GSI3`.
 - Update status dùng conditional expression để tránh ghi đè version cũ.
 
+Status update ghi atomically bằng `TransactWriteItems`: conditional Update item `META` và Put một history item. History status event có `entityType=TASK_EVENT`, `eventType=STATUS_CHANGED`, `taskId`, `groupId`, `actorId`, `fromStatus`, `toStatus`, `createdAt` và resulting `version`. Put history dùng `attribute_not_exists`.
+
+`expectedVersion` phải khớp persisted `version`; task legacy thiếu `version` được xem là version `0` và lần update đầu dùng condition `attribute_not_exists(version)` rồi ghi version `1`. Same-status không ghi và không tăng version. Khi chuyển sang `DONE`, `completedAt=updatedAt`; khi `DONE→DOING`, xóa `completedAt`. Status update xây lại `GSI1SK` và giữ nguyên `GSI2SK`/`GSI3`.
+
 Với task không có `dueAt`, item không lưu trường `dueAt`; riêng `GSI1SK` và `GSI2SK` dùng sentinel `9999-12-31T23:59:59.999Z` tại vị trí `<dueAt>`. Sentinel là data-key contract để task không hạn nằm sau task có hạn và không được trả ra API.
 
 ## 8. AI-work table
