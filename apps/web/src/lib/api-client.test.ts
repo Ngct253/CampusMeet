@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiClient } from './api-client';
+import { ApiClientError, apiClient } from './api-client';
 
 const fetchAuthSession = vi.hoisted(() => vi.fn());
 const environment = vi.hoisted(() => ({ apiBaseUrl: '' }));
@@ -29,4 +29,34 @@ describe('apiClient', () => {
       'Không thể kết nối tới CampusMeet. Vui lòng kiểm tra mạng rồi thử lại.',
     );
   });
+
+  it.each([400, 403, 404, 409, 422])(
+    'giữ structured API error cho status %s',
+    async (status) => {
+      environment.apiBaseUrl = 'https://api.example.test';
+      fetchAuthSession.mockResolvedValue({ tokens: { accessToken: { toString: () => 'token' } } });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status,
+          json: async () => ({
+            success: false,
+            error: { code: `ERROR_${status}`, message: `Lỗi ${status}`, details: { field: 'title' } },
+            requestId: 'request-1',
+          }),
+        }),
+      );
+
+      const error = await apiClient.request('/tasks').catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(Error);
+      expect(error).toBeInstanceOf(ApiClientError);
+      expect(error).toMatchObject({
+        message: `Lỗi ${status}`,
+        status,
+        code: `ERROR_${status}`,
+        details: { field: 'title' },
+      });
+    },
+  );
 });
