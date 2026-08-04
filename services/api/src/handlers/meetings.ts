@@ -8,19 +8,17 @@ import {
 } from '@campusmeet/shared';
 import { MeetingService } from '../application/meeting-service';
 import { authenticate } from '../middleware/authentication';
+import { SharedMembershipAuthorizer } from '../middleware/authorization';
 import { handleError } from '../middleware/error-handler';
 import { DynamoDbCollaborationRepository } from '../repositories/collaboration';
-import {
-  DynamoDbMeetingRepository,
-  DynamoDbMembershipAuthorizer,
-} from '../repositories/dynamodb';
+import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
 import { ApiError } from '../utils/errors';
 import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
 import { ok } from '../utils/response';
 
 const service = new MeetingService(
   new DynamoDbMeetingRepository(),
-  new DynamoDbMembershipAuthorizer(),
+  new SharedMembershipAuthorizer(),
 );
 const groups = new DynamoDbCollaborationRepository();
 
@@ -44,7 +42,10 @@ export const groupMeetingsHandler = handler(async (event) => {
   if (event.requestContext.http.method === 'POST') {
     const input = parseBody(event, meetingInputSchema) as CreateMeetingRequest;
     const key = requireIdempotencyKey(event);
-    const id = createHash('sha256').update(auth.userId + ':' + key).digest('hex').slice(0, 32);
+    const id = createHash('sha256')
+      .update(auth.userId + ':' + key)
+      .digest('hex')
+      .slice(0, 32);
     try {
       return await service.create(groupId, auth.userId, input, id);
     } catch (error) {
@@ -68,32 +69,35 @@ export const myMeetingsHandler = handler(async (event) => {
   return result.flat().sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
 });
 
-export const createMeetingDetailHandler = (meetingService: MeetingService) => handler(async (event) => {
-  const auth = authenticate(event);
-  const meetingId = getPathParameter(event, 'meetingId');
-  if (event.requestContext.http.method === 'GET') return meetingService.detail(meetingId, auth.userId);
-  if (event.requestContext.http.method === 'PATCH') {
-    return meetingService.update(
-      meetingId,
-      parseBody(event, updateMeetingInputSchema),
-      auth.userId,
-    );
-  }
-  throw new ApiError('METHOD_NOT_ALLOWED', 'Phương thức chưa được hỗ trợ.', 405);
-});
+export const createMeetingDetailHandler = (meetingService: MeetingService) =>
+  handler(async (event) => {
+    const auth = authenticate(event);
+    const meetingId = getPathParameter(event, 'meetingId');
+    if (event.requestContext.http.method === 'GET')
+      return meetingService.detail(meetingId, auth.userId);
+    if (event.requestContext.http.method === 'PATCH') {
+      return meetingService.update(
+        meetingId,
+        parseBody(event, updateMeetingInputSchema),
+        auth.userId,
+      );
+    }
+    throw new ApiError('METHOD_NOT_ALLOWED', 'Phương thức chưa được hỗ trợ.', 405);
+  });
 export const meetingDetailHandler = createMeetingDetailHandler(service);
 
-export const createCancelMeetingHandler = (meetingService: MeetingService) => handler(async (event) => {
-  if (event.requestContext.http.method !== 'POST') {
-    throw new ApiError('METHOD_NOT_ALLOWED', 'Phương thức chưa được hỗ trợ.', 405);
-  }
-  const auth = authenticate(event);
-  const input = parseBody(event, cancelMeetingInputSchema);
-  return meetingService.cancel(
-    getPathParameter(event, 'meetingId'),
-    auth.userId,
-    input.reason,
-    input.version,
-  );
-});
+export const createCancelMeetingHandler = (meetingService: MeetingService) =>
+  handler(async (event) => {
+    if (event.requestContext.http.method !== 'POST') {
+      throw new ApiError('METHOD_NOT_ALLOWED', 'Phương thức chưa được hỗ trợ.', 405);
+    }
+    const auth = authenticate(event);
+    const input = parseBody(event, cancelMeetingInputSchema);
+    return meetingService.cancel(
+      getPathParameter(event, 'meetingId'),
+      auth.userId,
+      input.reason,
+      input.version,
+    );
+  });
 export const cancelMeetingHandler = createCancelMeetingHandler(service);

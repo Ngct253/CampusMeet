@@ -1,4 +1,4 @@
-﻿import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -7,19 +7,13 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
-  GroupRole,
   GoogleSyncStatus,
   IntegrationStatus,
   MeetingStatus,
   type Group,
   type Meeting,
 } from '@campusmeet/shared';
-import type {
-  GroupRepository,
-  MembershipAuthorizer,
-  MeetingPage,
-  MeetingRepository,
-} from '../domain/ports';
+import type { GroupRepository, MeetingPage, MeetingRepository } from '../domain/ports';
 import { MeetingError } from '../domain/meeting-errors';
 
 type Item = Record<string, unknown>;
@@ -85,8 +79,8 @@ const mapAwsError = (error: unknown): never => {
 export class DynamoDbGroupRepository implements GroupRepository {
   constructor(
     private readonly db = client,
-    private readonly table =
-      process.env.COLLABORATION_TABLE ?? '__UNCONFIGURED_COLLABORATION_TABLE__',
+    private readonly table = process.env.COLLABORATION_TABLE ??
+      '__UNCONFIGURED_COLLABORATION_TABLE__',
   ) {}
   async getById(id: string): Promise<Group | null> {
     const result = await this.db.send(
@@ -95,34 +89,11 @@ export class DynamoDbGroupRepository implements GroupRepository {
     return result.Item ? (result.Item as unknown as Group) : null;
   }
 }
-export class DynamoDbMembershipAuthorizer implements MembershipAuthorizer {
-  constructor(
-    private readonly db = client,
-    private readonly table =
-      process.env.COLLABORATION_TABLE ?? '__UNCONFIGURED_COLLABORATION_TABLE__',
-  ) {}
-  async getMembership(groupId: string, userId: string) {
-    const result = await this.db.send(
-      new GetCommand({
-        TableName: this.table,
-        Key: { PK: `GROUP#${groupId}`, SK: `MEMBER#${userId}` },
-        ConsistentRead: true,
-      }),
-    );
-    if (!result.Item) return null;
-    return {
-      groupId,
-      userId,
-      role: result.Item.role as GroupRole,
-      active: result.Item.active === true || result.Item.status === 'ACTIVE',
-    };
-  }
-}
 export class DynamoDbMeetingRepository implements MeetingRepository {
   constructor(
     private readonly db = client,
-    private readonly table =
-      process.env.MEETING_DATA_TABLE ?? '__UNCONFIGURED_MEETING_DATA_TABLE__',
+    private readonly table = process.env.MEETING_DATA_TABLE ??
+      '__UNCONFIGURED_MEETING_DATA_TABLE__',
   ) {}
   async create(meeting: Meeting): Promise<Meeting> {
     const items = this.puts(meeting);
