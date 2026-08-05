@@ -38,7 +38,7 @@ const dependencies = () => {
   const groups = {
     getMembership: vi.fn().mockResolvedValue({ active: true, role: GroupRole.MEMBER }),
   };
-  const meetings = { getById: vi.fn() };
+  const meetings = { resolveMeetingGroup: vi.fn() };
   return { tasks, groups, meetings };
 };
 
@@ -67,23 +67,24 @@ describe('TaskService.createTask', () => {
   it('does not query meetings when sourceMeetingId is absent', async () => {
     const { tasks, groups, meetings } = dependencies();
     await new TaskService(tasks, groups, meetings).createTask('admin-1', input, 'key-1');
-    expect(meetings.getById).not.toHaveBeenCalled();
+    expect(meetings.resolveMeetingGroup).not.toHaveBeenCalled();
   });
 
-  it('accepts a source meeting in the same group', async () => {
+  it('resolves sourceMeetingId through the public M2 boundary and accepts the same group', async () => {
     const { tasks, groups, meetings } = dependencies();
-    meetings.getById.mockResolvedValue({ id: 'meeting-1', groupId: 'group-1' });
+    meetings.resolveMeetingGroup.mockResolvedValue('group-1');
     const withMeeting = { ...input, sourceMeetingId: 'meeting-1' };
     await new TaskService(tasks, groups, meetings).createTask('admin-1', withMeeting, 'key-1');
+    expect(meetings.resolveMeetingGroup).toHaveBeenCalledWith('meeting-1');
     expect(tasks.create).toHaveBeenCalledWith('admin-1', withMeeting, 'key-1');
   });
 
   it.each([
-    ['missing', undefined],
-    ['different group', { id: 'meeting-1', groupId: 'group-2' }],
-  ])('returns the same 404 for a %s source meeting', async (_label, meeting) => {
+    ['missing', null],
+    ['different group', 'group-2'],
+  ])('returns the same 404 for a %s source meeting', async (_label, meetingGroupId) => {
     const { tasks, groups, meetings } = dependencies();
-    meetings.getById.mockResolvedValue(meeting);
+    meetings.resolveMeetingGroup.mockResolvedValue(meetingGroupId);
     await expect(
       new TaskService(tasks, groups, meetings).createTask(
         'admin-1',
@@ -132,13 +133,7 @@ describe('TaskService.updateTaskStatus', () => {
         expectedVersion: 1,
       }),
     ).resolves.toEqual(updated);
-    expect(tasks.updateStatus).toHaveBeenCalledWith(
-      current,
-      actorId,
-      TaskStatus.DOING,
-      1,
-      false,
-    );
+    expect(tasks.updateStatus).toHaveBeenCalledWith(current, actorId, TaskStatus.DOING, 1, false);
   });
 
   it.each([
@@ -228,13 +223,7 @@ describe('TaskService.updateTaskStatus', () => {
       status: TaskStatus.DOING,
       expectedVersion: 0,
     });
-    expect(tasks.updateStatus).toHaveBeenCalledWith(
-      legacy,
-      'user-2',
-      TaskStatus.DOING,
-      0,
-      true,
-    );
+    expect(tasks.updateStatus).toHaveBeenCalledWith(legacy, 'user-2', TaskStatus.DOING, 0, true);
   });
 
   it('returns 409 for persisted version 0 without starting a transaction', async () => {
