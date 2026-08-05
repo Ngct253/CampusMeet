@@ -12,6 +12,55 @@ Khi email được mời đã có profile CampusMeet, notification lời mời �
 
 Khi lời mời được chấp nhận hoặc từ chối, notification `invitation-<invitationId>` tương ứng được chuyển sang đã đọc; phản hồi lời mời không thất bại nếu notification cũ không tồn tại.
 
+| Method                | Endpoint dự kiến                                               | Shared contract                                                        | Trạng thái hiện tại                            |
+| --------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------- |
+| GET                   | `/health`                                                      | `ApiSuccessResponse<{service,status,timestamp}>`                       | Đã có health handler                           |
+| GET/PATCH             | `/me`                                                          | `UserProfile`, `UpdateProfileRequest`                                  | M1 đã triển khai                               |
+| GET/POST              | `/groups`                                                      | `CreateGroupRequest`, `GroupSummary[]`                                 | M1 đã triển khai                               |
+| GET/PATCH             | `/groups/:groupId`                                             | `GroupDetails`, `CreateGroupRequest`                                   | M1 đã triển khai, PATCH yêu cầu Group Admin    |
+| DELETE                | `/groups/:groupId/members/:userId`                             | `{removed:true}`                                                       | M1 đã triển khai, không cho xóa Group Admin    |
+| POST                  | `/groups/:groupId/invitations`                                 | `CreateInvitationRequest`, `CreateInvitationResponse`                  | M1 đã triển khai                               |
+| GET                   | `/groups/:groupId/invitations`                                 | `InvitationDetails[]`                                                  | M1 đã triển khai, yêu cầu Group Admin          |
+| POST                  | `/groups/:groupId/invitations/:invitationId/revoke`            | `{revoked:true}`                                                       | M1 đã triển khai, vô hiệu hóa token cũ         |
+| GET                   | `/invitations`                                                 | `InvitationDetails[]`                                                  | M1 đã triển khai theo email đăng nhập          |
+| POST                  | `/invitations/by-id/:invitationId/accept`                      | `InvitationDetails`                                                    | M1 đã triển khai                               |
+| POST                  | `/invitations/by-id/:invitationId/decline`                     | `InvitationDetails`                                                    | M1 đã triển khai                               |
+| GET                   | `/invitations/:token`                                          | `InvitationDetails`                                                    | M1 đã triển khai                               |
+| POST                  | `/invitations/:token/accept`                                   | `InvitationDetails`                                                    | M1 đã triển khai                               |
+| POST                  | `/invitations/:token/decline`                                  | `InvitationDetails`                                                    | M1 đã triển khai                               |
+| GET                   | `/meetings`                                                    | `Meeting[]`                                                            | Đã triển khai, trả lịch của các nhóm người dùng đang tham gia |
+| GET/POST              | `/groups/:groupId/meetings`                                    | `Meeting[]`, `CreateMeetingRequest`                                    | Đã triển khai; POST yêu cầu Group Admin và `Idempotency-Key` |
+| GET/PATCH             | `/meetings/:meetingId`                                         | `Meeting`, `UpdateMeetingRequest`                                      | Đã triển khai; PATCH yêu cầu Group Admin       |
+| POST                  | `/meetings/:meetingId/cancel`                                  | `CancelMeetingRequest`, `Meeting`                                      | Đã triển khai; yêu cầu Group Admin              |
+| GET/POST              | `/minutes`                                                     | `CreateMinutesRequest`, `MeetingMinutes`                               | Handler skeleton, trả 501                      |
+| GET                   | `/dashboard`                                                   | `DashboardResponse`                                                    | Handler skeleton, trả 501                      |
+| GET                   | `/notifications`                                               | `Notification[]`                                                       | M1 đã triển khai                               |
+| POST                  | `/notifications/:notificationId/read`                          | `{read:true}`                                                          | M1 đã triển khai                               |
+| POST/DELETE           | `/integrations/google`                                         | Chưa chốt DTO                                                          | Dự kiến; skeleton hiện chỉ bắt `/integrations` |
+| POST                  | `/meetings/:meetingId/google-artifacts/sync`                   | `StartGoogleArtifactSyncRequest/Response`                              | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/meetings/:meetingId/attachments/upload-url`                  | `CreateUploadUrlRequest`, `AttachmentUploadTarget`                     | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/meetings/:meetingId/attachments/:attachmentId/complete`      | `CompleteUploadRequest`, `Attachment`, `AIJob`                         | Đã chốt contract mục tiêu; chưa implement      |
+| GET                   | `/meetings/:meetingId/attachments`                             | `Attachment[]`                                                         | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/attachments/:attachmentId/download-url`                      | `AttachmentDownloadTarget`                                             | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/meetings/:meetingId/recordings`                              | `CreateRecordingRequest`, `Recording`                                  | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/meetings/:meetingId/transcriptions`                          | `StartTranscriptionRequest`, `AIJob`                                   | Đã chốt contract mục tiêu; chưa implement      |
+| GET                   | `/meetings/:meetingId/transcripts`                             | `Transcript[]`, `TranscriptSegment[]`                                  | Đã chốt contract mục tiêu; chưa implement      |
+| PATCH                 | `/transcripts/:transcriptId/segments/:segmentId`               | `UpdateTranscriptSegmentRequest`, `TranscriptSegment`                  | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/transcripts/:transcriptId/approve`                           | `ApproveTranscriptRequest`, `Transcript`, `AIJob`                      | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/meetings/:meetingId/live-transcription`                      | `StartLiveTranscriptionRequest`, `LiveTranscriptionSession`            | Đã chốt contract mục tiêu; chưa implement      |
+| GET                   | `/meetings/:meetingId/live-transcription/:sessionId`           | `LiveTranscriptionSession`                                             | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/meetings/:meetingId/live-transcription/:sessionId/segments`  | `AppendFinalSegmentsRequest`, `TranscriptSegment[]`                    | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/meetings/:meetingId/live-transcription/:sessionId/heartbeat` | `LiveTranscriptionHeartbeatRequest`, `LiveTranscriptionSession`        | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/meetings/:meetingId/live-transcription/:sessionId/reconnect` | `ReconnectLiveTranscriptionRequest`, `LiveTranscriptionConnection`     | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/meetings/:meetingId/live-transcription/:sessionId/stop`      | `StopLiveTranscriptionRequest`, `LiveTranscriptionSession`             | Đã chốt contract mục tiêu; chưa implement      |
+| POST                  | `/meetings/:meetingId/ai/chat`                                 | `MeetingChatRequest` → `AIJob` (`202`)                                 | Phase 4A handler/application đã implement      |
+| POST                  | `/groups/:groupId/ai/search`                                   | `GroupKnowledgeQuery` → `AIJob` (`202`)                                | Phase 4A handler/application đã implement      |
+| POST                  | `/meetings/:meetingId/ai/minutes-draft`                        | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                        | Phase 4A handler/application đã implement      |
+| POST                  | `/meetings/:meetingId/ai/task-proposals`                       | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                        | Phase 4A handler/application đã implement      |
+| POST                  | `/ai/task-proposals/:proposalId/confirm`                       | `ConfirmTaskProposalRequest/Response`                                  | Group Admin theo FR-16; chưa implement         |
+| POST                  | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                       | Phase 4A; yêu cầu Group Admin                  |
+| POST                  | `/groups/:groupId/ai/tool-proposals`                           | `CreateToolProposalRequest`, `ToolProposal`                            | Pha AI mở rộng; chưa implement                 |
+| POST                  | `/ai/tool-proposals/:id/confirm`                               | `ConfirmToolProposalRequest/Response`                                  | Pha AI mở rộng; chưa implement                 |
 | Method         | Endpoint dự kiến                                               | Shared contract                                                    | Trạng thái hiện tại                                           |
 | -------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------- |
 | GET            | `/health`                                                      | `ApiSuccessResponse<{service,status,timestamp}>`                   | Đã có health handler                                          |
@@ -33,7 +82,9 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | GET/PATCH      | `/meetings/:meetingId`                                         | `Meeting`, `UpdateMeetingRequest`                                  | Đã triển khai; PATCH yêu cầu Group Admin                      |
 | POST           | `/meetings/:meetingId/cancel`                                  | `CancelMeetingRequest`, `Meeting`                                  | Đã triển khai; yêu cầu Group Admin                            |
 | GET/POST       | `/minutes`                                                     | `CreateMinutesRequest`, `MeetingMinutes`                           | Handler skeleton, trả 501                                     |
-| GET/POST/PATCH | `/tasks`                                                       | `CreateTaskRequest`, `UpdateTaskStatusRequest`                     | Handler skeleton, trả 501                                     |
+| GET            | `/tasks`                                                       | `Task[]`                                                           | Đã triển khai; trả toàn bộ task có `assigneeId` bằng user từ JWT |
+| POST           | `/tasks`                                                       | `CreateTaskRequest`, `Task`                                        | Group Admin; bắt buộc `Idempotency-Key`                       |
+| PATCH          | `/tasks/:taskId/status`                                        | `UpdateTaskStatusRequest`, `Task`                                  | Assignee hoặc active Group Admin; optimistic version          |
 | GET            | `/dashboard`                                                   | `DashboardResponse`                                                | Handler skeleton, trả 501                                     |
 | GET            | `/notifications`                                               | `Notification[]`                                                   | M1 đã triển khai                                              |
 | POST           | `/notifications/:notificationId/read`                          | `{read:true}`                                                      | M1 đã triển khai                                              |
@@ -90,6 +141,12 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 - Google artifact sync lưu trạng thái `POLLING|AVAILABLE|UNAVAILABLE|ACTION_REQUIRED|FAILED`; `UNAVAILABLE` là kết quả hợp lệ và phải dẫn tới fallback upload/capture.
 
 ## Response format hiện có
+
+`GET /tasks` không nhận `userId` từ query, path hoặc body. Backend chỉ dùng `sub` từ JWT và tự đọc hết các trang DynamoDB qua GSI2. API chưa expose pagination trong MVP hiện tại; `limit`/`cursor` sẽ dùng cursor contract chung sau khi contract list endpoint được chốt.
+
+`POST /tasks` yêu cầu active Group Admin, lấy `createdBy` từ JWT, kiểm tra assignee là active member cùng group và kiểm tra `sourceMeetingId` thuộc group khi có. Retry cùng actor/key/payload trả task cũ; dùng cùng key với payload khác trả `409`.
+
+`PATCH /tasks/:taskId/status` nhận `{ status, expectedVersion }` và chỉ cho assignee hoặc active Group Admin của task cập nhật. API dùng `TODO|DOING|DONE`, cho phép `TODO→DOING|DONE`, `DOING→TODO|DONE`, `DONE→DOING`; `DONE→TODO` trả `422`. Same-status trả task hiện tại nhưng vẫn kiểm tra version, không tăng version và không ghi history. Task legacy thiếu `version` được xem là version `0`. Version cũ trả `409`; PATCH này không yêu cầu `Idempotency-Key`.
 
 Health response:
 

@@ -34,7 +34,7 @@ import {
 import { meHandler } from './handlers/me';
 import { minutesHandler } from './handlers/minutes';
 import { notificationsHandler, readNotificationHandler } from './handlers/notifications';
-import { tasksHandler } from './handlers/tasks';
+import { tasksHandler, taskStatusHandler } from './handlers/tasks';
 import { getRequestId } from './utils/request';
 import { notImplemented } from './utils/response';
 import { createRouter } from './utils/router';
@@ -72,7 +72,9 @@ const findRoute = createRouter([
   { method: 'POST', path: '/invitations/:token/accept', handler: acceptInvitationHandler },
   { method: 'POST', path: '/invitations/:token/decline', handler: declineInvitationHandler },
   { method: 'ANY', path: '/minutes', handler: minutesHandler },
-  { method: 'ANY', path: '/tasks', handler: tasksHandler },
+  { method: 'GET', path: '/tasks', handler: tasksHandler },
+  { method: 'POST', path: '/tasks', handler: tasksHandler },
+  { method: 'PATCH', path: '/tasks/:taskId/status', handler: taskStatusHandler },
   { method: 'ANY', path: '/dashboard', handler: dashboardHandler },
   { method: 'ANY', path: '/notifications', handler: notificationsHandler },
   { method: 'POST', path: '/notifications/:notificationId/read', handler: readNotificationHandler },

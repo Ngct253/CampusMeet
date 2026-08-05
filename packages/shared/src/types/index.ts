@@ -129,6 +129,11 @@ export interface Task {
   priority: Priority;
   dueAt?: ISODateTime;
   sourceMeetingId?: string;
+  createdBy?: string;
+  createdAt?: ISODateTime;
+  updatedAt?: ISODateTime;
+  completedAt?: ISODateTime;
+  version?: number;
 }
 export interface Notification {
   id: string;
