@@ -95,9 +95,14 @@ export interface ActionItem {
 export interface MeetingMinutes {
   id: string;
   meetingId: string;
+  groupId: string;
   summary: string;
+  discussion: string;
   decisions: Decision[];
   actionItems: ActionItem[];
+  version: number;
+  createdBy: string;
+  createdAt: ISODateTime;
 }
 export interface Task {
   id: string;

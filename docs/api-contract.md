@@ -32,7 +32,8 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | GET/POST              | `/groups/:groupId/meetings`                                    | `Meeting[]`, `CreateMeetingRequest`                                    | Đã triển khai; POST yêu cầu Group Admin và `Idempotency-Key` |
 | GET/PATCH             | `/meetings/:meetingId`                                         | `Meeting`, `UpdateMeetingRequest`                                      | Đã triển khai; PATCH yêu cầu Group Admin       |
 | POST                  | `/meetings/:meetingId/cancel`                                  | `CancelMeetingRequest`, `Meeting`                                      | Đã triển khai; yêu cầu Group Admin              |
-| GET/POST              | `/minutes`                                                     | `CreateMinutesRequest`, `MeetingMinutes`                               | Handler skeleton, trả 501                      |
+| GET                   | `/meetings/:meetingId/minutes`                                 | `MeetingMinutes`                                                       | Active member; trả latest version, chưa có trả `404` |
+| PUT                   | `/meetings/:meetingId/minutes`                                 | `UpdateMeetingMinutesRequest`, `MeetingMinutes`                         | Active Group Admin; optimistic version            |
 | GET                   | `/tasks`                                                       | `Task[]`                                                               | Đã triển khai; trả toàn bộ task có `assigneeId` bằng user từ JWT |
 | POST                  | `/tasks`                                                       | `CreateTaskRequest`, `Task`                                             | Group Admin; bắt buộc `Idempotency-Key`         |
 | PATCH                 | `/tasks/:taskId/status`                                        | `UpdateTaskStatusRequest`, `Task`                                       | Assignee hoặc active Group Admin; optimistic version |
@@ -98,6 +99,8 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 `POST /tasks` yêu cầu active Group Admin, lấy `createdBy` từ JWT, kiểm tra assignee là active member cùng group và kiểm tra `sourceMeetingId` thuộc group khi có. Retry cùng actor/key/payload trả task cũ; dùng cùng key với payload khác trả `409`.
 
 `PATCH /tasks/:taskId/status` nhận `{ status, expectedVersion }` và chỉ cho assignee hoặc active Group Admin của task cập nhật. API dùng `TODO|DOING|DONE`, cho phép `TODO→DOING|DONE`, `DOING→TODO|DONE`, `DONE→DOING`; `DONE→TODO` trả `422`. Same-status trả task hiện tại nhưng vẫn kiểm tra version, không tăng version và không ghi history. Task legacy thiếu `version` được xem là version `0`. Version cũ trả `409`; PATCH này không yêu cầu `Idempotency-Key`.
+
+`GET /meetings/:meetingId/minutes` lấy meeting từ path, kiểm tra actor là active member của `meeting.groupId` rồi trả immutable Minutes version mới nhất; meeting hoặc Minutes chưa tồn tại trả `404`. `PUT` chỉ cho active Group Admin, không nhận meeting/group/actor hoặc metadata server-managed từ body và từ chối meeting `CANCELLED` bằng `422`. Request gồm `summary`, `discussion`, `decisions`, `actionItems` và `expectedVersion`; assignee của action item nếu có phải là active member cùng group. Chưa có Minutes dùng `expectedVersion=0` để tạo version `1`; version cũ trả `409`. PUT không dùng `Idempotency-Key`; retry sau success với expected version cũ trả `409` và không tạo phiên bản trùng.
 
 Health response:
 

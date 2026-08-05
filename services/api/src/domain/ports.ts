@@ -2,9 +2,11 @@ import type {
   CreateTaskRequest,
   Group,
   Meeting,
+  MeetingMinutes,
   Notification,
   Task,
   TaskStatus,
+  UpdateMeetingMinutesRequest,
 } from '@campusmeet/shared';
 
 export interface GroupRepository {
@@ -12,6 +14,16 @@ export interface GroupRepository {
 }
 export interface MeetingRepository {
   getById(id: string): Promise<Meeting | null>;
+}
+export interface MinutesRepository {
+  getLatest(meetingId: string): Promise<MeetingMinutes | null>;
+  createVersion(
+    meeting: Meeting,
+    actorId: string,
+    input: UpdateMeetingMinutesRequest,
+    nextVersion: number,
+    minutesId?: string,
+  ): Promise<MeetingMinutes>;
 }
 export interface TaskRepository {
   listByAssignee(userId: string): Promise<Task[]>;

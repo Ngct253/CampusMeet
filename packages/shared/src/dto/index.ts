@@ -73,6 +73,24 @@ export const updateTaskStatusInputSchema = z
     expectedVersion: z.number().int().nonnegative(),
   })
   .strict();
+const minutesDecisionInputSchema = z
+  .object({ content: z.string().trim().min(1).max(1000) })
+  .strict();
+const minutesActionItemInputSchema = z
+  .object({
+    content: z.string().trim().min(1).max(1000),
+    assigneeId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+export const meetingMinutesInputSchema = z
+  .object({
+    summary: z.string().trim().min(1).max(2000),
+    discussion: z.string().trim().max(10000),
+    decisions: z.array(minutesDecisionInputSchema).max(50),
+    actionItems: z.array(minutesActionItemInputSchema).max(100),
+    expectedVersion: z.number().int().min(0).max(999999),
+  })
+  .strict();
 
 export interface CreateGroupRequest {
   name: string;
@@ -101,12 +119,14 @@ export type UpdateMeetingRequest = Partial<CreateMeetingRequest>;
 export interface CancelMeetingRequest {
   reason?: string;
 }
+/** @deprecated Use UpdateMeetingMinutesRequest for the versioned meeting-scoped Minutes API. */
 export interface CreateMinutesRequest {
   meetingId: string;
   summary: string;
   decisions: string[];
   actionItems: Array<{ content: string; assigneeId?: string }>;
 }
+export type UpdateMeetingMinutesRequest = z.infer<typeof meetingMinutesInputSchema>;
 export type CreateTaskRequest = z.infer<typeof taskInputSchema>;
 export type UpdateTaskStatusRequest = z.infer<typeof updateTaskStatusInputSchema>;
 export interface DashboardResponse {
@@ -128,6 +148,7 @@ export interface ApiErrorResponse {
   requestId: string;
   isMock?: boolean;
 }
+/** @deprecated The versioned Minutes API returns ApiSuccessResponse<MeetingMinutes>. */
 export interface MinutesResponse {
   minutes: MeetingMinutes;
 }
