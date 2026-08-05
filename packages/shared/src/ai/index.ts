@@ -175,6 +175,66 @@ export const groupProgressAnalysisSchema = z.object({
 });
 export type GroupProgressAnalysis = z.infer<typeof groupProgressAnalysisSchema>;
 
+export const knowledgeIngestionResultSchema = z.object({
+  pending: z.boolean(),
+  ingestionJobId: z.string().min(1),
+  status: z.string().min(1),
+});
+export type KnowledgeIngestionResult = z.infer<typeof knowledgeIngestionResultSchema>;
+
+export const aiJobResultSchema = z.union([
+  groundedAnswerSchema,
+  minutesDraftSchema,
+  z.array(taskProposalSchema),
+  groupProgressAnalysisSchema,
+  knowledgeIngestionResultSchema,
+]);
+export type AIJobResult = z.infer<typeof aiJobResultSchema>;
+
+const aiJobResultSchemas = {
+  PARSE_DOCUMENT: z.never(),
+  BATCH_TRANSCRIPTION: z.never(),
+  INGEST_SOURCE: knowledgeIngestionResultSchema,
+  GENERATE_ANSWER: groundedAnswerSchema,
+  GENERATE_MINUTES: minutesDraftSchema,
+  GENERATE_TASK_PROPOSALS: z.array(taskProposalSchema),
+  PROGRESS_ANALYSIS: groupProgressAnalysisSchema,
+} satisfies Record<AIJobType, z.ZodTypeAny>;
+
+const completedResultTypes = new Set<AIJobType>([
+  'INGEST_SOURCE',
+  'GENERATE_ANSWER',
+  'GENERATE_MINUTES',
+  'GENERATE_TASK_PROPOSALS',
+  'PROGRESS_ANALYSIS',
+]);
+
+export const aiJobDetailSchema = aiJobSchema
+  .extend({
+    result: aiJobResultSchema.optional(),
+  })
+  .superRefine((job, context) => {
+    if (job.result !== undefined && !aiJobResultSchemas[job.type].safeParse(job.result).success) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['result'],
+        message: `result does not match AI job type ${job.type}`,
+      });
+    }
+    if (
+      job.status === 'COMPLETED' &&
+      completedResultTypes.has(job.type) &&
+      job.result === undefined
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['result'],
+        message: `result is required for completed AI job type ${job.type}`,
+      });
+    }
+  });
+export type AIJobDetail = z.infer<typeof aiJobDetailSchema>;
+
 export const meetingChatRequestSchema = z.object({
   question: z.string().trim().min(1).max(4_000),
   conversationId: z.string().min(1).optional(),

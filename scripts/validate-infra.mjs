@@ -33,7 +33,11 @@ assert.deepEqual(
 for (const [logicalId, contract] of expected) {
   const resource = resources[logicalId];
   assert.equal(resource.Type, 'AWS::DynamoDB::Table', `${logicalId} must be DynamoDB.`);
-  assert.equal(resource.DeletionPolicy, 'Retain', `${logicalId} must retain data on stack deletion.`);
+  assert.equal(
+    resource.DeletionPolicy,
+    'Retain',
+    `${logicalId} must retain data on stack deletion.`,
+  );
   assert.equal(
     resource.UpdateReplacePolicy,
     'Retain',
@@ -80,7 +84,11 @@ for (const variable of [
   'TASK_DATA_TABLE',
   'AI_WORK_TABLE',
 ]) {
-  assert.equal(appTemplate.includes(variable), true, `Application template is missing ${variable}.`);
+  assert.equal(
+    appTemplate.includes(variable),
+    true,
+    `Application template is missing ${variable}.`,
+  );
 }
 
 for (const invalidAction of ['dynamodb:TransactGetItems', 'dynamodb:TransactWriteItems']) {
@@ -91,7 +99,104 @@ for (const invalidAction of ['dynamodb:TransactGetItems', 'dynamodb:TransactWrit
   );
 }
 
-assert.equal(appTemplate.includes('USER_POOL_ID: !Ref UserPool'), true, 'API must receive the Cognito User Pool id.');
-assert.equal(appTemplate.includes('cognito-idp:AdminGetUser'), true, 'API role must be able to read verified Cognito attributes.');
+for (const parameter of [
+  'UserContentBucketName',
+  'BedrockEmbeddingModelId',
+  'BedrockEmbeddingDimensions',
+  'BedrockGenerationModelArn',
+]) {
+  assert.equal(
+    appTemplate.includes(`  ${parameter}:`),
+    true,
+    `Application template is missing required AI parameter ${parameter}.`,
+  );
+}
 
-console.log('Infrastructure contract validation passed: five-table DynamoDB model.');
+for (const marker of [
+  'AIWorkerRole:',
+  'AIWorkerFunction:',
+  'Handler: services/ai-worker/src/index.handler',
+  'EntryPoints: [services/ai-worker/src/index.ts]',
+  'USER_CONTENT_BUCKET: !Ref UserContentBucketName',
+  'BEDROCK_KNOWLEDGE_BASE_ID: !Ref CampusMeetKnowledgeBase',
+  'BEDROCK_DATA_SOURCE_ID: !GetAtt CampusMeetKnowledgeDataSource.DataSourceId',
+  'BEDROCK_GENERATION_MODEL_ID: !Ref BedrockGenerationModelArn',
+  'RequireResolvedAIInfrastructure:',
+  'KnowledgeVectorBucket:',
+  'Type: AWS::S3Vectors::VectorBucket',
+  'KnowledgeVectorIndex:',
+  'Type: AWS::S3Vectors::Index',
+  'Dimension: !Ref BedrockEmbeddingDimensions',
+  'DistanceMetric: cosine',
+  'KnowledgeBaseRole:',
+  'Principal: { Service: bedrock.amazonaws.com }',
+  'CampusMeetKnowledgeBase:',
+  'Type: AWS::Bedrock::KnowledgeBase',
+  'EmbeddingDataType: FLOAT32',
+  'Type: S3_VECTORS',
+  'CampusMeetKnowledgeDataSource:',
+  'Type: AWS::Bedrock::DataSource',
+  'DataDeletionPolicy: DELETE',
+  'InclusionPrefixes: [kb/]',
+  'MaxTokens: 300',
+  'OverlapPercentage: 20',
+  's3vectors:PutVectors',
+  's3vectors:GetVectors',
+  's3vectors:DeleteVectors',
+  's3vectors:QueryVectors',
+  's3vectors:GetIndex',
+  's3:DeleteObject',
+  'bedrock:Retrieve',
+  'bedrock:StartIngestionJob',
+  'bedrock:GetIngestionJob',
+  'bedrock:InvokeModel',
+  'AIWorkerLogGroup:',
+  'AIWorkerErrorAlarm:',
+  'AIWorkerDurationAlarm:',
+  'AIWorkerFunctionArn:',
+  'KnowledgeBaseId:',
+  'KnowledgeDataSourceId:',
+  'KnowledgeVectorBucketArn:',
+  'KnowledgeVectorIndexArn:',
+]) {
+  assert.equal(appTemplate.includes(marker), true, `Application template is missing ${marker}.`);
+}
+
+for (const removedExternalParameter of ['BedrockKnowledgeBaseId:', 'BedrockDataSourceId:']) {
+  assert.equal(
+    appTemplate.includes(`  ${removedExternalParameter}`),
+    false,
+    `${removedExternalParameter} must be created by M5-6B instead of supplied externally.`,
+  );
+}
+
+assert.equal(
+  appTemplate.includes('UserContentBucket:\n'),
+  false,
+  'M5 must consume the M4-owned user-content bucket instead of creating one.',
+);
+assert.equal(
+  appTemplate.includes('Type: AWS::Serverless::StateMachine'),
+  false,
+  'M5 must not create the M4-owned Step Functions state machine.',
+);
+assert.equal(
+  appTemplate.includes('Type: AWS::StepFunctions::StateMachine'),
+  false,
+  'M5 must not create the M4-owned Step Functions state machine.',
+);
+
+assert.equal(
+  appTemplate.includes('USER_POOL_ID: !Ref UserPool'),
+  true,
+  'API must receive the Cognito User Pool id.',
+);
+assert.equal(
+  appTemplate.includes('cognito-idp:AdminGetUser'),
+  true,
+  'API role must be able to read verified Cognito attributes.',
+);
+
+console.log(
+  'Infrastructure contract validation passed: data foundation, M5 AI Worker, Knowledge Base, and S3 Vectors.',
+);

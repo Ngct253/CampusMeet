@@ -1,5 +1,6 @@
 import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import { dashboardHandler } from './handlers/dashboard';
+import { aiJobDetailHandler } from './handlers/ai-jobs';
 import {
   groupDetailHandler,
   groupInvitationsHandler,
@@ -87,6 +88,7 @@ const findRoute = createRouter([
     path: '/groups/:groupId/ai/progress-analysis',
     handler: progressAnalysisHandler,
   },
+  { method: 'GET', path: '/ai/jobs/:aiJobId', handler: aiJobDetailHandler },
 ]);
 
 export const handler: APIGatewayProxyHandlerV2 = async (event, context, callback) => {

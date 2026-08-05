@@ -3,7 +3,9 @@ import { GroupRole } from '@campusmeet/shared';
 
 const getMembership = vi.hoisted(() => vi.fn());
 vi.mock('../src/repositories/collaboration', () => ({
-  DynamoDbCollaborationRepository: class { getMembership = getMembership; },
+  DynamoDbCollaborationRepository: class {
+    getMembership = getMembership;
+  },
 }));
 
 import { requireGroupMembership } from '../src/middleware/authorization';
@@ -21,7 +23,16 @@ describe('M1 authorization boundary', () => {
 
   it('không cho MEMBER thực hiện thao tác của Group Admin', async () => {
     getMembership.mockResolvedValue({ role: GroupRole.MEMBER, active: true });
-    await expect(requireGroupMembership('user-1', 'group-1', GroupRole.GROUP_ADMIN)).rejects.toMatchObject({
+    await expect(
+      requireGroupMembership('user-1', 'group-1', GroupRole.GROUP_ADMIN),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('từ chối membership không còn active', async () => {
+    getMembership.mockResolvedValue({ role: GroupRole.MEMBER, active: false });
+    await expect(requireGroupMembership('user-1', 'group-1')).rejects.toMatchObject({
       code: 'FORBIDDEN',
     });
   });

@@ -290,12 +290,14 @@ export function AIChatPanel({
   answer,
   isPending = false,
   error,
+  context = 'meeting',
   onSubmit,
   onOpenCitation,
 }: {
   answer?: GroundedAnswer;
   isPending?: boolean;
   error?: Error | null;
+  context?: 'meeting' | 'group';
   onSubmit: (input: { question: string; intent: 'QUESTION_ANSWER' | 'LATE_JOIN_SUMMARY' }) => void;
   onOpenCitation?: (citation: Citation) => void;
 }) {
@@ -308,7 +310,7 @@ export function AIChatPanel({
   return (
     <section
       aria-busy={isPending}
-      aria-label="Trợ lý cuộc họp"
+      aria-label={context === 'meeting' ? 'Trợ lý cuộc họp' : 'Trợ lý nhóm'}
       className="ai-surface ai-chat-panel"
     >
       <PanelHeader
@@ -318,10 +320,14 @@ export function AIChatPanel({
             Nguồn trong nhóm
           </span>
         }
-        description="Hỏi từ tài liệu, bản ghi và biên bản mà bạn được phép truy cập."
-        eyebrow="Meeting copilot"
+        description={
+          context === 'meeting'
+            ? 'Hỏi từ tài liệu, bản ghi và biên bản mà bạn được phép truy cập.'
+            : 'Hỏi từ tài liệu, bản ghi và biên bản đã duyệt trong nhóm hiện tại.'
+        }
+        eyebrow={context === 'meeting' ? 'Meeting copilot' : 'Group copilot'}
         icon="message"
-        title="Nối lại mạch cuộc họp"
+        title={context === 'meeting' ? 'Nối lại mạch cuộc họp' : 'Đối chiếu kiến thức nhóm'}
       />
       <form className="ai-composer" onSubmit={submit}>
         <label htmlFor="ai-question">Bạn muốn làm rõ điều gì?</label>
@@ -355,20 +361,22 @@ export function AIChatPanel({
               </>
             )}
           </button>
-          <button
-            className="ai-button ai-button--secondary"
-            type="button"
-            disabled={isPending}
-            onClick={() =>
-              onSubmit({
-                question: 'Tóm tắt phần nội dung cuộc họp đã diễn ra trước khi tôi tham gia.',
-                intent: 'LATE_JOIN_SUMMARY',
-              })
-            }
-          >
-            <AIIcon name="clock" size={17} />
-            Tóm tắt phần đã lỡ
-          </button>
+          {context === 'meeting' && (
+            <button
+              className="ai-button ai-button--secondary"
+              type="button"
+              disabled={isPending}
+              onClick={() =>
+                onSubmit({
+                  question: 'Tóm tắt phần nội dung cuộc họp đã diễn ra trước khi tôi tham gia.',
+                  intent: 'LATE_JOIN_SUMMARY',
+                })
+              }
+            >
+              <AIIcon name="clock" size={17} />
+              Tóm tắt phần đã lỡ
+            </button>
+          )}
         </div>
       </form>
       {isPending && <AIJobState isLoading />}
@@ -412,7 +420,7 @@ export function GroupSearchPanel({
         description="Đối chiếu quyết định và nội dung đã duyệt, luôn giới hạn trong nhóm này."
         eyebrow="Group knowledge"
         icon="search"
-        title="Tìm trong trí nhớ của nhóm"
+        title="Tìm trong tài liệu của nhóm"
       />
       <div className="ai-field">
         <label htmlFor="ai-group-question">Câu hỏi cần đối chiếu</label>

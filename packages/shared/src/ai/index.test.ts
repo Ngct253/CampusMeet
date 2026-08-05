@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aiJobDetailSchema,
   groupKnowledgeQuerySchema,
   knowledgeIngestionPayloadSchema,
   supportedDocumentContentTypes,
@@ -65,6 +66,65 @@ describe('M5 shared schemas', () => {
       knowledgeIngestionPayloadSchema.safeParse({
         ...basePayload,
         contentType: 'application/x-msdownload',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('validates a grounded result returned by AI job polling', () => {
+    const detail = aiJobDetailSchema.parse({
+      aiJobId: 'job-1',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      type: 'GENERATE_ANSWER',
+      status: 'COMPLETED',
+      attempt: 1,
+      requestId: 'request-1',
+      provider: 'BEDROCK',
+      createdAt: '2026-08-03T00:00:00.000Z',
+      updatedAt: '2026-08-03T00:01:00.000Z',
+      result: {
+        answer: 'Không có đủ nguồn để trả lời.',
+        citations: [],
+        scope: 'CURRENT_MEETING',
+        insufficientContext: true,
+      },
+    });
+
+    expect(detail.result).toMatchObject({ scope: 'CURRENT_MEETING' });
+  });
+
+  it('rejects a completed generation job without a result', () => {
+    expect(
+      aiJobDetailSchema.safeParse({
+        aiJobId: 'job-1',
+        groupId: 'group-1',
+        type: 'GENERATE_ANSWER',
+        status: 'COMPLETED',
+        attempt: 1,
+        requestId: 'request-1',
+        createdAt: '2026-08-03T00:00:00.000Z',
+        updatedAt: '2026-08-03T00:01:00.000Z',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a result that does not match the AI job type', () => {
+    expect(
+      aiJobDetailSchema.safeParse({
+        aiJobId: 'job-1',
+        groupId: 'group-1',
+        type: 'PROGRESS_ANALYSIS',
+        status: 'COMPLETED',
+        attempt: 1,
+        requestId: 'request-1',
+        createdAt: '2026-08-03T00:00:00.000Z',
+        updatedAt: '2026-08-03T00:01:00.000Z',
+        result: {
+          answer: 'Đây không phải kết quả phân tích tiến độ.',
+          citations: [],
+          scope: 'WHOLE_GROUP',
+          insufficientContext: false,
+        },
       }).success,
     ).toBe(false);
   });
