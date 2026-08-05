@@ -42,7 +42,13 @@ const saved: MeetingMinutes = {
   summary: input.summary,
   discussion: input.discussion,
   decisions: [{ id: 'decision-1', content: 'Quyết định' }],
-  actionItems: [{ id: 'action-1', content: 'Hành động', assigneeId: 'user-1' }],
+  actionItems: [{
+    id: 'action-1',
+    content: 'Hành động',
+    assigneeId: 'user-1',
+    dueAt: '2026-08-10T03:30:00.000Z',
+    taskId: 'task-1',
+  }],
   version: 1,
   createdBy: 'admin-1',
   createdAt: '2026-08-04T03:00:00.000Z',
@@ -121,7 +127,20 @@ describe('MinutesService', () => {
   it('allows an active Group Admin to create version 1 with actor and meeting from persisted data', async () => {
     const { minutes, meetings, groups } = dependencies();
     await new MinutesService(minutes, meetings, groups).update('admin-1', meeting.id, input);
-    expect(minutes.createVersion).toHaveBeenCalledWith(meeting, 'admin-1', input, 1, undefined);
+    expect(minutes.createVersion).toHaveBeenCalledWith(
+      meeting,
+      'admin-1',
+      expect.objectContaining({
+        ...input,
+        actionItems: [expect.objectContaining({
+          id: expect.any(String),
+          content: 'Hành động',
+          assigneeId: 'user-1',
+        })],
+      }),
+      1,
+      undefined,
+    );
   });
 
   it('rejects a regular member from writing', async () => {
@@ -179,9 +198,33 @@ describe('MinutesService', () => {
   it('creates N+1 only when expectedVersion matches and preserves the logical Minutes id', async () => {
     const { minutes, meetings, groups } = dependencies();
     minutes.getLatest.mockResolvedValue({ ...saved, version: 7 });
-    const nextInput = { ...input, expectedVersion: 7 };
+    const nextInput: UpdateMeetingMinutesRequest = {
+      ...input,
+      actionItems: [{
+        id: 'action-1',
+        content: 'Hành động cập nhật',
+        assigneeId: 'user-1',
+        dueAt: '2026-08-11T03:30:00.000Z',
+      }],
+      expectedVersion: 7,
+    };
     await new MinutesService(minutes, meetings, groups).update('admin-1', meeting.id, nextInput);
-    expect(minutes.createVersion).toHaveBeenCalledWith(meeting, 'admin-1', nextInput, 8, saved.id);
+    expect(minutes.createVersion).toHaveBeenCalledWith(
+      meeting,
+      'admin-1',
+      {
+        ...nextInput,
+        actionItems: [{
+          id: 'action-1',
+          content: 'Hành động cập nhật',
+          assigneeId: 'user-1',
+          dueAt: '2026-08-11T03:30:00.000Z',
+          taskId: 'task-1',
+        }],
+      },
+      8,
+      saved.id,
+    );
 
     await expect(
       new MinutesService(minutes, meetings, groups).update('admin-1', meeting.id, {
@@ -189,6 +232,53 @@ describe('MinutesService', () => {
         expectedVersion: 6,
       }),
     ).rejects.toMatchObject({ code: 'CONFLICT', statusCode: 409 });
+    expect(minutes.createVersion).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects duplicate and unknown action item ids without creating a version', async () => {
+    const { minutes, meetings, groups } = dependencies();
+    minutes.getLatest.mockResolvedValue(saved);
+    const service = new MinutesService(minutes, meetings, groups);
+    const base = { ...input, expectedVersion: 1 };
+
+    await expect(service.update('admin-1', meeting.id, {
+      ...base,
+      actionItems: [
+        { id: 'action-1', content: 'A' },
+        { id: 'action-1', content: 'B' },
+      ],
+    })).rejects.toMatchObject({ code: 'UNPROCESSABLE_ENTITY', statusCode: 422 });
+    await expect(service.update('admin-1', meeting.id, {
+      ...base,
+      actionItems: [{ id: 'action-unknown', content: 'A' }],
+    })).rejects.toMatchObject({ code: 'UNPROCESSABLE_ENTITY', statusCode: 422 });
+    expect(minutes.createVersion).not.toHaveBeenCalled();
+  });
+
+  it('preserves ids and task links while reordering and deleting action items', async () => {
+    const { minutes, meetings, groups } = dependencies();
+    minutes.getLatest.mockResolvedValue({
+      ...saved,
+      actionItems: [
+        { id: 'action-1', content: 'Một', taskId: 'task-1' },
+        { id: 'action-2', content: 'Hai', taskId: 'task-2' },
+        { id: 'action-3', content: 'Ba', dueAt: '2026-08-12T03:30:00.000Z' },
+      ],
+    });
+    await new MinutesService(minutes, meetings, groups).update('admin-1', meeting.id, {
+      ...input,
+      expectedVersion: 1,
+      actionItems: [
+        { id: 'action-3', content: 'Ba cập nhật', dueAt: '2026-08-13T03:30:00.000Z' },
+        { id: 'action-1', content: 'Một cập nhật' },
+      ],
+    });
+
+    const resolved = minutes.createVersion.mock.calls[0]?.[2];
+    expect(resolved.actionItems).toEqual([
+      { id: 'action-3', content: 'Ba cập nhật', dueAt: '2026-08-13T03:30:00.000Z' },
+      { id: 'action-1', content: 'Một cập nhật', taskId: 'task-1' },
+    ]);
   });
 
   it('rejects a next version above 999999 without writing', async () => {

@@ -82,9 +82,11 @@ const minutesDraft = (minutes?: MeetingMinutes): MinutesDraft => ({
   discussion: minutes?.discussion ?? '',
   decisions: minutes?.decisions.map(({ content }) => ({ content })) ?? [],
   actionItems:
-    minutes?.actionItems.map(({ content, assigneeId }) => ({
+    minutes?.actionItems.map(({ id, content, assigneeId, dueAt }) => ({
+      id,
       content,
       ...(assigneeId ? { assigneeId } : {}),
+      ...(dueAt ? { dueAt } : {}),
     })) ?? [],
 });
 
@@ -120,6 +122,7 @@ function MinutesReadView({ minutes, group }: { minutes: MeetingMinutes; group?: 
               <li key={item.id}>
                 {item.content}
                 {item.assigneeId ? ` — ${memberLabel(group, item.assigneeId)}` : ''}
+                {item.dueAt ? ` — hạn ${formatDate(item.dueAt)}` : ''}
               </li>
             ))}
           </ul>
@@ -260,7 +263,7 @@ function MinutesEditor({
       <fieldset>
         <legend>Việc cần thực hiện</legend>
         {draft.actionItems.map((action, index) => (
-          <div className="minutes-action-row" key={`action-${index}`}>
+          <div className="minutes-action-row" key={action.id ?? `action-new-${index}`}>
             <input
               aria-label={`Việc cần thực hiện ${index + 1}`}
               value={action.content}
@@ -284,8 +287,10 @@ function MinutesEditor({
                   actionItems: draft.actionItems.map((item, itemIndex) =>
                     itemIndex === index
                       ? {
+                          ...(item.id ? { id: item.id } : {}),
                           content: item.content,
                           ...(event.target.value ? { assigneeId: event.target.value } : {}),
+                          ...(item.dueAt ? { dueAt: item.dueAt } : {}),
                         }
                       : item,
                   ),
@@ -299,6 +304,28 @@ function MinutesEditor({
                 </option>
               ))}
             </select>
+            <input
+              aria-label={`Hạn hoàn thành ${index + 1}`}
+              type="datetime-local"
+              value={action.dueAt ? toLocalInput(action.dueAt) : ''}
+              onChange={(event) =>
+                changeDraft({
+                  ...draft,
+                  actionItems: draft.actionItems.map((item, itemIndex) =>
+                    itemIndex === index
+                      ? {
+                          ...(item.id ? { id: item.id } : {}),
+                          content: item.content,
+                          ...(item.assigneeId ? { assigneeId: item.assigneeId } : {}),
+                          ...(event.target.value
+                            ? { dueAt: new Date(event.target.value).toISOString() }
+                            : {}),
+                        }
+                      : item,
+                  ),
+                })
+              }
+            />
             <button
               type="button"
               disabled={mutation.isPending}

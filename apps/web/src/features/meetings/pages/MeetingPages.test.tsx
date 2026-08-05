@@ -82,7 +82,13 @@ const minutes = {
   summary: 'Tóm tắt đã lưu',
   discussion: 'Nội dung đã lưu',
   decisions: [{ id: 'decision-1', content: 'Quyết định A' }],
-  actionItems: [{ id: 'action-1', content: 'Việc A', assigneeId: 'user-1' }],
+  actionItems: [{
+    id: 'action-1',
+    content: 'Việc A',
+    assigneeId: 'user-1',
+    dueAt: '2026-08-10T03:30:00.000Z',
+    taskId: 'task-1',
+  }],
   version: 2,
   createdBy: 'admin-1',
   createdAt: '2026-08-04T03:00:00.000Z',
@@ -290,7 +296,7 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     renderDetail('MEMBER');
     expect(await screen.findByText('Tóm tắt đã lưu')).toBeInTheDocument();
     expect(screen.getByText('Quyết định A')).toBeInTheDocument();
-    expect(screen.getByText(/Việc A — Lan/)).toBeInTheDocument();
+    expect(screen.getByText(/Việc A — Lan — hạn/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Lưu biên bản' })).not.toBeInTheDocument();
   });
 
@@ -359,6 +365,52 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
         expect.objectContaining({ expectedVersion: 2 }),
       ),
     );
+  });
+
+  it('round-trips action item identity and due date without sending server taskId', async () => {
+    services.getMeetingMinutes.mockResolvedValue(minutes);
+    services.updateMeetingMinutes.mockResolvedValue({ ...minutes, version: 3 });
+    renderDetail();
+
+    const dueAt = (await screen.findByLabelText('Hạn hoàn thành 1')) as HTMLInputElement;
+    expect(dueAt.value).toBe('2026-08-10T10:30');
+    fireEvent.change(dueAt, { target: { value: '2026-08-11T09:15' } });
+    fireEvent.change(screen.getByLabelText('Việc cần thực hiện 1'), {
+      target: { value: 'Việc A cập nhật' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
+
+    await waitFor(() => expect(services.updateMeetingMinutes).toHaveBeenCalledTimes(1));
+    const sent = services.updateMeetingMinutes.mock.calls[0]?.[1];
+    expect(sent.actionItems).toEqual([{
+      id: 'action-1',
+      content: 'Việc A cập nhật',
+      assigneeId: 'user-1',
+      dueAt: new Date('2026-08-11T09:15').toISOString(),
+    }]);
+    expect(sent.actionItems[0]).not.toHaveProperty('taskId');
+  });
+
+  it('keeps the remaining action item id after deleting another item', async () => {
+    services.getMeetingMinutes.mockResolvedValue({
+      ...minutes,
+      actionItems: [
+        minutes.actionItems[0],
+        { id: 'action-2', content: 'Việc B', assigneeId: 'admin-1' },
+      ],
+    });
+    services.updateMeetingMinutes.mockResolvedValue({ ...minutes, version: 3 });
+    renderDetail();
+
+    await screen.findByDisplayValue('Việc A');
+    const deleteButtons = screen.getAllByRole('button', { name: 'Xóa' });
+    fireEvent.click(deleteButtons[1]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
+
+    await waitFor(() => expect(services.updateMeetingMinutes).toHaveBeenCalledTimes(1));
+    expect(services.updateMeetingMinutes.mock.calls[0]?.[1].actionItems).toEqual([
+      expect.objectContaining({ id: 'action-2', content: 'Việc B' }),
+    ]);
   });
 
   it('locks double submit while pending', async () => {

@@ -324,6 +324,10 @@
   max-width: 16rem;
 }
 
+.minutes-action-row input[type='datetime-local'] {
+  max-width: 18rem;
+}
+
 .minutes-dirty {
   color: #b45309;
 }
@@ -340,7 +344,8 @@
     flex-direction: column;
   }
 
-  .minutes-action-row select {
+  .minutes-action-row select,
+  .minutes-action-row input[type='datetime-local'] {
     max-width: none;
   }
 }

@@ -51,7 +51,13 @@ const minutesItem = {
   summary: 'Tóm tắt',
   discussion: '',
   decisions: [{ id: 'decision-1', content: 'Quyết định' }],
-  actionItems: [{ id: 'action-1', content: 'Hành động', assigneeId: 'user-1' }],
+  actionItems: [{
+    id: 'action-1',
+    content: 'Hành động',
+    assigneeId: 'user-1',
+    dueAt: '2026-08-10T03:30:00.000Z',
+    taskId: 'task-1',
+  }],
   version: 1,
   createdBy: 'admin-1',
   createdAt: '2026-08-04T03:00:00.000Z',
@@ -79,6 +85,13 @@ describe('DynamoDbMinutesRepository', () => {
     await expect(new DynamoDbMinutesRepository().getLatest('meeting-1')).resolves.toMatchObject({
       id: 'minutes-1',
       version: 1,
+      actionItems: [{
+        id: 'action-1',
+        content: 'Hành động',
+        assigneeId: 'user-1',
+        dueAt: '2026-08-10T03:30:00.000Z',
+        taskId: 'task-1',
+      }],
     });
     const command = send.mock.calls[0]?.[0] as {
       constructor: { name: string };
@@ -116,6 +129,10 @@ describe('DynamoDbMinutesRepository', () => {
     ['meeting id', { meetingId: 'other-meeting' }],
     ['version encoded in the sort key', { SK: 'MINUTES#VERSION#000002' }],
     ['created timestamp', { createdAt: '2026-02-30T03:00:00.000Z' }],
+    [
+      'action item due date',
+      { actionItems: [{ ...minutesItem.actionItems[0], dueAt: '2026-08-10T10:30:00' }] },
+    ],
   ])('rejects a persisted item with invalid %s', async (_label, override) => {
     send.mockResolvedValueOnce({ Items: [{ ...minutesItem, ...override }] });
     await expect(new DynamoDbMinutesRepository().getLatest('meeting-1')).rejects.toThrow(
@@ -123,7 +140,7 @@ describe('DynamoDbMinutesRepository', () => {
     );
   });
 
-  it('puts a six-digit version with server metadata and unique row ids', async () => {
+  it('puts a six-digit version with server metadata and lossless action items', async () => {
     send.mockResolvedValueOnce({});
     const result = await new DynamoDbMinutesRepository().createVersion(
       meeting,
@@ -132,7 +149,16 @@ describe('DynamoDbMinutesRepository', () => {
         summary: 'Tóm tắt',
         discussion: '',
         decisions: [{ content: 'A' }, { content: 'B' }],
-        actionItems: [{ content: 'C' }, { content: 'D', assigneeId: 'user-1' }],
+        actionItems: [
+          { id: 'action-c', content: 'C' },
+          {
+            id: 'action-d',
+            content: 'D',
+            assigneeId: 'user-1',
+            dueAt: '2026-08-10T03:30:00.000Z',
+            taskId: 'task-1',
+          },
+        ],
         expectedVersion: 6,
       },
       7,
@@ -161,7 +187,13 @@ describe('DynamoDbMinutesRepository', () => {
     expect(item).not.toHaveProperty('GSI2PK');
     const ids = [...result.decisions, ...result.actionItems].map(({ id }) => id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(result.actionItems[1]).not.toHaveProperty('taskId');
+    expect(result.actionItems[1]).toEqual({
+      id: 'action-d',
+      content: 'D',
+      assigneeId: 'user-1',
+      dueAt: '2026-08-10T03:30:00.000Z',
+      taskId: 'task-1',
+    });
   });
 
   it('maps a conditional race to 409 only after a consistent latest query observes a new version', async () => {
@@ -350,5 +382,32 @@ describe('minutesHandler', () => {
       groupId: 'group-1',
       createdBy: 'admin-1',
     });
+  });
+
+  it.each([
+    ['a due date without timezone', { content: 'Action', dueAt: '2026-08-10T10:30:00' }],
+    ['a client-managed task id', { content: 'Action', taskId: 'task-forged' }],
+  ])('returns 400 before persistence for %s', async (_label, actionItem) => {
+    const event = authenticatedEvent('PUT');
+    event.body = JSON.stringify({
+      summary: 'Tóm tắt',
+      discussion: '',
+      decisions: [],
+      actionItems: [actionItem],
+      expectedVersion: 0,
+    });
+    const response = (await minutesHandler(
+      event,
+      {} as never,
+      vi.fn(),
+    )) as APIGatewayProxyStructuredResultV2;
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body ?? '{}')).toMatchObject({
+      success: false,
+      error: { code: 'BAD_REQUEST' },
+      requestId: 'test-request-id',
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(getMeetingById).not.toHaveBeenCalled();
   });
 });

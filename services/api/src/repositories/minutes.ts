@@ -5,9 +5,8 @@ import type {
   Decision,
   Meeting,
   MeetingMinutes,
-  UpdateMeetingMinutesRequest,
 } from '@campusmeet/shared';
-import type { MinutesRepository } from '../domain/ports';
+import type { MinutesRepository, ResolvedMeetingMinutesInput } from '../domain/ports';
 import { ConflictError } from '../utils/errors';
 import { documentClient, stringValue, tableName, type DynamoItem } from './client';
 
@@ -72,8 +71,16 @@ const actionItemsValue = (value: unknown): ActionItem[] | undefined => {
     const content = stringValue(item, 'content');
     if (!id || !content) return [];
     const assigneeId = stringValue(item, 'assigneeId');
+    const dueAt = stringValue(item, 'dueAt');
     const taskId = stringValue(item, 'taskId');
-    return [{ id, content, ...(assigneeId ? { assigneeId } : {}), ...(taskId ? { taskId } : {}) }];
+    if (item.dueAt !== undefined && (!dueAt || !isIsoDateTime(dueAt))) return [];
+    return [{
+      id,
+      content,
+      ...(assigneeId ? { assigneeId } : {}),
+      ...(dueAt ? { dueAt } : {}),
+      ...(taskId ? { taskId } : {}),
+    }];
   });
   return actionItems.length === value.length ? actionItems : undefined;
 };
@@ -154,7 +161,7 @@ export class DynamoDbMinutesRepository implements MinutesRepository {
   async createVersion(
     meeting: Meeting,
     actorId: string,
-    input: UpdateMeetingMinutesRequest,
+    input: ResolvedMeetingMinutesInput,
     nextVersion: number,
     minutesId: string = randomUUID(),
   ): Promise<MeetingMinutes> {
@@ -168,11 +175,7 @@ export class DynamoDbMinutesRepository implements MinutesRepository {
       summary: input.summary,
       discussion: input.discussion,
       decisions: input.decisions.map(({ content }) => ({ id: randomUUID(), content })),
-      actionItems: input.actionItems.map(({ content, assigneeId }) => ({
-        id: randomUUID(),
-        content,
-        ...(assigneeId ? { assigneeId } : {}),
-      })),
+      actionItems: input.actionItems,
       version: nextVersion,
       createdBy: actorId,
       createdAt: new Date().toISOString(),

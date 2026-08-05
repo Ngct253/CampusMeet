@@ -6,7 +6,12 @@ const validInput = {
   summary: ' Tóm tắt ',
   discussion: ' Nội dung ',
   decisions: [{ content: ' Quyết định ' }],
-  actionItems: [{ content: ' Việc cần làm ', assigneeId: ' user-1 ' }],
+  actionItems: [{
+    id: ' action-1 ',
+    content: ' Việc cần làm ',
+    assigneeId: ' user-1 ',
+    dueAt: '2026-08-10T10:30:00+07:00',
+  }],
   expectedVersion: 0,
 };
 
@@ -27,7 +32,12 @@ describe('meetingMinutesInputSchema', () => {
       summary: 'Tóm tắt',
       discussion: 'Nội dung',
       decisions: [{ content: 'Quyết định' }],
-      actionItems: [{ content: 'Việc cần làm', assigneeId: 'user-1' }],
+      actionItems: [{
+        id: 'action-1',
+        content: 'Việc cần làm',
+        assigneeId: 'user-1',
+        dueAt: '2026-08-10T10:30:00+07:00',
+      }],
       expectedVersion: 0,
     });
     expect(
@@ -62,6 +72,8 @@ describe('meetingMinutesInputSchema', () => {
     ],
     ['empty action', { ...validInput, actionItems: [{ content: ' ' }] }],
     ['empty assignee', { ...validInput, actionItems: [{ content: 'x', assigneeId: ' ' }] }],
+    ['empty action id', { ...validInput, actionItems: [{ id: ' ', content: 'x' }] }],
+    ['due date without timezone', { ...validInput, actionItems: [{ content: 'x', dueAt: '2026-08-10T10:30:00' }] }],
     ['negative version', { ...validInput, expectedVersion: -1 }],
     ['fractional version', { ...validInput, expectedVersion: 1.5 }],
     ['version above maximum', { ...validInput, expectedVersion: 1000000 }],

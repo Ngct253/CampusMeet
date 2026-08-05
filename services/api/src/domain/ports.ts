@@ -1,4 +1,5 @@
 import type {
+  ActionItem,
   CreateTaskRequest,
   Group,
   GroupRole,
@@ -9,6 +10,10 @@ import type {
   TaskStatus,
   UpdateMeetingMinutesRequest,
 } from '@campusmeet/shared';
+
+export type ResolvedMeetingMinutesInput = Omit<UpdateMeetingMinutesRequest, 'actionItems'> & {
+  actionItems: ActionItem[];
+};
 
 export interface GroupRepository {
   getById(id: string): Promise<Group | null>;
@@ -67,7 +72,7 @@ export interface MinutesRepository {
   createVersion(
     meeting: Meeting,
     actorId: string,
-    input: UpdateMeetingMinutesRequest,
+    input: ResolvedMeetingMinutesInput,
     nextVersion: number,
     minutesId?: string,
   ): Promise<MeetingMinutes>;

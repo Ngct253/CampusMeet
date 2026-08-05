@@ -94,8 +94,10 @@ const minutesDecisionInputSchema = z
   .strict();
 const minutesActionItemInputSchema = z
   .object({
+    id: z.string().trim().min(1).optional(),
     content: z.string().trim().min(1).max(1000),
     assigneeId: z.string().trim().min(1).optional(),
+    dueAt: z.string().datetime({ offset: true }).optional(),
   })
   .strict();
 export const meetingMinutesInputSchema = z
