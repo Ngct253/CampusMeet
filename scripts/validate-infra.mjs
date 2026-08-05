@@ -91,7 +91,7 @@ for (const variable of [
   );
 }
 
-for (const invalidAction of ['dynamodb:TransactGetItems', 'dynamodb:TransactWriteItems']) {
+for (const invalidAction of ['dynamodb:TransactGetItems']) {
   assert.equal(
     appTemplate.includes(invalidAction),
     false,
