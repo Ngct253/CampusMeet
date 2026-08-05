@@ -1,27 +1,45 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { IntegrationStatus, MeetingStatus } from '@campusmeet/shared';
+import {
+  GoogleSyncStatus,
+  IntegrationStatus,
+  MeetingStatus,
+  type Meeting,
+} from '@campusmeet/shared';
 import { apiEvent } from './fixtures';
 
 const send = vi.hoisted(() => vi.fn());
+const getMeetingById = vi.hoisted(() => vi.fn());
 vi.mock('../src/repositories/client', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/repositories/client')>();
   return { ...original, documentClient: { send } };
 });
+vi.mock('../src/repositories/dynamodb', () => ({
+  DynamoDbMeetingRepository: class {
+    getById = getMeetingById;
+  },
+}));
 
 import { minutesHandler } from '../src/handlers/minutes';
 import { DynamoDbMinutesRepository } from '../src/repositories/minutes';
 
-const meeting = {
+const meeting: Meeting = {
   id: 'meeting-1',
   groupId: 'group-1',
   title: 'Họp tuần',
   organizerId: 'admin-1',
   attendeeIds: ['admin-1'],
+  agenda: [],
   startsAt: '2026-08-04T01:00:00.000Z',
   endsAt: '2026-08-04T02:00:00.000Z',
   status: MeetingStatus.COMPLETED,
+  googleSyncStatus: GoogleSyncStatus.NOT_REQUESTED,
   integrationStatus: IntegrationStatus.READY,
+  createdAt: '2026-08-01T00:00:00.000Z',
+  createdBy: 'admin-1',
+  updatedAt: '2026-08-01T00:00:00.000Z',
+  updatedBy: 'admin-1',
+  version: 1,
 };
 const minutesItem = {
   PK: 'MEETING#meeting-1',
@@ -213,6 +231,7 @@ describe('DynamoDbMinutesRepository', () => {
 describe('minutesHandler', () => {
   beforeEach(() => {
     send.mockReset();
+    getMeetingById.mockReset().mockResolvedValue(meeting);
     process.env.MEETING_DATA_TABLE = 'campusmeet-test-meeting-data';
     process.env.COLLABORATION_TABLE = 'campusmeet-test-collaboration';
   });
@@ -235,7 +254,6 @@ describe('minutesHandler', () => {
 
   it('returns the latest Minutes in the standard success envelope using the JWT actor', async () => {
     send
-      .mockResolvedValueOnce({ Item: meeting })
       .mockResolvedValueOnce({
         Item: {
           id: 'group-1:admin-1',
@@ -262,7 +280,6 @@ describe('minutesHandler', () => {
 
   it('returns a standard 404 envelope when the meeting has no Minutes', async () => {
     send
-      .mockResolvedValueOnce({ Item: meeting })
       .mockResolvedValueOnce({
         Item: {
           id: 'group-1:admin-1',
@@ -289,7 +306,6 @@ describe('minutesHandler', () => {
 
   it('creates Minutes from the path meeting and JWT actor in the standard envelope', async () => {
     send
-      .mockResolvedValueOnce({ Item: meeting })
       .mockResolvedValueOnce({
         Item: {
           id: 'group-1:admin-1',
@@ -327,7 +343,7 @@ describe('minutesHandler', () => {
       },
       requestId: 'test-request-id',
     });
-    const put = send.mock.calls[3]?.[0] as { input: { Item: Record<string, unknown> } };
+    const put = send.mock.calls[2]?.[0] as { input: { Item: Record<string, unknown> } };
     expect(put.input.Item).toMatchObject({
       PK: 'MEETING#meeting-1',
       meetingId: 'meeting-1',

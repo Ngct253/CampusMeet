@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  GoogleSyncStatus,
   GroupRole,
   IntegrationStatus,
   MeetingStatus,
@@ -15,10 +16,17 @@ const meeting: Meeting = {
   title: 'Họp tuần',
   organizerId: 'admin-1',
   attendeeIds: ['admin-1', 'user-1'],
+  agenda: [],
   startsAt: '2026-08-04T01:00:00.000Z',
   endsAt: '2026-08-04T02:00:00.000Z',
   status: MeetingStatus.COMPLETED,
+  googleSyncStatus: GoogleSyncStatus.NOT_REQUESTED,
   integrationStatus: IntegrationStatus.READY,
+  createdAt: '2026-08-04T00:00:00.000Z',
+  createdBy: 'admin-1',
+  updatedAt: '2026-08-04T00:00:00.000Z',
+  updatedBy: 'admin-1',
+  version: 1,
 };
 const input: UpdateMeetingMinutesRequest = {
   summary: 'Tóm tắt',

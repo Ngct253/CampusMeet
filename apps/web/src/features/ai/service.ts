@@ -1,7 +1,9 @@
 import { fetchAuthSession } from 'aws-amplify/auth';
 import {
+  aiJobDetailSchema,
   aiJobSchema,
   type AIJob,
+  type AIJobDetail,
   type GenerateMeetingDraftRequest,
   type GroupKnowledgeQuery,
   type GroupProgressAnalysisRequest,
@@ -58,7 +60,7 @@ export interface AIService {
     request: GroupProgressAnalysisRequest,
     idempotencyKey: string,
   ): Promise<AIJob>;
-  getJob(aiJobId: string): Promise<AIJob>;
+  getJob(aiJobId: string): Promise<AIJobDetail>;
 }
 
 interface AIServiceOptions {
@@ -76,7 +78,11 @@ export const createAIService = (options: AIServiceOptions = {}): AIService => {
   const fetcher = options.fetcher ?? fetch;
   const getAccessToken = options.getAccessToken ?? defaultAccessToken;
 
-  const request = async (path: string, init: RequestInit = {}): Promise<AIJob> => {
+  const request = async <T>(
+    path: string,
+    schema: { parse(value: unknown): T },
+    init: RequestInit = {},
+  ): Promise<T> => {
     if (!baseUrl) {
       throw new AIServiceError(503, 'API_NOT_CONFIGURED', 'API CampusMeet chưa được cấu hình.');
     }
@@ -99,11 +105,11 @@ export const createAIService = (options: AIServiceOptions = {}): AIService => {
         failure?.error?.message ?? 'Không thể xử lý yêu cầu AI.',
       );
     }
-    return aiJobSchema.parse(payload.data);
+    return schema.parse(payload.data);
   };
 
   const post = (path: string, body: unknown, idempotencyKey: string) =>
-    request(path, {
+    request(path, aiJobSchema, {
       method: 'POST',
       body: JSON.stringify(body),
       headers: { 'idempotency-key': idempotencyKey },
@@ -119,7 +125,7 @@ export const createAIService = (options: AIServiceOptions = {}): AIService => {
       post(`/meetings/${pathId(meetingId)}/ai/task-proposals`, body, key),
     progressAnalysis: (groupId, body, key) =>
       post(`/groups/${pathId(groupId)}/ai/progress-analysis`, body, key),
-    getJob: (aiJobId) => request(`/ai/jobs/${pathId(aiJobId)}`),
+    getJob: (aiJobId) => request(`/ai/jobs/${pathId(aiJobId)}`, aiJobDetailSchema),
   };
 };
 

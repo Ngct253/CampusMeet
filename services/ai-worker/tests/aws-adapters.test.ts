@@ -52,6 +52,35 @@ describe('AWS Phase 3 adapters', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('deletes only a normalized object and its Bedrock metadata sidecar', async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const store = new S3SourceObjectStore({ send } as unknown as S3Client, 'content-bucket');
+
+    await store.deleteNormalized('kb/group-1/meeting-1/source-1/v1/content.txt');
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]![0].input).toMatchObject({
+      Bucket: 'content-bucket',
+      Delete: {
+        Quiet: true,
+        Objects: [
+          { Key: 'kb/group-1/meeting-1/source-1/v1/content.txt' },
+          { Key: 'kb/group-1/meeting-1/source-1/v1/content.txt.metadata.json' },
+        ],
+      },
+    });
+  });
+
+  it('refuses to delete an object outside the normalized knowledge prefix', async () => {
+    const send = vi.fn();
+    const store = new S3SourceObjectStore({ send } as unknown as S3Client, 'content-bucket');
+
+    await expect(store.deleteNormalized('uploads/group-1/source.txt')).rejects.toThrow(
+      'INVALID_NORMALIZED_OBJECT_KEY',
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('constructs authorization scope filters before Bedrock retrieval', async () => {
     const send = vi.fn().mockResolvedValue({ retrievalResults: [] });
     const retriever = new BedrockKnowledgeRetriever(

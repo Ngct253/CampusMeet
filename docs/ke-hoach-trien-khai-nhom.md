@@ -240,7 +240,7 @@ User kết nối Google
   - cô lập Meet Add-ons SDK và `getMeetingInfo()` tại `apps/web/src/features/meet-addon/meet-addon-client.ts`;
   - dùng `meetingId` làm external identifier chính; `meetingCode` chỉ hỗ trợ nhận context hiện tại, không lưu làm định danh dài hạn.
 - Meet Add-on deployment: tạo HTTP deployment manifest `integrations/google-meet-addon/deployment.json` với `sidePanelUrl`, `addOnOrigins`, logo và `supportsScreenSharing`; không đặt secret hoặc OAuth token trong manifest.
-- Backend: OAuth/meeting sync, ánh xạ Meet context sang meeting nội bộ, presigned upload/complete/download, AIJob status và reminder handlers/services trong `services/api/src/`; Add-on không có backend riêng.
+- Backend: OAuth/meeting sync, ánh xạ Meet context sang meeting nội bộ, presigned upload/complete/download, AIJob orchestration/input state và reminder handlers/services trong `services/api/src/`; Add-on không có backend riêng.
 - Adapter: Google Calendar/Meet REST, S3, Step Functions, EventBridge Scheduler và SES.
 - Data:
   - integration reference/ciphertext secret reference trong `identity`;
@@ -298,7 +298,8 @@ Approved transcript/file + active membership
 
 ### Tệp và việc cần làm
 
-- Shared: M5 mở contract PR cho `AIJob`, `KnowledgeSource`, `KnowledgeScope`, `GroundedAnswer`, `Citation`, conversation, late summary, minutes/task draft và progress-analysis DTO; input API/output Worker có Zod schema runtime.
+- Shared: M5 mở contract PR cho `AIJob`, `AIJobDetail`, `KnowledgeSource`, `KnowledgeScope`, `GroundedAnswer`, `Citation`, conversation, late summary, minutes/task draft và progress-analysis DTO; input API/output Worker có Zod schema runtime.
+- Backend: M5 sở hữu handler polling `GET /ai/jobs/:aiJobId` và validation output theo loại job; M4 chỉ cập nhật trạng thái/đầu vào trong luồng orchestration mà M4 sở hữu.
 - Backend: ingestion, retrieval, current-meeting chat/late summary, selected/whole-group search, minutes/task draft và progress-analysis handlers/services trong `services/api/src/`.
 - Worker: normalize source, gọi Bedrock và cập nhật trạng thái trong worker Lambda được khai báo tại `infra/template.yaml`.
 - Frontend: chat, chọn phạm vi meeting, late summary, citation viewer, minutes/task draft, missing fields và trạng thái job/thiếu nguồn trong `apps/web/src/features/`.

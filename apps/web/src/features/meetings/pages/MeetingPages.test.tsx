@@ -10,50 +10,71 @@ import { GroupMeetingsPage, MeetingDetailPage } from './MeetingPages';
 const services = vi.hoisted(() => ({
   getGroup: vi.fn(),
   getMeetings: vi.fn(),
+  createMeeting: vi.fn(),
   getMeeting: vi.fn(),
+  updateMeeting: vi.fn(),
+  cancelMeeting: vi.fn(),
   getMeetingMinutes: vi.fn(),
   updateMeetingMinutes: vi.fn(),
 }));
+
 vi.mock('../../groups/service', () => ({
   getGroup: services.getGroup,
 }));
+
 vi.mock('../service', () => ({
   getMeetings: services.getMeetings,
-  createMeeting: vi.fn(),
+  createMeeting: services.createMeeting,
   getMeeting: services.getMeeting,
+  updateMeeting: services.updateMeeting,
+  cancelMeeting: services.cancelMeeting,
   getMeetingMinutes: services.getMeetingMinutes,
   updateMeetingMinutes: services.updateMeetingMinutes,
-  updateMeeting: vi.fn(),
-  cancelMeeting: vi.fn(),
+}));
+
+const authMock = vi.hoisted(() => ({ userId: 'user-1' }));
+
+vi.mock('../../../auth/AuthProvider', () => ({
+  useAuth: () => ({
+    status: 'authenticated',
+    user: { userId: authMock.userId },
+  }),
+}));
+
+vi.mock('../../ai', () => ({
+  MeetingAIWorkspace: ({ meetingId }: { meetingId: string }) => (
+    <div data-testid="meeting-ai-workspace">AI workspace {meetingId}</div>
+  ),
 }));
 
 afterEach(cleanup);
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  services.getGroup.mockResolvedValue({
-    group: { id: 'group-1', name: 'Nhóm A', role: 'MEMBER' },
-    members: [],
-  });
-  services.getMeetings.mockResolvedValue([]);
-  services.getMeeting.mockResolvedValue(meeting);
-  services.getMeetingMinutes.mockRejectedValue(
-    new ApiClientError('Chưa có biên bản.', 404, 'NOT_FOUND'),
-  );
-  services.updateMeetingMinutes.mockReset();
-});
-
-const meeting = {
-  id: 'meeting-1',
+const meetingFixture = (
+  meetingId = 'meeting-1',
+  organizerId = 'admin-1',
+  status = 'COMPLETED',
+) => ({
+  id: meetingId,
   groupId: 'group-1',
   title: 'Họp tuần',
-  organizerId: 'admin-1',
+  description: 'Agenda overview',
+  organizerId,
   attendeeIds: ['admin-1', 'user-1'],
+  agenda: [],
   startsAt: '2026-08-04T01:00:00.000Z',
   endsAt: '2026-08-04T02:00:00.000Z',
-  status: 'COMPLETED',
+  status,
+  googleSyncStatus: 'NOT_REQUESTED',
   integrationStatus: 'READY',
-};
+  createdAt: '2026-08-01T00:00:00.000Z',
+  createdBy: organizerId,
+  updatedAt: '2026-08-01T00:00:00.000Z',
+  updatedBy: organizerId,
+  version: 1,
+});
+
+const meeting = meetingFixture();
+
 const minutes = {
   id: 'minutes-1',
   meetingId: 'meeting-1',
@@ -66,6 +87,7 @@ const minutes = {
   createdBy: 'admin-1',
   createdAt: '2026-08-04T03:00:00.000Z',
 };
+
 const groupDetails = (role: 'MEMBER' | 'GROUP_ADMIN') => ({
   group: { id: 'group-1', name: 'Nhóm A', role },
   members: [
@@ -80,12 +102,34 @@ const groupDetails = (role: 'MEMBER' | 'GROUP_ADMIN') => ({
   ],
 });
 
+beforeEach(() => {
+  vi.clearAllMocks();
+  authMock.userId = 'user-1';
+
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'MEMBER' },
+    members: [],
+  });
+
+  services.getMeetings.mockResolvedValue([]);
+  services.getMeeting.mockResolvedValue(meeting);
+  services.createMeeting.mockResolvedValue({ id: 'meeting-created' });
+  services.updateMeeting.mockResolvedValue({});
+  services.cancelMeeting.mockResolvedValue({});
+  services.getMeetingMinutes.mockRejectedValue(
+    new ApiClientError('Chưa có biên bản.', 404, 'NOT_FOUND'),
+  );
+  services.updateMeetingMinutes.mockReset();
+});
+
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/app/groups/group-1/meetings']}>
         <Routes>
+          <Route path="/app/meetings/:meetingId" element={<div>Meeting created</div>} />
           <Route path="/app/groups/:groupId/meetings" element={<GroupMeetingsPage />} />
         </Routes>
       </MemoryRouter>
@@ -97,6 +141,7 @@ function renderDetail(role: 'MEMBER' | 'GROUP_ADMIN' = 'GROUP_ADMIN') {
   services.getGroup.mockResolvedValue(groupDetails(role));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const invalidate = vi.spyOn(client, 'invalidateQueries');
+
   return {
     client,
     invalidate,
@@ -111,6 +156,63 @@ function renderDetail(role: 'MEMBER' | 'GROUP_ADMIN' = 'GROUP_ADMIN') {
     ),
   };
 }
+
+it('hiển thị loading state trong khi tải timeline', () => {
+  services.getMeetings.mockReturnValue(new Promise(() => undefined));
+  renderPage();
+  expect(screen.getByRole('status')).toBeInTheDocument();
+});
+
+it('validate form và submit create thành công', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  renderPage();
+  const button = await screen.findByRole('button', { name: /tạo cuộc họp/i });
+  fireEvent.click(button);
+  expect(services.createMeeting).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText(/tiêu đề/i), { target: { value: 'Planning' } });
+  fireEvent.click(button);
+  await waitFor(() => expect(services.createMeeting).toHaveBeenCalledTimes(1));
+});
+
+it('render detail, submit edit và xác nhận cancel', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [{ membership: { userId: 'admin' }, user: { displayName: 'Admin' } }],
+  });
+  services.getMeeting.mockResolvedValue(meetingFixture('meeting-1', 'admin', 'SCHEDULED'));
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  renderDetail();
+
+  expect(await screen.findByText('Agenda overview')).toBeInTheDocument();
+  fireEvent.click(await screen.findByText(/chỉnh sửa cuộc họp/i));
+  fireEvent.change(screen.getByLabelText(/tiêu đề/i), {
+    target: { value: 'Updated planning' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /lưu thay đổi/i }));
+  await waitFor(() => expect(services.updateMeeting).toHaveBeenCalledTimes(1));
+
+  fireEvent.click(screen.getByRole('button', { name: /^hủy cuộc họp$/i }));
+  expect(confirm).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(services.cancelMeeting).toHaveBeenCalledTimes(1));
+  confirm.mockRestore();
+});
+
+it('hiển thị server validation error khi create thất bại', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  services.createMeeting.mockRejectedValue(new Error('Tiêu đề không hợp lệ'));
+  renderPage();
+  fireEvent.change(await screen.findByLabelText(/tiêu đề/i), {
+    target: { value: 'Planning' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /tạo cuộc họp/i }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Tiêu đề không hợp lệ');
+});
 
 it('hiển thị trạng thái rỗng rõ ràng và ẩn biểu mẫu tạo với thành viên thường', async () => {
   renderPage();
@@ -139,7 +241,9 @@ it('dùng giờ 24 tiếng không phụ thuộc CH hoặc SA', async () => {
       },
     ],
   });
+
   renderPage();
+
   const start = (await screen.findByLabelText('Bắt đầu')) as HTMLSelectElement;
   const end = screen.getByLabelText('Kết thúc') as HTMLSelectElement;
   expect(start.value).toMatch(/^\d{2}:(?:00|15|30|45)$/);
@@ -148,6 +252,21 @@ it('dùng giờ 24 tiếng không phụ thuộc CH hoặc SA', async () => {
   expect(screen.getByText('Lan')).toBeInTheDocument();
   expect(screen.getByText('lan@example.edu')).toBeInTheDocument();
   expect(screen.queryByText(/\b(?:CH|SA)\b/)).not.toBeInTheDocument();
+});
+
+it('không hiển thị thao tác sinh output cho thành viên không phải organizer', async () => {
+  services.getMeeting.mockResolvedValue(meetingFixture('meeting-1', 'admin'));
+  renderDetail('MEMBER');
+
+  expect(await screen.findByText('Agenda overview')).toBeInTheDocument();
+  expect(screen.queryByTestId('meeting-ai-workspace')).not.toBeInTheDocument();
+});
+
+it('cho phép organizer tạo output dù không phải Group Admin', async () => {
+  services.getMeeting.mockResolvedValue(meetingFixture('meeting-1', 'user-1'));
+  renderDetail('MEMBER');
+
+  expect(await screen.findByTestId('meeting-ai-workspace')).toHaveTextContent('meeting-1');
 });
 
 describe('Meeting Minutes on MeetingDetailPage', () => {
@@ -194,7 +313,9 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     const { invalidate } = renderDetail();
     expect(await screen.findByText('Chưa có biên bản')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Tóm tắt'), { target: { value: 'Biên bản đầu' } });
+    fireEvent.change(screen.getByLabelText('Tóm tắt'), {
+      target: { value: 'Biên bản đầu' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Thêm quyết định' }));
     fireEvent.change(screen.getByLabelText('Quyết định 1'), {
       target: { value: 'Chốt phương án' },
@@ -203,7 +324,9 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     fireEvent.change(screen.getByLabelText('Việc cần thực hiện 1'), {
       target: { value: 'Viết báo cáo' },
     });
-    fireEvent.change(screen.getByLabelText('Người phụ trách 1'), { target: { value: 'user-1' } });
+    fireEvent.change(screen.getByLabelText('Người phụ trách 1'), {
+      target: { value: 'user-1' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
     await waitFor(() => expect(services.updateMeetingMinutes).toHaveBeenCalledTimes(1));
     expect(services.updateMeetingMinutes).toHaveBeenCalledWith(
@@ -211,7 +334,9 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
       expect.objectContaining({ expectedVersion: 0, summary: 'Biên bản đầu' }),
     );
     expect(await screen.findByText('Đã lưu phiên bản 1.')).toBeInTheDocument();
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['meetings', 'meeting-1', 'minutes'] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['meetings', 'meeting-1', 'minutes'],
+    });
   });
 
   it('edits version N, adds/removes rows, and uses only active group member options', async () => {
@@ -271,7 +396,9 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     expect(await screen.findByText(/Bản nháp của bạn vẫn được giữ/)).toBeInTheDocument();
     expect(screen.getByDisplayValue('Bản nháp chưa lưu')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Quyết định nháp')).toBeInTheDocument();
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['meetings', 'meeting-1', 'minutes'] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['meetings', 'meeting-1', 'minutes'],
+    });
   });
 
   it('keeps a version-zero draft when a 409 refetch discovers version one', async () => {
@@ -283,7 +410,9 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     renderDetail();
     await screen.findByText('Chưa có biên bản');
-    fireEvent.change(screen.getByLabelText('Tóm tắt'), { target: { value: 'Draft version zero' } });
+    fireEvent.change(screen.getByLabelText('Tóm tắt'), {
+      target: { value: 'Draft version zero' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
     expect(await screen.findByText(/Bản nháp của bạn vẫn được giữ/)).toBeInTheDocument();
     expect(screen.getByDisplayValue('Draft version zero')).toBeInTheDocument();
@@ -297,10 +426,12 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
   });
 
   it('shows cancelled Minutes read-only without a save editor', async () => {
-    services.getMeeting.mockResolvedValue({ ...meeting, status: 'CANCELLED' });
+    services.getMeeting.mockResolvedValue(meetingFixture('meeting-1', 'admin-1', 'CANCELLED'));
     services.getMeetingMinutes.mockResolvedValue(minutes);
     renderDetail();
-    expect(await screen.findByText('Không thể chỉnh sửa biên bản của cuộc họp đã hủy.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Không thể chỉnh sửa biên bản của cuộc họp đã hủy.'),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Lưu biên bản' })).not.toBeInTheDocument();
   });
 
@@ -311,7 +442,9 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.updateMeetingMinutes.mockRejectedValue(new ApiClientError(expected, status, code));
     renderDetail();
     await screen.findByText('Chưa có biên bản');
-    fireEvent.change(screen.getByLabelText('Tóm tắt'), { target: { value: 'Draft còn nguyên' } });
+    fireEvent.change(screen.getByLabelText('Tóm tắt'), {
+      target: { value: 'Draft còn nguyên' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
     expect(await screen.findByText(expected)).toBeInTheDocument();
     expect(screen.getByDisplayValue('Draft còn nguyên')).toBeInTheDocument();

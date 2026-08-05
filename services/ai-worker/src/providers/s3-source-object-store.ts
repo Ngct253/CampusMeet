@@ -1,4 +1,9 @@
-import { GetObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  type S3Client,
+} from '@aws-sdk/client-s3';
 import type { SourceObjectStore } from '../domain/ports';
 
 const validateKey = (key: string) => {
@@ -43,5 +48,20 @@ export class S3SourceObjectStore implements SourceObjectStore {
         ServerSideEncryption: 'AES256',
       }),
     );
+  }
+
+  async deleteNormalized(key: string): Promise<void> {
+    validateKey(key);
+    if (!key.startsWith('kb/')) throw new Error('INVALID_NORMALIZED_OBJECT_KEY');
+    const response = await this.s3.send(
+      new DeleteObjectsCommand({
+        Bucket: this.bucketName,
+        Delete: {
+          Quiet: true,
+          Objects: [{ Key: key }, { Key: `${key}.metadata.json` }],
+        },
+      }),
+    );
+    if (response.Errors?.length) throw new Error('NORMALIZED_SOURCE_DELETE_FAILED');
   }
 }

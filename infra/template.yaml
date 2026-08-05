@@ -21,6 +21,38 @@ Parameters:
     Default: /campusmeet/dev/google-oauth
     NoEcho: true
     Description: Secrets Manager or Parameter Store reference only; never put the secret value here.
+  UserContentBucketName:
+    Type: String
+    AllowedPattern: '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: Name of the M4-owned private user-content bucket; this stack does not create it.
+  BedrockEmbeddingModelId:
+    Type: String
+    Default: cohere.embed-multilingual-v3
+    AllowedValues: [cohere.embed-multilingual-v3]
+    Description: Multilingual embedding model configured for the M5 knowledge base.
+  BedrockEmbeddingDimensions:
+    Type: Number
+    Default: 1024
+    AllowedValues: [1024]
+    Description: Vector dimension required by Cohere Embed Multilingual v3.
+  BedrockGenerationModelArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:bedrock:[^:]+:[^:]*:(foundation-model|inference-profile|application-inference-profile)/.+$'
+    Description: Model or inference-profile ARN passed to Converse and scoped in the worker policy.
+
+Rules:
+  RequireResolvedAIInfrastructure:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref UserContentBucketName, replace-with-m4-user-content-bucket]]
+        AssertDescription: UserContentBucketName must be the real M4 stack output.
+      - Assert:
+          !Not [
+            !Equals [
+              !Ref BedrockGenerationModelArn,
+              'arn:aws:bedrock:ap-southeast-1::foundation-model/replace-with-approved-model-id',
+            ],
+          ]
+        AssertDescription: BedrockGenerationModelArn must be an approved model resource.
 
 Globals:
   Function:
@@ -217,6 +249,244 @@ Resources:
             Auth: { Authorizer: CognitoAuthorizer }
       Tags: *SamTags
 
+  KnowledgeVectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+        - { Key: Component, Value: AI }
+        - { Key: Module, Value: M5 }
+
+  KnowledgeVectorIndex:
+    Type: AWS::S3Vectors::Index
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      VectorBucketArn: !GetAtt KnowledgeVectorBucket.VectorBucketArn
+      DataType: float32
+      Dimension: !Ref BedrockEmbeddingDimensions
+      DistanceMetric: cosine
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+        - { Key: Component, Value: AI }
+        - { Key: Module, Value: M5 }
+
+  KnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-knowledge-base'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: bedrock.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*'
+      Policies:
+        - PolicyName: CampusMeetKnowledgeBaseEmbedding
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: InvokeConfiguredEmbeddingModel
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockEmbeddingModelId}'
+        - PolicyName: CampusMeetKnowledgeBaseSource
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ListNormalizedKnowledgeSources
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}'
+                Condition:
+                  StringLike:
+                    s3:prefix: [kb, 'kb/*']
+              - Sid: ReadNormalizedKnowledgeSources
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/kb/*'
+        - PolicyName: CampusMeetKnowledgeBaseVectorIndex
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadWriteConfiguredVectorIndex
+                Effect: Allow
+                Action:
+                  - s3vectors:PutVectors
+                  - s3vectors:GetVectors
+                  - s3vectors:DeleteVectors
+                  - s3vectors:QueryVectors
+                  - s3vectors:GetIndex
+                Resource: !GetAtt KnowledgeVectorIndex.IndexArn
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+        - { Key: Component, Value: AI }
+        - { Key: Module, Value: M5 }
+
+  CampusMeetKnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub 'campusmeet-${Environment}-knowledge'
+      Description: Group-scoped CampusMeet sources with filterable authorization metadata.
+      RoleArn: !GetAtt KnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockEmbeddingModelId}'
+          EmbeddingModelConfiguration:
+            BedrockEmbeddingModelConfiguration:
+              Dimensions: !Ref BedrockEmbeddingDimensions
+              EmbeddingDataType: FLOAT32
+      StorageConfiguration:
+        Type: S3_VECTORS
+        S3VectorsConfiguration:
+          IndexArn: !GetAtt KnowledgeVectorIndex.IndexArn
+      Tags:
+        Project: CampusMeet
+        Environment: !Ref Environment
+        ManagedBy: IaC
+        Component: AI
+        Module: M5
+
+  CampusMeetKnowledgeDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      Name: !Sub 'campusmeet-${Environment}-sources'
+      Description: Approved normalized CampusMeet sources under the M5 knowledge prefix.
+      KnowledgeBaseId: !Ref CampusMeetKnowledgeBase
+      DataDeletionPolicy: DELETE
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}'
+          BucketOwnerAccountId: !Ref AWS::AccountId
+          InclusionPrefixes: [kb/]
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 300
+            OverlapPercentage: 20
+
+  AIWorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-ai-worker'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: CampusMeetAIWorkerDataAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadWriteAIWorkItems
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:ConditionCheckItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-ai-work'
+              - Sid: ReadFinalMeetingTranscriptSegments
+                Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data'
+              - Sid: ReadGroupProgressSnapshots
+                Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-task-data'
+        - PolicyName: CampusMeetAIWorkerSourceAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadUserContentSources
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/*'
+              - Sid: WriteNormalizedKnowledgeSources
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/kb/*'
+        - PolicyName: CampusMeetAIWorkerBedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: RetrieveFromConfiguredKnowledgeBase
+                Effect: Allow
+                Action: bedrock:Retrieve
+                Resource: !GetAtt CampusMeetKnowledgeBase.KnowledgeBaseArn
+              - Sid: ManageConfiguredDataSourceIngestion
+                Effect: Allow
+                Action:
+                  - bedrock:StartIngestionJob
+                  - bedrock:GetIngestionJob
+                Resource: !GetAtt CampusMeetKnowledgeBase.KnowledgeBaseArn
+              - Sid: InvokeConfiguredGenerationModel
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Ref BedrockGenerationModelArn
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+        - { Key: Component, Value: AI }
+        - { Key: Module, Value: M5 }
+
+  AIWorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints: [services/ai-worker/src/index.ts]
+        Target: es2022
+        Minify: false
+        Sourcemap: true
+    Properties:
+      CodeUri: ..
+      Handler: services/ai-worker/src/index.handler
+      Role: !GetAtt AIWorkerRole.Arn
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          AI_WORK_TABLE: !Sub '${DataTablePrefix}-ai-work'
+          MEETING_DATA_TABLE: !Sub '${DataTablePrefix}-meeting-data'
+          TASK_DATA_TABLE: !Sub '${DataTablePrefix}-task-data'
+          USER_CONTENT_BUCKET: !Ref UserContentBucketName
+          BEDROCK_KNOWLEDGE_BASE_ID: !Ref CampusMeetKnowledgeBase
+          BEDROCK_DATA_SOURCE_ID: !GetAtt CampusMeetKnowledgeDataSource.DataSourceId
+          BEDROCK_GENERATION_MODEL_ID: !Ref BedrockGenerationModelArn
+          NODE_OPTIONS: --enable-source-maps
+      Tags:
+        Project: CampusMeet
+        Environment: !Ref Environment
+        ManagedBy: IaC
+        Component: AI
+        Module: M5
+
   ReminderLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -357,6 +627,18 @@ Resources:
       RetentionInDays: 14
       Tags: *ResourceTags
 
+  AIWorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AIWorkerFunction}'
+      RetentionInDays: 14
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+        - { Key: Component, Value: AI }
+        - { Key: Module, Value: M5 }
+
   AlarmTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -380,6 +662,50 @@ Resources:
       AlarmActions: [!Ref AlarmTopic]
       Tags: *ResourceTags
 
+  AIWorkerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'campusmeet-${Environment}-ai-worker-errors'
+      AlarmDescription: Alerts when the AI Worker returns an unhandled error.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref AIWorkerFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+        - { Key: Component, Value: AI }
+        - { Key: Module, Value: M5 }
+
+  AIWorkerDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'campusmeet-${Environment}-ai-worker-duration'
+      AlarmDescription: Alerts when an AI Worker invocation approaches its five-minute timeout.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions: [{ Name: FunctionName, Value: !Ref AIWorkerFunction }]
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 240000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
+        - { Key: Component, Value: AI }
+        - { Key: Module, Value: M5 }
+
 Outputs:
   FrontendBucketName: { Value: !Ref FrontendBucket }
   CloudFrontDomainName: { Value: !GetAtt FrontendDistribution.DomainName }
@@ -393,4 +719,21 @@ Outputs:
   MeetingDataTableName: { Value: !Sub '${DataTablePrefix}-meeting-data' }
   TaskDataTableName: { Value: !Sub '${DataTablePrefix}-task-data' }
   AIWorkTableName: { Value: !Sub '${DataTablePrefix}-ai-work' }
+  AIWorkerFunctionName: { Value: !Ref AIWorkerFunction }
+  AIWorkerFunctionArn:
+    Description: M4 Step Functions invokes this M5-owned worker; no state machine is created here.
+    Value: !GetAtt AIWorkerFunction.Arn
+  AIWorkerRoleArn: { Value: !GetAtt AIWorkerRole.Arn }
+  AIWorkerLogGroupName: { Value: !Ref AIWorkerLogGroup }
+  AIWorkerErrorAlarmName: { Value: !Ref AIWorkerErrorAlarm }
+  AIWorkerDurationAlarmName: { Value: !Ref AIWorkerDurationAlarm }
+  AlarmTopicArn: { Value: !Ref AlarmTopic }
+  ConfiguredUserContentBucketName: { Value: !Ref UserContentBucketName }
+  KnowledgeBaseId: { Value: !Ref CampusMeetKnowledgeBase }
+  KnowledgeBaseArn: { Value: !GetAtt CampusMeetKnowledgeBase.KnowledgeBaseArn }
+  KnowledgeDataSourceId: { Value: !GetAtt CampusMeetKnowledgeDataSource.DataSourceId }
+  KnowledgeVectorBucketArn: { Value: !GetAtt KnowledgeVectorBucket.VectorBucketArn }
+  KnowledgeVectorIndexArn: { Value: !GetAtt KnowledgeVectorIndex.IndexArn }
+  KnowledgeBaseRoleArn: { Value: !GetAtt KnowledgeBaseRole.Arn }
+  ConfiguredEmbeddingModelId: { Value: !Ref BedrockEmbeddingModelId }
   ConfiguredDomainPlaceholder: { Value: !Ref DomainName }

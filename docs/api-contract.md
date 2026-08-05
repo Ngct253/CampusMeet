@@ -34,9 +34,9 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | POST                  | `/meetings/:meetingId/cancel`                                  | `CancelMeetingRequest`, `Meeting`                                      | Đã triển khai; yêu cầu Group Admin              |
 | GET                   | `/meetings/:meetingId/minutes`                                 | `MeetingMinutes`                                                       | Active member; trả latest version, chưa có trả `404` |
 | PUT                   | `/meetings/:meetingId/minutes`                                 | `UpdateMeetingMinutesRequest`, `MeetingMinutes`                         | Active Group Admin; optimistic version            |
-| GET                   | `/tasks`                                                       | `Task[]`                                                               | Đã triển khai; trả toàn bộ task có `assigneeId` bằng user từ JWT |
-| POST                  | `/tasks`                                                       | `CreateTaskRequest`, `Task`                                             | Group Admin; bắt buộc `Idempotency-Key`         |
-| PATCH                 | `/tasks/:taskId/status`                                        | `UpdateTaskStatusRequest`, `Task`                                       | Assignee hoặc active Group Admin; optimistic version |
+| GET | `/tasks` | `Task[]` | Đã triển khai; trả toàn bộ task có `assigneeId` bằng user từ JWT |
+| POST | `/tasks` | `CreateTaskRequest`, `Task` | Group Admin; bắt buộc `Idempotency-Key` |
+| PATCH | `/tasks/:taskId/status` | `UpdateTaskStatusRequest`, `Task` | Assignee hoặc active Group Admin; optimistic version |
 | GET                   | `/dashboard`                                                   | `DashboardResponse`                                                    | Handler skeleton, trả 501                      |
 | GET                   | `/notifications`                                               | `Notification[]`                                                       | M1 đã triển khai                               |
 | POST                  | `/notifications/:notificationId/read`                          | `{read:true}`                                                          | M1 đã triển khai                               |
@@ -65,13 +65,13 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | POST                  | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                       | Phase 4A; yêu cầu Group Admin                  |
 | POST                  | `/groups/:groupId/ai/tool-proposals`                           | `CreateToolProposalRequest`, `ToolProposal`                            | Pha AI mở rộng; chưa implement                 |
 | POST                  | `/ai/tool-proposals/:id/confirm`                               | `ConfirmToolProposalRequest/Response`                                  | Pha AI mở rộng; chưa implement                 |
-| GET                   | `/ai/jobs/:aiJobId`                                            | `AIJob`                                                                | Đã chốt contract mục tiêu; chưa implement      |
+| GET | `/ai/jobs/:aiJobId` | `AIJobDetail` | M5 đã triển khai |
 
 ## Quy ước contract cho AI và artifact
 
 - API nghiệp vụ không nhận binary audio/tài liệu. API chỉ cấp presigned URL; Browser upload trực tiếp vào S3 user-content và gọi complete với checksum.
 - Mỗi meeting nhận tối đa 10 file. Mỗi file tối đa 50 MB; tài liệu hỗ trợ TXT/Markdown/CSV/TSV/JSON/NDJSON/HTML/XHTML/XML/YAML/iCalendar, PDF, DOCX/PPTX/XLSX và ODT/ODP/ODS; audio hỗ trợ MP3/WAV/WebM/M4A và audio tối đa 60 phút. Complete handler phải kiểm tra lại size/checksum bằng `HeadObject`; worker tiếp tục kiểm tra extension, MIME và signature/cấu trúc file khi áp dụng trước khi chuyển attachment sang `READY`.
-- Parse, STT, ingestion và generation trả `202 Accepted` cùng `aiJobId`. Client theo dõi bằng `GET /ai/jobs/:id`; không giữ request mở chờ file dài.
+- Parse, STT, ingestion và generation trả `202 Accepted` cùng `aiJobId`. Client theo dõi bằng `GET /ai/jobs/:id`; không giữ request mở chờ file dài. Endpoint polling trả `AIJobDetail` gồm metadata job và `result` tùy chọn đã được kiểm tra bằng schema runtime. Khi job M5 ở trạng thái `COMPLETED`, `result` là bắt buộc và phải khớp `type`: `GENERATE_ANSWER` → `GroundedAnswer`, `GENERATE_MINUTES` → `MinutesDraft`, `GENERATE_TASK_PROPOSALS` → `TaskProposal[]`, `PROGRESS_ANALYSIS` → `GroupProgressAnalysis`, `INGEST_SOURCE` → kết quả ingestion. Record sai contract không được trả nguyên trạng cho client.
 - `MeetingChatRequest` gồm `question`, `conversationId?` và `intent=QUESTION_ANSWER|LATE_JOIN_SUMMARY`; `meetingId` lấy từ path. Current-meeting chat dùng tài liệu `READY`, approved sources và các live segment final đọc trực tiếp từ transcript repository, không chờ Knowledge Base ingestion. Citation live transcript phải ghi `Speaker N`, timestamp và trạng thái chưa duyệt.
 - `GroupKnowledgeQuery` gồm `question`, `scope=SELECTED_MEETINGS|WHOLE_GROUP`, `meetingIds?` và `conversationId?`. `SELECTED_MEETINGS` bắt buộc có danh sách; `WHOLE_GROUP` không nhận meeting ngoài path group. Backend kiểm tra mọi meeting thuộc cùng `groupId` rồi áp filter group/meeting-set/ACL trước retrieval.
 - `GroundedAnswer` gồm `answer`, `citations[]`, `scope` và `insufficientContext`. Citation ánh xạ về group/meeting/source/segment nội bộ, không lộ raw S3 key hoặc presigned URL. Khi thiếu nguồn, API trả `insufficientContext=true`.

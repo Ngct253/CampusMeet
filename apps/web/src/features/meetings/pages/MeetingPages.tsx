@@ -7,9 +7,13 @@ import type {
   Meeting,
   MeetingMinutes,
   UpdateMeetingMinutesRequest,
-} from '@campusmeet/shared';
-import { FeaturePage } from '../../../components/FeaturePage';
+} from '@campusmeet/shared';import { FeaturePage } from '../../../components/FeaturePage';
+
+import { useAuth } from '../../../auth/AuthProvider';
 import { ApiClientError } from '../../../lib/api-client';
+import { MeetingAIWorkspace } from '../../ai';
+
+
 import { getGroup } from '../../groups/service';
 import {
   cancelMeeting,
@@ -547,8 +551,6 @@ export function GroupMeetingsPage() {
           ? `Lịch làm việc chung của ${groupQuery.data.group.name}.`
           : 'Lịch làm việc chung của nhóm.'
       }
-      backTo={`/app/groups/${groupId}`}
-      backLabel="Quay lại"
     >
       <div className={`meeting-page-layout${isAdmin ? '' : ' meeting-page-layout-single'}`}>
         <section
@@ -656,6 +658,7 @@ function MeetingListItem({ meeting }: { meeting: Meeting }) {
 
 export function MeetingDetailPage() {
   const { meetingId = '' } = useParams();
+  const auth = useAuth();
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: ['meetings', meetingId],
@@ -701,12 +704,7 @@ export function MeetingDetailPage() {
     );
   if (query.isError)
     return (
-      <FeaturePage
-        title="Cuộc họp"
-        description="Không thể mở cuộc họp."
-        backTo="/app/groups"
-        backLabel="Quay lại"
-      >
+      <FeaturePage title="Cuộc họp" description="Không thể mở cuộc họp.">
         <div className="state state-error" role="alert">
           <strong>{query.error.message}</strong>
           <button type="button" onClick={() => void query.refetch()}>
@@ -718,17 +716,15 @@ export function MeetingDetailPage() {
 
   const meeting = query.data;
   const isAdmin = groupQuery.data?.group.role === 'GROUP_ADMIN';
+  const currentUserId = auth.status === 'authenticated' ? auth.user.userId : '';
+  const canGenerateMeetingOutputs = isAdmin || meeting.organizerId === currentUserId;
+  
   const minutesMissing =
     minutesQuery.isError &&
     minutesQuery.error instanceof ApiClientError &&
     minutesQuery.error.status === 404;
   return (
-    <FeaturePage
-      title={meeting.title}
-      description={formatDate(meeting.startsAt)}
-      backTo={`/app/groups/${meeting.groupId}/meetings`}
-      backLabel="Quay lại"
-    >
+    <FeaturePage title={meeting.title} description={formatDate(meeting.startsAt)}>
       <div className="meeting-detail-layout">
         <section className="app-panel meeting-overview">
           <div className="meeting-overview-heading">
@@ -846,6 +842,9 @@ export function MeetingDetailPage() {
               )}
             </div>
           </details>
+        )}
+        {canGenerateMeetingOutputs && groupQuery.data && (
+          <MeetingAIWorkspace meetingId={meeting.id} group={groupQuery.data} />
         )}
       </div>
     </FeaturePage>

@@ -136,8 +136,6 @@ export function InvitationPage() {
     <FeaturePage
       title="Lời mời tham gia nhóm"
       description="Kiểm tra thông tin trước khi phản hồi."
-      backTo="/app/invitations"
-      backLabel="Quay lại"
     >
       {query.isPending ? (
         <div className="state">Đang kiểm tra lời mời…</div>
