@@ -1,25 +1,22 @@
 import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import { taskInputSchema, updateTaskStatusInputSchema } from '@campusmeet/shared';
+import { MeetingService } from '../application/meeting-service';
 import { authenticate } from '../middleware/authentication';
+import { SharedMembershipAuthorizer } from '../middleware/authorization';
 import { handleError } from '../middleware/error-handler';
 import { DynamoDbCollaborationRepository } from '../repositories/collaboration';
 import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
 import { DynamoDbTaskRepository } from '../repositories/tasks';
 import { TaskService } from '../services/task-service';
-import {
-  getPathParameter,
-  getRequestId,
-  parseBody,
-  requireIdempotencyKey,
-} from '../utils/request';
+import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
 import { failure, ok } from '../utils/response';
 
 const tasks = new DynamoDbTaskRepository();
-const taskService = new TaskService(
-  tasks,
-  new DynamoDbCollaborationRepository(),
+const meetings = new MeetingService(
   new DynamoDbMeetingRepository(),
+  new SharedMembershipAuthorizer(),
 );
+const taskService = new TaskService(tasks, new DynamoDbCollaborationRepository(), meetings);
 
 export const tasksHandler: APIGatewayProxyHandlerV2 = async (event) => {
   const requestId = getRequestId(event);
