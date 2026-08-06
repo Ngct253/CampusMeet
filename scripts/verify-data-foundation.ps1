@@ -3,7 +3,7 @@ param(
   [string]$Profile,
   [string]$Region = 'ap-southeast-1',
   [string]$TablePrefix = 'campusmeet-dev',
-  [string]$ExpectedAccountId = '604360241374'
+  [string]$ExpectedAccountId = '462355914392'
 )
 
 $ErrorActionPreference = 'Stop'
