@@ -17,6 +17,11 @@ import {
   myInvitationsHandler,
 } from './handlers/invitations';
 import { healthHandler } from './handlers/health';
+import {
+  attachmentDownloadUrlHandler,
+  completeAttachmentUploadHandler,
+  meetingAttachmentsHandler,
+} from './handlers/attachments';
 import { integrationsHandler } from './handlers/integrations';
 import {
   groupSearchHandler,
@@ -34,6 +39,7 @@ import {
 import { meHandler } from './handlers/me';
 import { minutesHandler } from './handlers/minutes';
 import { notificationsHandler, readNotificationHandler } from './handlers/notifications';
+import { meetContextHandler } from './handlers/meet-context';
 import { tasksHandler, taskStatusHandler } from './handlers/tasks';
 import { getRequestId } from './utils/request';
 import { notImplemented } from './utils/response';
@@ -57,6 +63,22 @@ const findRoute = createRouter([
   { method: 'GET', path: '/meetings', handler: myMeetingsHandler },
   { method: 'ANY', path: '/meetings/:meetingId', handler: meetingDetailHandler },
   { method: 'POST', path: '/meetings/:meetingId/cancel', handler: cancelMeetingHandler },
+  { method: 'GET', path: '/meetings/:meetingId/attachments', handler: meetingAttachmentsHandler },
+  {
+    method: 'POST',
+    path: '/meetings/:meetingId/attachments/upload-url',
+    handler: meetingAttachmentsHandler,
+  },
+  {
+    method: 'POST',
+    path: '/meetings/:meetingId/attachments/:attachmentId/complete',
+    handler: completeAttachmentUploadHandler,
+  },
+  {
+    method: 'POST',
+    path: '/attachments/:attachmentId/download-url',
+    handler: attachmentDownloadUrlHandler,
+  },
   { method: 'GET', path: '/invitations', handler: myInvitationsHandler },
   {
     method: 'POST',
@@ -79,6 +101,7 @@ const findRoute = createRouter([
   { method: 'ANY', path: '/notifications', handler: notificationsHandler },
   { method: 'POST', path: '/notifications/:notificationId/read', handler: readNotificationHandler },
   { method: 'ANY', path: '/integrations', handler: integrationsHandler },
+  { method: 'GET', path: '/integrations/google/meet-context', handler: meetContextHandler },
   { method: 'POST', path: '/meetings/:meetingId/ai/chat', handler: meetingChatHandler },
   { method: 'POST', path: '/groups/:groupId/ai/search', handler: groupSearchHandler },
   { method: 'POST', path: '/meetings/:meetingId/ai/minutes-draft', handler: minutesDraftHandler },

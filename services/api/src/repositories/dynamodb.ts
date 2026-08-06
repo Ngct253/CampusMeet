@@ -132,6 +132,21 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
       .sort((a, b) => a.order - b.order);
     return meeting;
   }
+
+  async getByGoogleMeetingId(googleMeetingId: string): Promise<Meeting | null> {
+    const response = await this.db.send(
+      new QueryCommand({
+        TableName: this.table,
+        IndexName: 'GSI3',
+        KeyConditionExpression: 'GSI3PK = :external',
+        ExpressionAttributeValues: {
+          ':external': `EXTERNAL#GOOGLE_MEETING#${googleMeetingId}`,
+        },
+        Limit: 1,
+      }),
+    );
+    return response.Items?.[0] ? fromMeta(response.Items[0]) : null;
+  }
   async resolveGroupId(id: string) {
     const result = await this.db.send(
       new GetCommand({
