@@ -14,8 +14,22 @@ const statusLabel: Record<string, string> = {
   SCHEDULED: 'Đã lên lịch',
   READY: 'Sẵn sàng',
   CANCELLED: 'Đã hủy',
-  COMPLETED: 'Đã kết thúc',
+  COMPLETED: 'Đã hoàn thành',
   INTEGRATION_PENDING: 'Đang đồng bộ',
+};
+
+const meetingErrorMessage = (error: Error, context: 'create' | 'detail' | 'update' | 'cancel') => {
+  if (!(error instanceof ApiClientError)) return error.message;
+  if (error.status === 403) return 'Bạn không có quyền thực hiện thao tác này với cuộc họp.';
+  if (error.status === 404)
+    return context === 'create'
+      ? 'Nhóm không còn tồn tại hoặc bạn không thể truy cập nhóm này.'
+      : 'Cuộc họp không tồn tại hoặc bạn không thể truy cập.';
+  if (error.status === 400 || error.status === 422)
+    return 'Thông tin cuộc họp chưa hợp lệ. Vui lòng kiểm tra các trường và thử lại.';
+  if (error.status >= 500)
+    return 'CampusMeet đang tạm thời gặp sự cố. Dữ liệu của bạn vẫn được giữ, vui lòng thử lại.';
+  return error.message;
 };
 
 const timeOptions = Array.from({ length: 96 }, (_, index) => {
@@ -100,6 +114,8 @@ function MeetingForm({
   const [startTime, setStartTime] = useState(schedule.start.slice(11));
   const [endTime, setEndTime] = useState(schedule.end.slice(11));
   const [timeError, setTimeError] = useState('');
+  const [titleError, setTitleError] = useState('');
+  const [descriptionError, setDescriptionError] = useState('');
   const [attendeeIds, setAttendeeIds] = useState(initial?.attendeeIds ?? []);
   const [agenda, setAgenda] = useState<AgendaDraft[]>(() =>
     [...(initial?.agenda ?? [])].sort((a, b) => a.order - b.order).map(createAgendaDraft),
@@ -108,6 +124,17 @@ function MeetingForm({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    const normalizedTitle = title.trim();
+    if (normalizedTitle.length < 2) {
+      setTitleError('Tiêu đề cần ít nhất 2 ký tự.');
+      return;
+    }
+    if (description.trim().length > 2000) {
+      setDescriptionError('Nội dung không được vượt quá 2000 ký tự.');
+      return;
+    }
+    setTitleError('');
+    setDescriptionError('');
     if (endTime <= startTime) {
       setTimeError('Giờ kết thúc phải sau giờ bắt đầu.');
       return;
@@ -124,8 +151,8 @@ function MeetingForm({
     }
     setAgendaErrors({});
     onSubmit({
-      title,
-      ...(description.trim() ? { description } : {}),
+      title: normalizedTitle,
+      ...(description.trim() ? { description: description.trim() } : {}),
       attendeeIds,
       agenda: agenda.map((item, order) => ({
         ...(item.id ? { id: item.id } : {}),
@@ -144,12 +171,22 @@ function MeetingForm({
         Tiêu đề
         <input
           value={title}
-          onChange={(event) => setTitle(event.target.value)}
+          aria-invalid={Boolean(titleError)}
+          aria-describedby={titleError ? 'meeting-title-error' : undefined}
+          onChange={(event) => {
+            setTitle(event.target.value);
+            if (event.target.value.trim().length >= 2) setTitleError('');
+          }}
           minLength={2}
           maxLength={150}
           required
         />
       </label>
+      {titleError && (
+        <p className="meeting-field-error" id="meeting-title-error" role="alert">
+          {titleError}
+        </p>
+      )}
       <div className="meeting-time-fields">
         <label className="meeting-date-field">
           Ngày họp
@@ -169,6 +206,8 @@ function MeetingForm({
               setTimeError('');
             }}
             required
+            aria-invalid={Boolean(timeError)}
+            aria-describedby={timeError ? 'meeting-time-error' : undefined}
           >
             {startTime && !timeOptions.includes(startTime) && (
               <option value={startTime}>{startTime}</option>
@@ -189,6 +228,8 @@ function MeetingForm({
               setTimeError('');
             }}
             required
+            aria-invalid={Boolean(timeError)}
+            aria-describedby={timeError ? 'meeting-time-error' : undefined}
           >
             {endTime && !timeOptions.includes(endTime) && (
               <option value={endTime}>{endTime}</option>
@@ -202,7 +243,7 @@ function MeetingForm({
         </label>
       </div>
       {timeError && (
-        <p className="meeting-field-error" role="alert">
+        <p className="meeting-field-error" id="meeting-time-error" role="alert">
           {timeError}
         </p>
       )}
@@ -210,11 +251,21 @@ function MeetingForm({
         Nội dung <span>(không bắt buộc)</span>
         <textarea
           value={description}
-          onChange={(event) => setDescription(event.target.value)}
+          aria-invalid={Boolean(descriptionError)}
+          aria-describedby={descriptionError ? 'meeting-description-error' : undefined}
+          onChange={(event) => {
+            setDescription(event.target.value);
+            if (event.target.value.trim().length <= 2000) setDescriptionError('');
+          }}
           rows={3}
           maxLength={2000}
         />
       </label>
+      {descriptionError && (
+        <p className="meeting-field-error" id="meeting-description-error" role="alert">
+          {descriptionError}
+        </p>
+      )}
       <fieldset className="meeting-agenda-editor">
         <legend>Chương trình họp</legend>
         {agenda.length === 0 ? (
@@ -399,7 +450,10 @@ export function GroupMeetingsPage() {
     [meetingsQuery.data],
   );
   const upcoming = meetings.filter(
-    (meeting) => meeting.status !== 'CANCELLED' && Date.parse(meeting.endsAt) >= Date.now(),
+    (meeting) =>
+      meeting.status !== 'CANCELLED' &&
+      meeting.status !== 'COMPLETED' &&
+      Date.parse(meeting.endsAt) >= Date.now(),
   );
   const history = meetings.filter((meeting) => !upcoming.includes(meeting));
   const isAdmin = groupQuery.data?.group.role === 'GROUP_ADMIN';
@@ -491,7 +545,7 @@ export function GroupMeetingsPage() {
               group={groupQuery.data}
               submitLabel="Tạo cuộc họp"
               pending={mutation.isPending}
-              error={mutation.isError ? mutation.error.message : undefined}
+              error={mutation.isError ? meetingErrorMessage(mutation.error, 'create') : undefined}
               onSubmit={(input) => mutation.mutate(input)}
             />
           </section>
@@ -527,11 +581,15 @@ export function MeetingDetailPage() {
   const [reloadError, setReloadError] = useState('');
   const [reloadSuccess, setReloadSuccess] = useState('');
   const [isReloading, setIsReloading] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelReasonError, setCancelReasonError] = useState('');
   useEffect(() => {
     setConflictMessage('');
     setReloadError('');
     setReloadSuccess('');
     setIsReloading(false);
+    setCancelReason('');
+    setCancelReasonError('');
   }, [meetingId]);
   const query = useQuery({
     queryKey: ['meetings', meetingId],
@@ -566,12 +624,16 @@ export function MeetingDetailPage() {
     },
   });
   const cancelMutation = useMutation({
-    mutationFn: () => cancelMeeting(meetingId, { version: query.data?.version }),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] }),
-        queryClient.invalidateQueries({ queryKey: ['groups', query.data?.groupId, 'meetings'] }),
-      ]);
+    mutationFn: (reason?: string) =>
+      cancelMeeting(meetingId, {
+        ...(reason ? { reason } : {}),
+        version: query.data?.version,
+      }),
+    onSuccess: async (cancelled) => {
+      queryClient.setQueryData(['meetings', meetingId], cancelled);
+      await queryClient.invalidateQueries({
+        queryKey: ['groups', query.data?.groupId, 'meetings'],
+      });
     },
   });
 
@@ -585,7 +647,7 @@ export function MeetingDetailPage() {
     return (
       <FeaturePage title="Cuộc họp" description="Không thể mở cuộc họp.">
         <div className="state state-error" role="alert">
-          <strong>{query.error.message}</strong>
+          <strong>{meetingErrorMessage(query.error, 'detail')}</strong>
           <button type="button" onClick={() => void query.refetch()}>
             Thử lại
           </button>
@@ -644,6 +706,22 @@ export function MeetingDetailPage() {
               <p className="meeting-agenda-empty">Chưa có mục chương trình nào.</p>
             )}
           </div>
+          {meeting.status === 'CANCELLED' &&
+            (meeting.cancellationReason || meeting.cancelledAt) && (
+              <div className="meeting-cancellation">
+                <h2>Thông tin hủy</h2>
+                {meeting.cancellationReason && (
+                  <p>
+                    <strong>Lý do:</strong> {meeting.cancellationReason}
+                  </p>
+                )}
+                {meeting.cancelledAt && (
+                  <p>
+                    <strong>Thời điểm:</strong> {formatDate(meeting.cancelledAt)}
+                  </p>
+                )}
+              </div>
+            )}
         </section>
         <aside className="app-panel meeting-attendee-panel">
           <span className="section-kicker">Thành phần</span>
@@ -669,7 +747,7 @@ export function MeetingDetailPage() {
                   pending={updateMutation.isPending}
                   error={
                     updateMutation.isError && !conflictMessage
-                      ? updateMutation.error.message
+                      ? meetingErrorMessage(updateMutation.error, 'update')
                       : undefined
                   }
                   onSubmit={(input) => updateMutation.mutate(input)}
@@ -725,19 +803,52 @@ export function MeetingDetailPage() {
                   <div>
                     <strong>Hủy cuộc họp</strong>
                     <p>Cuộc họp vẫn được giữ trong lịch sử.</p>
+                    <label>
+                      Lý do hủy <span>(không bắt buộc)</span>
+                      <textarea
+                        value={cancelReason}
+                        rows={2}
+                        maxLength={500}
+                        aria-invalid={Boolean(cancelReasonError)}
+                        aria-describedby={
+                          cancelReasonError ? 'meeting-cancel-reason-error' : undefined
+                        }
+                        onChange={(event) => {
+                          setCancelReason(event.target.value);
+                          if (event.target.value.trim().length <= 500) setCancelReasonError('');
+                        }}
+                      />
+                    </label>
+                    {cancelReasonError && (
+                      <p
+                        className="meeting-field-error"
+                        id="meeting-cancel-reason-error"
+                        role="alert"
+                      >
+                        {cancelReasonError}
+                      </p>
+                    )}
                   </div>
                   <button
                     className="button-danger-quiet"
                     type="button"
                     disabled={cancelMutation.isPending}
-                    onClick={() => window.confirm('Hủy cuộc họp này?') && cancelMutation.mutate()}
+                    onClick={() => {
+                      const reason = cancelReason.trim();
+                      if (reason.length > 500) {
+                        setCancelReasonError('Lý do hủy không được vượt quá 500 ký tự.');
+                        return;
+                      }
+                      if (window.confirm('Hủy cuộc họp này?'))
+                        cancelMutation.mutate(reason || undefined);
+                    }}
                   >
                     Hủy cuộc họp
                   </button>
                 </div>
                 {cancelMutation.isError && (
                   <p className="error" role="alert">
-                    {cancelMutation.error.message}
+                    {meetingErrorMessage(cancelMutation.error, 'cancel')}
                   </p>
                 )}
               </div>
