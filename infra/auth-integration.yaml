@@ -118,7 +118,7 @@ Resources:
         Variables:
           IDENTITY_TABLE: !Sub '${DataTablePrefix}-identity'
           COLLABORATION_TABLE: !Sub '${DataTablePrefix}-collaboration'
-          MEETING_TABLE: !Sub '${DataTablePrefix}-meeting-data'
+          MEETING_DATA_TABLE: !Sub '${DataTablePrefix}-meeting-data'
           USER_POOL_ID: !Ref UserPool
       Events:
         Health:
