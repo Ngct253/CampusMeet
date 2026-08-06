@@ -1,0 +1,17 @@
+{
+  "addOns": {
+    "common": {
+      "name": "CampusMeet",
+      "logoUrl": "https://campusmeet.example.com/logo.png"
+    },
+    "meet": {
+      "web": {
+        "sidePanelUrl": "https://campusmeet.example.com/meet-addon/side-panel",
+        "supportsScreenSharing": false,
+        "addOnOrigins": ["https://campusmeet.example.com"],
+        "logoUrl": "https://campusmeet.example.com/logo.png",
+        "darkModeLogoUrl": "https://campusmeet.example.com/logo-dark.png"
+      }
+    }
+  }
+}

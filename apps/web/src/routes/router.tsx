@@ -5,6 +5,7 @@ import { GroupMeetingsPage, MeetingDetailPage } from '../features/meetings/pages
 import { NotificationsPage } from '../features/notifications/pages/NotificationsPage';
 import { SettingsPage } from '../features/settings/pages/SettingsPage';
 import { TasksPage } from '../features/tasks/pages/TasksPage';
+import { MeetSidePanelPage } from '../features/meet-addon/MeetSidePanelPage';
 import { InvitationInboxPage, InvitationPage } from '../features/invitations/pages/InvitationPage';
 import { RequireAuth } from '../auth/RequireAuth';
 import { LandingPage } from '../pages/LandingPage';
@@ -21,6 +22,7 @@ export const router = createBrowserRouter([
   { path: '/sign-up', element: <SignUpPage /> },
   { path: '/confirm-sign-up', element: <ConfirmSignUpPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
+  { path: '/meet-addon/side-panel', element: <MeetSidePanelPage /> },
   {
     path: '/app',
     element: <RequireAuth />,
