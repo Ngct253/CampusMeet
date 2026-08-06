@@ -67,7 +67,9 @@ export const meetingInputSchema = meetingFieldsSchema.superRefine((value, contex
     });
   }
 });
-export const updateMeetingInputSchema = meetingFieldsSchema.partial();
+export const updateMeetingInputSchema = meetingFieldsSchema.partial().extend({
+  version: z.number().int().positive().optional(),
+});
 export const cancelMeetingInputSchema = z.object({
   reason: z.string().trim().max(500).optional(),
   version: z.number().int().positive().optional(),

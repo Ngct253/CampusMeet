@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { ApiClientError } from '../../../lib/api-client';
 import { GroupMeetingsPage, MeetingDetailPage } from './MeetingPages';
 
 const services = vi.hoisted(() => ({
@@ -67,7 +68,13 @@ beforeEach(() => {
   services.getMeetings.mockResolvedValue([]);
   services.getMeeting.mockResolvedValue(meetingFixture());
   services.createMeeting.mockResolvedValue({ id: 'meeting-created' });
-  services.updateMeeting.mockResolvedValue({});
+  services.updateMeeting.mockImplementation(
+    async (_meetingId: string, request: Record<string, unknown>) => ({
+      ...meetingFixture(),
+      ...request,
+      version: 2,
+    }),
+  );
   services.cancelMeeting.mockResolvedValue({});
 });
 
@@ -146,7 +153,7 @@ it('hiển thị server validation error khi create thất bại', async () => {
   fireEvent.change(await screen.findByLabelText(/tiêu đề/i), {
     target: { value: 'Planning' },
   });
-  fireEvent.click(screen.getByRole('button', { name: /tạo cuộc họp/i }));
+  fireEvent.submit(screen.getByRole('button', { name: /tạo cuộc họp/i }).closest('form')!);
   expect(await screen.findByRole('alert')).toHaveTextContent('Tiêu đề không hợp lệ');
 });
 it('hiển thị trạng thái rỗng rõ ràng và ẩn biểu mẫu tạo với thành viên thường', async () => {
@@ -199,4 +206,259 @@ it('cho phép organizer tạo output dù không phải Group Admin', async () =>
   renderDetail();
 
   expect(await screen.findByTestId('meeting-ai-workspace')).toHaveTextContent('meeting-1');
+});
+
+it('quản lý agenda khi create, reorder deterministic, trim và giữ draft khi API lỗi', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  services.createMeeting.mockRejectedValue(new Error('Không thể tạo meeting'));
+  renderPage();
+
+  expect(await screen.findByText('Chưa có mục chương trình nào.')).toBeInTheDocument();
+  const add = screen.getByRole('button', { name: 'Thêm mục chương trình' });
+  fireEvent.click(add);
+  fireEvent.click(add);
+  const titles = screen.getAllByLabelText('Tiêu đề', { selector: 'input[maxlength="200"]' });
+  fireEvent.change(titles[0]!, { target: { value: '  Mục đầu  ' } });
+  fireEvent.change(titles[1]!, { target: { value: 'Mục sau' } });
+
+  expect(screen.getByRole('button', { name: 'Di chuyển mục chương trình 1 lên' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Di chuyển mục chương trình 2 xuống' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Di chuyển mục chương trình 2 lên' }));
+  fireEvent.change(
+    screen.getByLabelText(/tiêu đề/i, { selector: 'input:not([maxlength="200"])' }),
+    {
+      target: { value: 'Planning' },
+    },
+  );
+  fireEvent.submit(screen.getByRole('button', { name: /tạo cuộc họp/i }).closest('form')!);
+
+  await waitFor(() => expect(services.createMeeting).toHaveBeenCalledTimes(1));
+  expect(services.createMeeting.mock.calls[0]?.[1]).toEqual(
+    expect.objectContaining({
+      agenda: [
+        { order: 0, title: 'Mục sau' },
+        { order: 1, title: 'Mục đầu' },
+      ],
+    }),
+  );
+  expect(await screen.findByText('Không thể tạo meeting')).toBeInTheDocument();
+  expect(screen.getByDisplayValue('Mục sau')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Xóa mục chương trình 2' }));
+  expect(screen.queryByDisplayValue('Mục đầu')).not.toBeInTheDocument();
+});
+
+it('validate đúng agenda item trống và không gửi create request', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole('button', { name: 'Thêm mục chương trình' }));
+  fireEvent.change(
+    screen.getByLabelText(/tiêu đề/i, { selector: 'input:not([maxlength="200"])' }),
+    {
+      target: { value: 'Planning' },
+    },
+  );
+  fireEvent.click(screen.getByRole('button', { name: /tạo cuộc họp/i }));
+  expect(await screen.findByText('Mục chương trình cần có tiêu đề.')).toBeInTheDocument();
+  expect(services.createMeeting).not.toHaveBeenCalled();
+});
+
+it('chặn double submit create khi request đang pending', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  services.createMeeting.mockReturnValue(new Promise(() => undefined));
+  renderPage();
+  fireEvent.change(
+    await screen.findByLabelText(/tiêu đề/i, { selector: 'input:not([maxlength="200"])' }),
+    { target: { value: 'Planning' } },
+  );
+  const submit = screen.getByRole('button', { name: /tạo cuộc họp/i });
+  fireEvent.click(submit);
+  await waitFor(() => expect(submit).toBeDisabled());
+  fireEvent.click(submit);
+  expect(services.createMeeting).toHaveBeenCalledTimes(1);
+});
+
+it.each(['SCHEDULED', 'CANCELLED', 'COMPLETED'])(
+  'hiển thị agenda read-only đúng thứ tự với lifecycle %s',
+  async (status) => {
+    services.getMeeting.mockResolvedValue({
+      ...meetingFixture(),
+      status,
+      agenda: [
+        { id: 'agenda-2', order: 1, title: 'Thứ hai', description: 'Chi tiết hai' },
+        { id: 'agenda-1', order: 0, title: 'Thứ nhất' },
+      ],
+    });
+    renderDetail();
+    const items = await screen.findAllByRole('listitem');
+    expect(items.map((item) => item.textContent)).toEqual(['Thứ nhất', 'Thứ haiChi tiết hai']);
+    if (status === 'SCHEDULED') return;
+    expect(screen.queryByText('Chỉnh sửa cuộc họp')).not.toBeInTheDocument();
+  },
+);
+
+it('edit nạp, sửa, thêm, xóa, reorder agenda và cập nhật detail/version từ response', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  services.getMeeting.mockResolvedValue({
+    ...meetingFixture(),
+    agenda: [
+      { id: 'agenda-1', order: 0, title: 'Một' },
+      { id: 'agenda-2', order: 1, title: 'Hai' },
+    ],
+  });
+  services.updateMeeting.mockResolvedValue({
+    ...meetingFixture(),
+    title: 'Planning',
+    version: 2,
+    agenda: [
+      { id: 'agenda-3', order: 0, title: 'Ba' },
+      { id: 'agenda-1', order: 1, title: 'Một mới' },
+    ],
+  });
+  renderDetail();
+  fireEvent.click(await screen.findByText('Chỉnh sửa cuộc họp'));
+  fireEvent.change(screen.getByDisplayValue('Một'), { target: { value: 'Một mới' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Xóa mục chương trình 2' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Thêm mục chương trình' }));
+  fireEvent.change(screen.getAllByLabelText('Tiêu đề').at(-1)!, {
+    target: { value: 'Ba' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Di chuyển mục chương trình 2 lên' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }));
+
+  await waitFor(() =>
+    expect(services.updateMeeting).toHaveBeenCalledWith(
+      'meeting-1',
+      expect.objectContaining({
+        version: 1,
+        agenda: [
+          { order: 0, title: 'Ba' },
+          { id: 'agenda-1', order: 1, title: 'Một mới' },
+        ],
+      }),
+    ),
+  );
+  expect(await screen.findByText('Ba')).toBeInTheDocument();
+});
+
+it('giữ toàn bộ draft và không retry khi update trả 409', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [{ membership: { userId: 'admin' }, user: { displayName: 'Admin' } }],
+  });
+  services.getMeeting.mockResolvedValue({
+    ...meetingFixture(),
+    attendeeIds: [],
+    agenda: [{ id: 'agenda-1', order: 0, title: 'Server cũ' }],
+  });
+  services.updateMeeting.mockRejectedValue(
+    new ApiClientError('Phiên bản đã thay đổi', 409, 'CONFLICT'),
+  );
+  renderDetail();
+  fireEvent.click(await screen.findByText('Chỉnh sửa cuộc họp'));
+  fireEvent.change(screen.getByLabelText('Tiêu đề', { selector: 'input:not([maxlength="200"])' }), {
+    target: { value: 'Draft title' },
+  });
+  fireEvent.change(screen.getByDisplayValue('Server cũ'), { target: { value: 'Draft agenda' } });
+  fireEvent.click(screen.getByLabelText('Admin'));
+  fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }));
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Cuộc họp đã được cập nhật ở nơi khác',
+  );
+  expect(services.updateMeeting).toHaveBeenCalledTimes(1);
+  expect(screen.getByDisplayValue('Draft title')).toBeInTheDocument();
+  expect(screen.getByDisplayValue('Draft agenda')).toBeInTheDocument();
+  expect(screen.getByLabelText('Admin')).toBeChecked();
+  expect(screen.getByRole('button', { name: 'Tải phiên bản mới nhất' })).toBeInTheDocument();
+});
+
+it('reload latest cần confirmation, thay draft/version và không tự submit lại', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  const latest = {
+    ...meetingFixture(),
+    title: 'Server latest',
+    version: 2,
+    agenda: [{ id: 'latest-agenda', order: 0, title: 'Latest agenda' }],
+  };
+  services.getMeeting.mockResolvedValueOnce(meetingFixture()).mockResolvedValueOnce(latest);
+  services.updateMeeting.mockRejectedValue(
+    new ApiClientError('Phiên bản đã thay đổi', 409, 'CONFLICT'),
+  );
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+  renderDetail();
+  fireEvent.click(await screen.findByText('Chỉnh sửa cuộc họp'));
+  fireEvent.change(screen.getByLabelText('Tiêu đề', { selector: 'input:not([maxlength="200"])' }), {
+    target: { value: 'Draft' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }));
+  const reload = await screen.findByRole('button', { name: 'Tải phiên bản mới nhất' });
+  fireEvent.click(reload);
+  expect(screen.getByDisplayValue('Draft')).toBeInTheDocument();
+  expect(services.getMeeting).toHaveBeenCalledTimes(1);
+  fireEvent.click(reload);
+  expect(await screen.findByText('Đã tải phiên bản cuộc họp mới nhất.')).toBeInTheDocument();
+  expect(screen.getByDisplayValue('Server latest')).toBeInTheDocument();
+  expect(screen.getByDisplayValue('Latest agenda')).toBeInTheDocument();
+  expect(services.getMeeting).toHaveBeenCalledTimes(2);
+  expect(services.updateMeeting).toHaveBeenCalledTimes(1);
+  confirm.mockRestore();
+});
+
+it('reload latest thất bại giữ draft và cho phép retry', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  services.getMeeting
+    .mockResolvedValueOnce(meetingFixture())
+    .mockRejectedValueOnce(new Error('Mất kết nối'))
+    .mockResolvedValueOnce({ ...meetingFixture(), title: 'Đã tải lại', version: 2 });
+  services.updateMeeting.mockRejectedValue(
+    new ApiClientError('Phiên bản đã thay đổi', 409, 'CONFLICT'),
+  );
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  renderDetail();
+  fireEvent.click(await screen.findByText('Chỉnh sửa cuộc họp'));
+  fireEvent.change(screen.getByLabelText('Tiêu đề', { selector: 'input:not([maxlength="200"])' }), {
+    target: { value: 'Draft giữ lại' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Tải phiên bản mới nhất' }));
+  expect(
+    await screen.findByText(/Không thể tải phiên bản mới nhất: Mất kết nối/),
+  ).toBeInTheDocument();
+  expect(screen.getByDisplayValue('Draft giữ lại')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Tải phiên bản mới nhất' }));
+  expect(await screen.findByDisplayValue('Đã tải lại')).toBeInTheDocument();
+  confirm.mockRestore();
+});
+
+it('update lỗi khác 409 giữ behavior lỗi server hiện tại', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  services.updateMeeting.mockRejectedValue(
+    new ApiClientError('Agenda không hợp lệ', 422, 'INVALID'),
+  );
+  renderDetail();
+  fireEvent.click(await screen.findByText('Chỉnh sửa cuộc họp'));
+  fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Agenda không hợp lệ');
+  expect(screen.queryByRole('button', { name: 'Tải phiên bản mới nhất' })).not.toBeInTheDocument();
 });
