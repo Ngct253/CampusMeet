@@ -114,4 +114,44 @@ describe('MeetingService', () => {
     expect(twice.version).toBe(once.version);
     expect((await repository.getById(first.id))?.status).toBe(MeetingStatus.CANCELLED);
   });
+
+  it('stores Google event details after creating a meeting', async () => {
+    const { repository, memberships } = setup();
+    const service = new MeetingService(
+      repository,
+      memberships,
+      () => new Date('2029-01-01T00:00:00Z'),
+      () => 'meeting-google',
+      { createEvent: async () => ({
+        eventId: 'event-1',
+        googleMeetingId: 'abc-defg-hij',
+        meetUrl: 'https://meet.google.com/abc-defg-hij',
+      }) },
+    );
+    await expect(service.create('g1', 'admin', input())).resolves.toMatchObject({
+      googleSyncStatus: 'READY',
+      integrationStatus: 'READY',
+      googleEventId: 'event-1',
+      googleMeetingId: 'abc-defg-hij',
+      version: 2,
+    });
+  });
+
+  it('keeps meetings when Google Calendar is temporarily unavailable', async () => {
+    const { repository, memberships } = setup();
+    const service = new MeetingService(
+      repository,
+      memberships,
+      () => new Date('2029-01-01T00:00:00Z'),
+      () => 'meeting-google-failed',
+      { createEvent: async () => { throw new Error('Google unavailable'); } },
+    );
+    const created = await service.create('g1', 'admin', input());
+    expect(created).toMatchObject({
+      googleSyncStatus: 'FAILED_RETRYABLE',
+      integrationStatus: 'FAILED',
+      version: 2,
+    });
+    expect(await repository.getById(created.id)).not.toBeNull();
+  });
 });

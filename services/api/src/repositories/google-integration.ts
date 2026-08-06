@@ -9,6 +9,27 @@ export interface GoogleOAuthTokens {
 }
 
 export class GoogleIntegrationRepository {
+  async getTokens(userId: string): Promise<GoogleOAuthTokens | undefined> {
+    const result = await documentClient.send(new GetCommand({
+      TableName: tableName('IDENTITY_TABLE'),
+      Key: { PK: `USER#${userId}`, SK: 'INTEGRATION#GOOGLE' },
+      ConsistentRead: true,
+    }));
+    const item = result.Item;
+    if (!item) return undefined;
+    const accessToken = stringValue(item, 'accessToken');
+    const expiresAt = stringValue(item, 'expiresAt');
+    if (!accessToken || !expiresAt) return undefined;
+    const refreshToken = stringValue(item, 'refreshToken');
+    const scope = stringValue(item, 'scope');
+    return {
+      accessToken,
+      expiresAt,
+      ...(refreshToken ? { refreshToken } : {}),
+      ...(scope ? { scope } : {}),
+    };
+  }
+
   async createState(stateHash: string, userId: string, expiresAtEpoch: number): Promise<void> {
     await documentClient.send(new PutCommand({
       TableName: tableName('IDENTITY_TABLE'),

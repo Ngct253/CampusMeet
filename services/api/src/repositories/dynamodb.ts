@@ -31,6 +31,12 @@ const metaItem = (meeting: Meeting): Item => ({
   GSI1SK: `MEETING#${meeting.startsAt}#${meeting.id}`,
   GSI2PK: `USER#${meeting.organizerId}`,
   GSI2SK: `MEETING#${meeting.startsAt}#${meeting.id}`,
+  ...(meeting.googleMeetingId
+    ? {
+        GSI3PK: `EXTERNAL#GOOGLE_MEETING#${meeting.googleMeetingId}`,
+        GSI3SK: `MEETING#${meeting.id}`,
+      }
+    : {}),
 });
 const fromMeta = (item: Item): Meeting => ({
   id: String(item.id),
@@ -47,6 +53,8 @@ const fromMeta = (item: Item): Meeting => ({
     (item.googleSyncStatus as GoogleSyncStatus | undefined) ?? GoogleSyncStatus.NOT_REQUESTED,
   integrationStatus:
     (item.integrationStatus as IntegrationStatus | undefined) ?? IntegrationStatus.NOT_CONNECTED,
+  ...(item.googleEventId ? { googleEventId: String(item.googleEventId) } : {}),
+  ...(item.googleMeetingId ? { googleMeetingId: String(item.googleMeetingId) } : {}),
   ...(item.meetUrl ? { meetUrl: String(item.meetUrl) } : {}),
   createdAt: String(item.createdAt),
   createdBy: String(item.createdBy),

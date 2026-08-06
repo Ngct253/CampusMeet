@@ -7,7 +7,12 @@ import type {
   GoogleCalendarGateway,
   ReminderSchedulerGateway,
 } from '../domain/ports';
-import { NotImplementedError, ServiceConfigurationError } from '../utils/errors';
+import {
+  SecretsManagerGoogleCredentialsProvider,
+  type GoogleCredentialsProvider,
+} from './google-oauth';
+import { GoogleIntegrationRepository } from '../repositories/google-integration';
+import { ServiceConfigurationError, UnauthorizedError } from '../utils/errors';
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -16,9 +21,74 @@ const required = (name: string) => {
 };
 
 export class GoogleCalendarAdapter implements GoogleCalendarGateway {
-  createEvent(_meeting: Meeting): Promise<{ eventId: string; meetUrl?: string }> {
-    // TODO(M4): use a server-side token and Calendar conferenceDataVersion=1; map pending/failure states.
-    throw new NotImplementedError('Google Calendar adapter is not implemented');
+  constructor(
+    private readonly integrations = new GoogleIntegrationRepository(),
+    private readonly credentials: GoogleCredentialsProvider = new SecretsManagerGoogleCredentialsProvider(),
+    private readonly fetcher: typeof fetch = fetch,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  private async accessToken(userId: string) {
+    const stored = await this.integrations.getTokens(userId);
+    if (!stored?.refreshToken) throw new UnauthorizedError('Hãy kết nối lại Google Calendar.');
+    if (Date.parse(stored.expiresAt) > this.now().getTime() + 60_000) return stored.accessToken;
+    const client = await this.credentials.get();
+    const response = await this.fetcher('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: client.clientId,
+        client_secret: client.clientSecret,
+        refresh_token: stored.refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    });
+    const body = await response.json() as Record<string, unknown>;
+    if (!response.ok || typeof body.access_token !== 'string' || typeof body.expires_in !== 'number') {
+      throw new UnauthorizedError('Phiên Google đã hết hạn. Hãy kết nối lại.');
+    }
+    await this.integrations.saveTokens(userId, {
+      accessToken: body.access_token,
+      refreshToken: stored.refreshToken,
+      expiresAt: new Date(this.now().getTime() + body.expires_in * 1000).toISOString(),
+      scope: typeof body.scope === 'string' ? body.scope : stored.scope,
+    });
+    return body.access_token;
+  }
+
+  async createEvent(meeting: Meeting) {
+    const token = await this.accessToken(meeting.organizerId);
+    const response = await this.fetcher(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1',
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          summary: meeting.title,
+          description: meeting.description,
+          start: { dateTime: meeting.startsAt },
+          end: { dateTime: meeting.endsAt },
+          conferenceData: {
+            createRequest: {
+              requestId: `campusmeet-${meeting.id}`,
+              conferenceSolutionKey: { type: 'hangoutsMeet' },
+            },
+          },
+        }),
+      },
+    );
+    const body = await response.json() as Record<string, unknown>;
+    if (!response.ok || typeof body.id !== 'string') {
+      throw new Error(`GOOGLE_CALENDAR_CREATE_FAILED:${response.status}`);
+    }
+    const conference = body.conferenceData as Record<string, unknown> | undefined;
+    return {
+      eventId: body.id,
+      ...(typeof body.hangoutLink === 'string' ? { meetUrl: body.hangoutLink } : {}),
+      ...(typeof conference?.conferenceId === 'string'
+        ? { googleMeetingId: conference.conferenceId }
+        : {}),
+    };
   }
 }
 
