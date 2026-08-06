@@ -387,7 +387,7 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     renderDetail('GROUP_ADMIN');
 
     const dueAt = (await screen.findByLabelText('Hạn hoàn thành 1')) as HTMLInputElement;
-    expect(dueAt.value).toBe('2026-08-10T10:30');
+    expect(new Date(dueAt.value).toISOString()).toBe(minutes.actionItems[0]?.dueAt);
     fireEvent.change(dueAt, { target: { value: '2026-08-11T09:15' } });
     fireEvent.change(screen.getByLabelText('Việc cần thực hiện 1'), {
       target: { value: 'Việc A cập nhật' },
