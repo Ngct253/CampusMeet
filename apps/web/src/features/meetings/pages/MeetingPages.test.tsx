@@ -61,8 +61,8 @@ const meetingFixture = (
   organizerId,
   attendeeIds: ['admin-1', 'user-1'],
   agenda: [],
-  startsAt: '2026-08-04T01:00:00.000Z',
-  endsAt: '2026-08-04T02:00:00.000Z',
+  startsAt: '2030-01-01T10:00:00.000Z',
+  endsAt: '2030-01-01T11:00:00.000Z',
   status,
   googleSyncStatus: 'NOT_REQUESTED',
   integrationStatus: 'READY',
@@ -127,7 +127,15 @@ beforeEach(() => {
       version: 2,
     }),
   );
-  services.cancelMeeting.mockResolvedValue({});
+  services.cancelMeeting.mockImplementation(
+    async (_meetingId: string, request: { reason?: string; version?: number }) => ({
+      ...meetingFixture(),
+      status: 'CANCELLED',
+      cancelledAt: '2029-01-02T00:00:00.000Z',
+      cancellationReason: request.reason,
+      version: 2,
+    }),
+  );
   services.getMeetingMinutes.mockRejectedValue(
     new ApiClientError('Chưa có biên bản.', 404, 'NOT_FOUND'),
   );
@@ -749,7 +757,7 @@ it('reload latest thất bại giữ draft và cho phép retry', async () => {
   confirm.mockRestore();
 });
 
-it('update lỗi khác 409 giữ behavior lỗi server hiện tại', async () => {
+it('update lỗi 422 dùng validation message và không hiển thị conflict action', async () => {
   services.getGroup.mockResolvedValue({
     group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
     members: [],
@@ -760,6 +768,154 @@ it('update lỗi khác 409 giữ behavior lỗi server hiện tại', async () =
   renderDetail();
   fireEvent.click(await screen.findByText('Chỉnh sửa cuộc họp'));
   fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('Agenda không hợp lệ');
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Thông tin cuộc họp chưa hợp lệ. Vui lòng kiểm tra các trường và thử lại.',
+  );
   expect(screen.queryByRole('button', { name: 'Tải phiên bản mới nhất' })).not.toBeInTheDocument();
+});
+
+it('timeline hiển thị text status và giữ completed/cancelled trong lịch sử', async () => {
+  services.getMeetings.mockResolvedValue([
+    { ...meetingFixture('scheduled'), title: 'Meeting scheduled', status: 'SCHEDULED' },
+    { ...meetingFixture('completed'), title: 'Meeting completed', status: 'COMPLETED' },
+    { ...meetingFixture('cancelled'), title: 'Meeting cancelled', status: 'CANCELLED' },
+  ]);
+  renderPage();
+
+  expect(await screen.findByText('Meeting scheduled')).toBeInTheDocument();
+  expect(screen.getByText('Đã lên lịch')).toBeInTheDocument();
+  expect(screen.getByText('Meeting completed')).toBeInTheDocument();
+  expect(screen.getByText('Đã hoàn thành')).toBeInTheDocument();
+  expect(screen.getByText('Meeting cancelled')).toBeInTheDocument();
+  expect(screen.getByText('Đã hủy')).toBeInTheDocument();
+  expect(screen.getByText('Lịch sử (2)')).toBeInTheDocument();
+});
+
+it('detail cancelled hiển thị reason/time nhưng không lộ cancelledBy technical ID', async () => {
+  services.getMeeting.mockResolvedValue({
+    ...meetingFixture(),
+    status: 'CANCELLED',
+    cancellationReason: 'Phòng học không khả dụng',
+    cancelledAt: '2029-01-02T00:00:00.000Z',
+    cancelledBy: 'technical-user-id',
+  });
+  renderDetail();
+
+  expect(await screen.findByText('Đã hủy')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Thông tin hủy' })).toBeInTheDocument();
+  expect(screen.getByText(/Phòng học không khả dụng/)).toBeInTheDocument();
+  expect(screen.getByText(/02\/01\/2029/)).toBeInTheDocument();
+  expect(screen.queryByText('technical-user-id')).not.toBeInTheDocument();
+  expect(screen.queryByText('Chỉnh sửa cuộc họp')).not.toBeInTheDocument();
+});
+
+it('detail cancelled không tạo placeholder metadata khi contract không có dữ liệu', async () => {
+  services.getMeeting.mockResolvedValue({ ...meetingFixture(), status: 'CANCELLED' });
+  renderDetail();
+  expect(await screen.findByText('Đã hủy')).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Thông tin hủy' })).not.toBeInTheDocument();
+});
+
+it('validate title whitespace và time range tại đúng field, không gọi mutation', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  renderPage();
+  const title = await screen.findByLabelText('Tiêu đề', {
+    selector: 'input:not([maxlength="200"])',
+  });
+  fireEvent.change(title, { target: { value: '   ' } });
+  fireEvent.submit(screen.getByRole('button', { name: 'Tạo cuộc họp' }).closest('form')!);
+  const titleError = await screen.findByText('Tiêu đề cần ít nhất 2 ký tự.');
+  expect(title).toHaveAttribute('aria-describedby', titleError.id);
+  expect(services.createMeeting).not.toHaveBeenCalled();
+
+  fireEvent.change(title, { target: { value: 'Planning' } });
+  const start = screen.getByLabelText('Bắt đầu');
+  const end = screen.getByLabelText('Kết thúc');
+  fireEvent.change(start, { target: { value: '10:00' } });
+  fireEvent.change(end, { target: { value: '09:45' } });
+  fireEvent.submit(screen.getByRole('button', { name: 'Tạo cuộc họp' }).closest('form')!);
+  const timeError = await screen.findByText('Giờ kết thúc phải sau giờ bắt đầu.');
+  expect(start).toHaveAttribute('aria-describedby', timeError.id);
+  expect(end).toHaveAttribute('aria-describedby', timeError.id);
+  expect(services.createMeeting).not.toHaveBeenCalled();
+});
+
+it('cancel gửi reason đã trim/version và cập nhật detail cache ngay', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  renderDetail();
+  fireEvent.click(await screen.findByText('Chỉnh sửa cuộc họp'));
+  fireEvent.change(screen.getByLabelText('Lý do hủy (không bắt buộc)'), {
+    target: { value: '  Trùng lịch học  ' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Hủy cuộc họp' }));
+
+  await waitFor(() =>
+    expect(services.cancelMeeting).toHaveBeenCalledWith('meeting-1', {
+      reason: 'Trùng lịch học',
+      version: 1,
+    }),
+  );
+  expect(await screen.findByText('Đã hủy')).toBeInTheDocument();
+  expect(screen.getByText(/Trùng lịch học/)).toBeInTheDocument();
+  expect(screen.queryByText('Chỉnh sửa cuộc họp')).not.toBeInTheDocument();
+  confirm.mockRestore();
+});
+
+it('cancel reason vượt contract limit hiển thị field error và không gọi API', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  const confirm = vi.spyOn(window, 'confirm');
+  renderDetail();
+  fireEvent.click(await screen.findByText('Chỉnh sửa cuộc họp'));
+  const reason = screen.getByLabelText('Lý do hủy (không bắt buộc)');
+  fireEvent.change(reason, { target: { value: 'x'.repeat(501) } });
+  fireEvent.click(screen.getByRole('button', { name: 'Hủy cuộc họp' }));
+  const error = await screen.findByText('Lý do hủy không được vượt quá 500 ký tự.');
+  expect(reason).toHaveAttribute('aria-describedby', error.id);
+  expect(confirm).not.toHaveBeenCalled();
+  expect(services.cancelMeeting).not.toHaveBeenCalled();
+  confirm.mockRestore();
+});
+
+it.each([
+  [403, 'Bạn không có quyền thực hiện thao tác này với cuộc họp.'],
+  [422, 'Thông tin cuộc họp chưa hợp lệ. Vui lòng kiểm tra các trường và thử lại.'],
+  [500, 'CampusMeet đang tạm thời gặp sự cố. Dữ liệu của bạn vẫn được giữ, vui lòng thử lại.'],
+])('map update HTTP %s nhưng vẫn giữ form', async (status, expected) => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  services.updateMeeting.mockRejectedValue(new ApiClientError('raw server error', status, 'ERROR'));
+  renderDetail();
+  fireEvent.click(await screen.findByText('Chỉnh sửa cuộc họp'));
+  const title = screen.getByLabelText('Tiêu đề', {
+    selector: 'input:not([maxlength="200"])',
+  });
+  fireEvent.change(title, { target: { value: 'Draft vẫn còn' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Lưu thay đổi' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(expected);
+  expect(screen.getByDisplayValue('Draft vẫn còn')).toBeInTheDocument();
+  expect(services.updateMeeting).toHaveBeenCalledTimes(1);
+});
+
+it('detail 404 có message chuyên biệt và retry', async () => {
+  services.getMeeting.mockRejectedValue(
+    new ApiClientError('raw not found', 404, 'RESOURCE_NOT_FOUND'),
+  );
+  renderDetail();
+  expect(
+    await screen.findByText('Cuộc họp không tồn tại hoặc bạn không thể truy cập.'),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Thử lại' }));
+  await waitFor(() => expect(services.getMeeting).toHaveBeenCalledTimes(2));
 });
