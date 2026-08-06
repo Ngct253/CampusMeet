@@ -1,11 +1,8 @@
 import type {
   AgendaItem,
   InvitationDetails,
+  ISODateTime,
   MeetingMinutes,
-  Notification,
-  Task,
-  User,
-  Group,
   Meeting,
 } from '../types';
 import { Priority, TaskStatus } from '../enums';
@@ -139,12 +136,16 @@ export interface CreateMinutesRequest {
 }
 export type CreateTaskRequest = z.infer<typeof taskInputSchema>;
 export type UpdateTaskStatusRequest = z.infer<typeof updateTaskStatusInputSchema>;
+export interface DashboardTaskSummary {
+  total: number;
+  todo: number;
+  doing: number;
+  done: number;
+  overdue: number;
+}
 export interface DashboardResponse {
-  user: User;
-  groups: Group[];
-  upcomingMeetings: Meeting[];
-  tasks: Task[];
-  notifications: Notification[];
+  generatedAt: ISODateTime;
+  tasks: DashboardTaskSummary;
 }
 export interface ApiSuccessResponse<T> {
   success: true;
