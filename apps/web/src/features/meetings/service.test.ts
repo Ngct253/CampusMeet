@@ -4,7 +4,7 @@ import type { UpdateMeetingMinutesRequest } from '@campusmeet/shared';
 const request = vi.hoisted(() => vi.fn());
 vi.mock('../../lib/api-client', () => ({ apiClient: { request } }));
 
-import { getMeetingMinutes, updateMeetingMinutes } from './service';
+import { getAllMeetings, getMeetingMinutes, getMeetings, updateMeetingMinutes } from './service';
 
 describe('meeting minutes service', () => {
   beforeEach(() => request.mockReset());
@@ -35,5 +35,17 @@ describe('meeting minutes service', () => {
     expect(body).not.toHaveProperty('groupId');
     expect(body).not.toHaveProperty('createdBy');
     expect(body).not.toHaveProperty('version');
+  });
+  it('uses the public page contract and loads every page for full-list consumers', async () => {
+    request
+      .mockResolvedValueOnce({ success: true, data: { items: [{ id: 'm1' }], nextCursor: 'next' } })
+      .mockResolvedValueOnce({ success: true, data: { items: [{ id: 'm2' }] } });
+    await expect(getAllMeetings('group/one')).resolves.toEqual([{ id: 'm1' }, { id: 'm2' }]);
+    expect(request).toHaveBeenNthCalledWith(1, '/groups/group/one/meetings?limit=100');
+    expect(request).toHaveBeenNthCalledWith(2, '/groups/group/one/meetings?limit=100&cursor=next');
+
+    request.mockResolvedValueOnce({ success: true, data: { items: [] } });
+    await getMeetings('group/one', { limit: 20, cursor: 'opaque' });
+    expect(request).toHaveBeenLastCalledWith('/groups/group/one/meetings?limit=20&cursor=opaque');
   });
 });

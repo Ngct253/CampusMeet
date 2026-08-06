@@ -1,4 +1,4 @@
-﻿import { GroupRole, MeetingStatus, type Meeting } from '@campusmeet/shared';
+import { GroupRole, MeetingStatus, type Meeting } from '@campusmeet/shared';
 import type {
   MembershipAuthorizer,
   MembershipRecord,
@@ -36,12 +36,41 @@ export class InMemoryMeetingRepository implements MeetingRepository {
     const all = [...this.records.values()]
       .filter((m) => m.groupId === groupId)
       .sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.id.localeCompare(b.id));
-    const start = cursor ? Number(Buffer.from(cursor, 'base64url').toString('utf8')) : 0;
+    let start = 0;
+    if (cursor) {
+      try {
+        const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+          v?: number;
+          groupId?: string;
+          startsAt?: string;
+          meetingId?: string;
+        };
+        if (value.v !== 1 || value.groupId !== groupId || !value.startsAt || !value.meetingId)
+          throw new Error();
+        const index = all.findIndex(
+          (meeting) => meeting.startsAt === value.startsAt && meeting.id === value.meetingId,
+        );
+        if (index < 0) throw new Error();
+        start = index + 1;
+      } catch {
+        throw new MeetingError(
+          'VALIDATION_ERROR',
+          'Cursor khÃ´ng há»£p lá»‡ hoáº·c khÃ´ng thuá»™c nhÃ³m.',
+        );
+      }
+    }
     const items = all.slice(start, start + limit).map((m) => structuredClone(m));
     const next = start + items.length;
+    const last = items.at(-1);
     return Promise.resolve({
       items,
-      ...(next < all.length ? { nextCursor: Buffer.from(String(next)).toString('base64url') } : {}),
+      ...(next < all.length && last
+        ? {
+            nextCursor: Buffer.from(
+              JSON.stringify({ v: 1, groupId, startsAt: last.startsAt, meetingId: last.id }),
+            ).toString('base64url'),
+          }
+        : {}),
     });
   }
   update(meeting: Meeting, expectedVersion: number) {

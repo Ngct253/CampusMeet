@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { FeaturePage } from '../../../components/FeaturePage';
 import { StatusBadge } from '../../../components/ui';
 import { getGroup, getGroups } from '../../groups/service';
-import { getMeetings } from '../../meetings/service';
+import { getAllMeetings } from '../../meetings/service';
 import { ApiClientError } from '../../../lib/api-client';
 import { createTask, getTasks, updateTaskStatus } from '../service';
 import './TasksPage.css';
@@ -74,7 +74,7 @@ export const TasksPage = () => {
   });
   const meetingsQuery = useQuery({
     queryKey: ['groups', groupId, 'meetings'],
-    queryFn: () => getMeetings(groupId),
+    queryFn: () => getAllMeetings(groupId),
     enabled: Boolean(groupId),
   });
 
@@ -178,7 +178,12 @@ export const TasksPage = () => {
     const normalizedTitle = title.trim();
     const normalizedGroupId = groupId.trim();
     const normalizedAssigneeId = assigneeId.trim();
-    if (!normalizedTitle || normalizedTitle.length > 200 || !normalizedGroupId || !normalizedAssigneeId) {
+    if (
+      !normalizedTitle ||
+      normalizedTitle.length > 200 ||
+      !normalizedGroupId ||
+      !normalizedAssigneeId
+    ) {
       setFormError('Thông tin công việc chưa hợp lệ.');
       return;
     }
@@ -223,7 +228,11 @@ export const TasksPage = () => {
             <form className="app-form task-form" onSubmit={submit}>
               <label>
                 Nhóm
-                <select value={groupId} onChange={(event) => changeGroup(event.target.value)} required>
+                <select
+                  value={groupId}
+                  onChange={(event) => changeGroup(event.target.value)}
+                  required
+                >
                   {adminGroups.map((group) => (
                     <option key={group.id} value={group.id}>
                       {group.name}
@@ -271,7 +280,11 @@ export const TasksPage = () => {
               </label>
               <label>
                 Hạn hoàn thành <span>(không bắt buộc)</span>
-                <input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+                <input
+                  type="datetime-local"
+                  value={dueAt}
+                  onChange={(event) => setDueAt(event.target.value)}
+                />
               </label>
               <label>
                 Cuộc họp nguồn <span>(không bắt buộc)</span>
@@ -296,7 +309,9 @@ export const TasksPage = () => {
                 </select>
               </label>
               {meetingsQuery.isError && (
-                <p className="task-field-note">Bạn vẫn có thể tạo công việc không liên kết cuộc họp.</p>
+                <p className="task-field-note">
+                  Bạn vẫn có thể tạo công việc không liên kết cuộc họp.
+                </p>
               )}
               {meetingError && (
                 <p className="error" role="alert">
