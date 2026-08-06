@@ -7,6 +7,7 @@ import {
   type Meeting,
   type UpdateMeetingRequest,
 } from '@campusmeet/shared';
+import { randomUUID } from 'node:crypto';
 import type {
   MembershipAuthorizer,
   MeetingAccessBoundary,
@@ -30,7 +31,7 @@ const normalizeAgenda = (items: NonNullable<CreateMeetingRequest['agenda']> = []
   const orders = new Set<number>();
   return items
     .map((item) => {
-      const id = item.id?.trim() || crypto.randomUUID();
+      const id = item.id?.trim() || randomUUID();
       if (ids.has(id) || orders.has(item.order)) {
         throw new UnprocessableEntityError('Agenda id và thứ tự phải duy nhất.');
       }
