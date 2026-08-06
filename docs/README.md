@@ -38,3 +38,5 @@ Mô hình 5 bảng vẫn bao phủ Group, membership, meeting, minutes, task, at
 | Chia việc nhóm                 | `ke-hoach-trien-khai-nhom.md`                                                                                             |
 
 Mọi PR thay đổi physical schema phải sửa `dynamodb-data-model.md`, `infra/data-foundation.yaml`, validation script và migration/rollback note trong cùng PR.
+
+[Accepted M2 Meeting contract decisions](decisions/m2-contract-decisions.md) cover organizer, PATCH version, Meeting pagination, and the M2-M4 synchronization principle. Status: ACCEPTED.
