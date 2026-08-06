@@ -18,9 +18,17 @@ Parameters:
     Description: TODO(M5) Domain to configure after DNS ownership is confirmed.
   GoogleSecretReference:
     Type: String
-    Default: /campusmeet/dev/google-oauth
+    Default: campusmeet/dev/google-oauth
     NoEcho: true
     Description: Secrets Manager or Parameter Store reference only; never put the secret value here.
+  GoogleRedirectUri:
+    Type: String
+    AllowedPattern: '^https://.+/integrations/google/callback$'
+    Description: Exact callback URI registered on the Google OAuth web client.
+  FrontendOrigin:
+    Type: String
+    AllowedPattern: '^https://[^/]+$'
+    Description: HTTPS frontend origin used after Google OAuth completes.
   SesFromEmail:
     Type: String
     AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
@@ -217,6 +225,10 @@ Resources:
                 Effect: Allow
                 Action: cognito-idp:AdminGetUser
                 Resource: !GetAtt UserPool.Arn
+              - Sid: ReadGoogleOAuthClientSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GoogleSecretReference}*'
               - Sid: ManageUserContentObjects
                 Effect: Allow
                 Action:
@@ -250,6 +262,8 @@ Resources:
           AI_WORK_TABLE: !Sub '${DataTablePrefix}-ai-work'
           USER_POOL_ID: !Ref UserPool
           GOOGLE_SECRET_REFERENCE: !Ref GoogleSecretReference
+          GOOGLE_REDIRECT_URI: !Ref GoogleRedirectUri
+          FRONTEND_ORIGIN: !Ref FrontendOrigin
           USER_CONTENT_BUCKET: !Ref UserContentBucketName
           AI_STATE_MACHINE_ARN: !Ref AIStateMachineArn
           REMINDER_FUNCTION_ARN: !GetAtt ReminderFunction.Arn
@@ -262,6 +276,13 @@ Resources:
           Properties:
             ApiId: !Ref HttpApi
             Path: /health
+            Method: GET
+            Auth: { Authorizer: NONE }
+        GoogleOAuthCallback:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /integrations/google/callback
             Method: GET
             Auth: { Authorizer: NONE }
         Proxy:

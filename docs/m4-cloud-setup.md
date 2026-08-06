@@ -25,6 +25,9 @@ The SES sender supplied as `SesFromEmail` must already be verified. Accounts sti
 1. Create or select a Google Cloud project and enable Google Workspace Marketplace SDK.
 2. Configure OAuth consent and create a web OAuth client.
 3. Add the deployed HTTPS callback/origin URLs. Never place the client secret in Vite variables.
+   - Authorized JavaScript origin: the CloudFront origin, for example `https://example.cloudfront.net`.
+   - Authorized redirect URI: the exact API URL ending in `/integrations/google/callback`.
+   - Store JSON keys `clientId` and `clientSecret` in the Secrets Manager secret named by `GoogleSecretReference`.
 4. Set `VITE_GOOGLE_CLOUD_PROJECT_NUMBER` to the numeric project number.
 5. Replace every `campusmeet.example.com` URL in `integrations/google-meet-addon/deployment.json` with the deployed HTTPS origin.
 6. Create an unpublished HTTP deployment in the Marketplace SDK and paste the manifest.
@@ -39,4 +42,5 @@ Deployment reference: https://developers.google.com/workspace/meet/add-ons/guide
 - Document attachments create an `INGEST_SOURCE` AIJob and start the M4 state machine.
 - Audio upload is accepted by the UI contract, but completion is rejected until a `BATCH_TRANSCRIPTION` worker using Amazon Transcribe is implemented.
 - The Meet side panel and secure internal meeting lookup are implemented.
-- Google OAuth token exchange and Calendar event synchronization still require the Google OAuth credentials and secret-storage choice.
+- Google OAuth connect/callback, one-time state validation and token exchange are implemented. User tokens are stored in the encrypted identity table; OAuth client credentials remain in Secrets Manager.
+- Calendar event synchronization still needs to use the stored refresh token and map Google conference creation states.

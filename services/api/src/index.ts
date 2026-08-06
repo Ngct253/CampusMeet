@@ -22,7 +22,7 @@ import {
   completeAttachmentUploadHandler,
   meetingAttachmentsHandler,
 } from './handlers/attachments';
-import { integrationsHandler } from './handlers/integrations';
+import { googleOAuthCallbackHandler, integrationsHandler } from './handlers/integrations';
 import {
   groupSearchHandler,
   meetingChatHandler,
@@ -100,7 +100,8 @@ const findRoute = createRouter([
   { method: 'GET', path: '/dashboard', handler: dashboardHandler },
   { method: 'ANY', path: '/notifications', handler: notificationsHandler },
   { method: 'POST', path: '/notifications/:notificationId/read', handler: readNotificationHandler },
-  { method: 'ANY', path: '/integrations', handler: integrationsHandler },
+  { method: 'POST', path: '/integrations/google/connect', handler: integrationsHandler },
+  { method: 'GET', path: '/integrations/google/callback', handler: googleOAuthCallbackHandler },
   { method: 'GET', path: '/integrations/google/meet-context', handler: meetContextHandler },
   { method: 'POST', path: '/meetings/:meetingId/ai/chat', handler: meetingChatHandler },
   { method: 'POST', path: '/groups/:groupId/ai/search', handler: groupSearchHandler },
