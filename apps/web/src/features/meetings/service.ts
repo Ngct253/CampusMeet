@@ -3,6 +3,8 @@ import type {
   CancelMeetingRequest,
   CreateMeetingRequest,
   Meeting,
+  MeetingMinutes,
+  UpdateMeetingMinutesRequest,
   UpdateMeetingRequest,
 } from '@campusmeet/shared';
 import { apiClient } from '../../lib/api-client';
@@ -18,6 +20,26 @@ export async function getMyMeetings(): Promise<Meeting[]> {
 
 export async function getMeeting(meetingId: string): Promise<Meeting> {
   return (await apiClient.request<ApiSuccessResponse<Meeting>>(`/meetings/${meetingId}`)).data;
+}
+
+export async function getMeetingMinutes(meetingId: string): Promise<MeetingMinutes> {
+  return (
+    await apiClient.request<ApiSuccessResponse<MeetingMinutes>>(
+      `/meetings/${encodeURIComponent(meetingId)}/minutes`,
+    )
+  ).data;
+}
+
+export async function updateMeetingMinutes(
+  meetingId: string,
+  input: UpdateMeetingMinutesRequest,
+): Promise<MeetingMinutes> {
+  return (
+    await apiClient.request<ApiSuccessResponse<MeetingMinutes>>(
+      `/meetings/${encodeURIComponent(meetingId)}/minutes`,
+      { method: 'PUT', body: JSON.stringify(input) },
+    )
+  ).data;
 }
 
 export async function createMeeting(

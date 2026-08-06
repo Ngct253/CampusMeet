@@ -292,6 +292,109 @@
   gap: 1.25rem;
   align-items: start;
 }
+
+.meeting-minutes-panel {
+  grid-column: 1 / -1;
+}
+
+.minutes-empty,
+.minutes-read-view,
+.minutes-editor {
+  display: grid;
+  gap: 1rem;
+}
+
+.minutes-empty p,
+.minutes-read-view p {
+  margin: 0.35rem 0 0;
+  white-space: pre-wrap;
+}
+
+.minutes-read-view section h3 {
+  margin: 0;
+}
+
+.minutes-version,
+.minutes-editor-heading {
+  color: var(--muted, #64748b);
+  font-size: 0.9rem;
+}
+
+.minutes-editor,
+.minutes-editor fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.minutes-editor label,
+.minutes-editor fieldset {
+  display: grid;
+  gap: 0.5rem;
+  font-weight: 700;
+}
+
+.minutes-editor textarea,
+.minutes-editor input,
+.minutes-editor select {
+  border: 1px solid #d8dfeb;
+  border-radius: 0.75rem;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.75rem;
+  width: 100%;
+}
+
+.minutes-editor textarea {
+  resize: vertical;
+}
+
+.minutes-editor-heading,
+.minutes-row,
+.minutes-action-row {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+}
+
+.minutes-editor-heading {
+  justify-content: space-between;
+}
+
+.minutes-row input,
+.minutes-action-row input {
+  flex: 1;
+}
+
+.minutes-action-row select {
+  max-width: 16rem;
+}
+
+.minutes-action-row input[type='datetime-local'] {
+  max-width: 18rem;
+}
+
+.minutes-dirty {
+  color: #b45309;
+}
+
+.minutes-success {
+  color: #15803d;
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .minutes-row,
+  .minutes-action-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .minutes-action-row select,
+  .minutes-action-row input[type='datetime-local'] {
+    max-width: none;
+  }
+}
 .meeting-overview-heading {
   display: flex;
   justify-content: space-between;

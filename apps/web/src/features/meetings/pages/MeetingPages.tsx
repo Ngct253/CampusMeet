@@ -1,13 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { CreateMeetingRequest, GroupDetails, Meeting } from '@campusmeet/shared';
+import type {
+  CreateMeetingRequest,
+  GroupDetails,
+  Meeting,
+  MeetingMinutes,
+  UpdateMeetingMinutesRequest,
+} from '@campusmeet/shared';
 import { useAuth } from '../../../auth/AuthProvider';
 import { FeaturePage } from '../../../components/FeaturePage';
 import { ApiClientError } from '../../../lib/api-client';
 import { MeetingAIWorkspace } from '../../ai';
 import { getGroup } from '../../groups/service';
-import { cancelMeeting, createMeeting, getMeeting, getMeetings, updateMeeting } from '../service';
+import {
+  cancelMeeting,
+  createMeeting,
+  getMeeting,
+  getMeetingMinutes,
+  getMeetings,
+  updateMeeting,
+  updateMeetingMinutes,
+} from '../service';
 import './MeetingPages.css';
 
 const statusLabel: Record<string, string> = {
@@ -87,6 +101,305 @@ const createAgendaDraft = (item?: Meeting['agenda'][number]): AgendaDraft => ({
   title: item?.title ?? '',
   description: item?.description ?? '',
 });
+
+type MinutesDraft = Omit<UpdateMeetingMinutesRequest, 'expectedVersion'>;
+
+const minutesDraft = (minutes?: MeetingMinutes): MinutesDraft => ({
+  summary: minutes?.summary ?? '',
+  discussion: minutes?.discussion ?? '',
+  decisions: minutes?.decisions.map(({ content }) => ({ content })) ?? [],
+  actionItems:
+    minutes?.actionItems.map(({ id, content, assigneeId, dueAt }) => ({
+      id,
+      content,
+      ...(assigneeId ? { assigneeId } : {}),
+      ...(dueAt ? { dueAt } : {}),
+    })) ?? [],
+});
+
+function MinutesReadView({ minutes, group }: { minutes: MeetingMinutes; group?: GroupDetails }) {
+  return (
+    <div className="minutes-read-view">
+      <div className="minutes-version">Phiên bản {minutes.version}</div>
+      <section>
+        <h3>Tóm tắt</h3>
+        <p>{minutes.summary}</p>
+      </section>
+      <section>
+        <h3>Nội dung thảo luận</h3>
+        <p>{minutes.discussion || 'Không có nội dung thảo luận.'}</p>
+      </section>
+      <section>
+        <h3>Quyết định</h3>
+        {minutes.decisions.length ? (
+          <ul>
+            {minutes.decisions.map((item) => (
+              <li key={item.id}>{item.content}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>Chưa có quyết định.</p>
+        )}
+      </section>
+      <section>
+        <h3>Việc cần thực hiện</h3>
+        {minutes.actionItems.length ? (
+          <ul>
+            {minutes.actionItems.map((item) => (
+              <li key={item.id}>
+                {item.content}
+                {item.assigneeId ? ` — ${memberLabel(group, item.assigneeId)}` : ''}
+                {item.dueAt ? ` — hạn ${formatDate(item.dueAt)}` : ''}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>Chưa có việc cần thực hiện.</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function MinutesEditor({
+  meetingId,
+  initial,
+  group,
+  queryKey,
+}: {
+  meetingId: string;
+  initial?: MeetingMinutes;
+  group: GroupDetails;
+  queryKey: readonly unknown[];
+}) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState(() => minutesDraft(initial));
+  const [expectedVersion, setExpectedVersion] = useState(initial?.version ?? 0);
+  const [dirty, setDirty] = useState(false);
+  const [message, setMessage] = useState('');
+  const [hasConflict, setHasConflict] = useState(false);
+  const mutation = useMutation({
+    mutationFn: () => updateMeetingMinutes(meetingId, { ...draft, expectedVersion }),
+    onSuccess: async (minutes) => {
+      setDraft(minutesDraft(minutes));
+      setExpectedVersion(minutes.version);
+      setDirty(false);
+      setHasConflict(false);
+      setMessage(`Đã lưu phiên bản ${minutes.version}.`);
+      queryClient.setQueryData(queryKey, minutes);
+      await queryClient.invalidateQueries({ queryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiClientError && error.status === 409) {
+        setHasConflict(true);
+        setMessage('Biên bản đã thay đổi. Bản nháp của bạn vẫn được giữ để đối chiếu.');
+        await queryClient.invalidateQueries({ queryKey });
+        return;
+      }
+      if (error instanceof ApiClientError && error.status === 403) {
+        setMessage('Bạn không có quyền ghi biên bản này.');
+        return;
+      }
+      if (error instanceof ApiClientError && error.status === 422) {
+        setMessage(error.message);
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : 'Không thể lưu biên bản.');
+    },
+  });
+
+  const changeDraft = (next: MinutesDraft) => {
+    setDraft(next);
+    setDirty(true);
+    setMessage('');
+  };
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    setMessage('');
+    if (!mutation.isPending) mutation.mutate();
+  };
+
+  return (
+    <form className="minutes-editor" onSubmit={submit}>
+      <div className="minutes-editor-heading">
+        <span>Đang chỉnh sửa từ phiên bản {expectedVersion}</span>
+        {dirty && <span className="minutes-dirty">Có thay đổi chưa lưu</span>}
+      </div>
+      <label>
+        Tóm tắt
+        <textarea
+          value={draft.summary}
+          onChange={(event) => changeDraft({ ...draft, summary: event.target.value })}
+          minLength={1}
+          maxLength={2000}
+          rows={4}
+          required
+        />
+      </label>
+      <label>
+        Nội dung thảo luận
+        <textarea
+          value={draft.discussion}
+          onChange={(event) => changeDraft({ ...draft, discussion: event.target.value })}
+          maxLength={10000}
+          rows={7}
+        />
+      </label>
+      <fieldset>
+        <legend>Quyết định</legend>
+        {draft.decisions.map((decision, index) => (
+          <div className="minutes-row" key={`decision-${index}`}>
+            <input
+              aria-label={`Quyết định ${index + 1}`}
+              value={decision.content}
+              onChange={(event) =>
+                changeDraft({
+                  ...draft,
+                  decisions: draft.decisions.map((item, itemIndex) =>
+                    itemIndex === index ? { content: event.target.value } : item,
+                  ),
+                })
+              }
+              maxLength={1000}
+              required
+            />
+            <button
+              type="button"
+              disabled={mutation.isPending}
+              onClick={() =>
+                changeDraft({
+                  ...draft,
+                  decisions: draft.decisions.filter((_, itemIndex) => itemIndex !== index),
+                })
+              }
+            >
+              Xóa
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          disabled={mutation.isPending || draft.decisions.length >= 50}
+          onClick={() =>
+            changeDraft({ ...draft, decisions: [...draft.decisions, { content: '' }] })
+          }
+        >
+          Thêm quyết định
+        </button>
+      </fieldset>
+      <fieldset>
+        <legend>Việc cần thực hiện</legend>
+        {draft.actionItems.map((action, index) => (
+          <div className="minutes-action-row" key={action.id ?? `action-new-${index}`}>
+            <input
+              aria-label={`Việc cần thực hiện ${index + 1}`}
+              value={action.content}
+              onChange={(event) =>
+                changeDraft({
+                  ...draft,
+                  actionItems: draft.actionItems.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, content: event.target.value } : item,
+                  ),
+                })
+              }
+              maxLength={1000}
+              required
+            />
+            <select
+              aria-label={`Người phụ trách ${index + 1}`}
+              value={action.assigneeId ?? ''}
+              onChange={(event) =>
+                changeDraft({
+                  ...draft,
+                  actionItems: draft.actionItems.map((item, itemIndex) =>
+                    itemIndex === index
+                      ? {
+                          ...(item.id ? { id: item.id } : {}),
+                          content: item.content,
+                          ...(event.target.value ? { assigneeId: event.target.value } : {}),
+                          ...(item.dueAt ? { dueAt: item.dueAt } : {}),
+                        }
+                      : item,
+                  ),
+                })
+              }
+            >
+              <option value="">Chưa giao</option>
+              {group.members.map(({ membership, user }) => (
+                <option key={membership.userId} value={membership.userId}>
+                  {user?.displayName || user?.email || membership.userId}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label={`Hạn hoàn thành ${index + 1}`}
+              type="datetime-local"
+              value={action.dueAt ? toLocalInput(action.dueAt) : ''}
+              onChange={(event) =>
+                changeDraft({
+                  ...draft,
+                  actionItems: draft.actionItems.map((item, itemIndex) =>
+                    itemIndex === index
+                      ? {
+                          ...(item.id ? { id: item.id } : {}),
+                          content: item.content,
+                          ...(item.assigneeId ? { assigneeId: item.assigneeId } : {}),
+                          ...(event.target.value
+                            ? { dueAt: new Date(event.target.value).toISOString() }
+                            : {}),
+                        }
+                      : item,
+                  ),
+                })
+              }
+            />
+            <button
+              type="button"
+              disabled={mutation.isPending}
+              onClick={() =>
+                changeDraft({
+                  ...draft,
+                  actionItems: draft.actionItems.filter((_, itemIndex) => itemIndex !== index),
+                })
+              }
+            >
+              Xóa
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          disabled={mutation.isPending || draft.actionItems.length >= 100}
+          onClick={() =>
+            changeDraft({ ...draft, actionItems: [...draft.actionItems, { content: '' }] })
+          }
+        >
+          Thêm việc cần thực hiện
+        </button>
+      </fieldset>
+      {message && (
+        <p className={mutation.isError ? 'error' : 'minutes-success'} role="status">
+          {message}
+        </p>
+      )}
+      {hasConflict && initial && initial.version !== expectedVersion && (
+        <button
+          type="button"
+          onClick={() => {
+            setExpectedVersion(initial.version);
+            setHasConflict(false);
+            setMessage(`Đang đối chiếu với phiên bản ${initial.version}; bản nháp vẫn được giữ.`);
+          }}
+        >
+          Dùng phiên bản mới làm mốc
+        </button>
+      )}
+      <button type="submit" disabled={mutation.isPending}>
+        {mutation.isPending ? 'Đang lưu…' : 'Lưu biên bản'}
+      </button>
+    </form>
+  );
+}
 
 function MeetingForm({
   group,
@@ -601,6 +914,13 @@ export function MeetingDetailPage() {
     queryFn: () => getGroup(query.data!.groupId),
     enabled: Boolean(query.data?.groupId),
   });
+  const minutesQueryKey = ['meetings', meetingId, 'minutes'] as const;
+  const minutesQuery = useQuery({
+    queryKey: minutesQueryKey,
+    queryFn: () => getMeetingMinutes(meetingId),
+    enabled: Boolean(meetingId && query.data),
+    retry: false,
+  });
   const updateMutation = useMutation({
     mutationFn: (input: CreateMeetingRequest) =>
       updateMeeting(meetingId, { ...input, version: query.data?.version }),
@@ -659,6 +979,10 @@ export function MeetingDetailPage() {
   const isAdmin = groupQuery.data?.group.role === 'GROUP_ADMIN';
   const currentUserId = auth.status === 'authenticated' ? auth.user.userId : '';
   const canGenerateMeetingOutputs = isAdmin || meeting.organizerId === currentUserId;
+  const minutesMissing =
+    minutesQuery.isError &&
+    minutesQuery.error instanceof ApiClientError &&
+    minutesQuery.error.status === 404;
   return (
     <FeaturePage title={meeting.title} description={formatDate(meeting.startsAt)}>
       <div className="meeting-detail-layout">
@@ -732,6 +1056,53 @@ export function MeetingDetailPage() {
             ))}
           </div>
         </aside>
+        <section className="app-panel meeting-minutes-panel">
+          <div className="section-heading">
+            <div>
+              <span className="section-kicker">Sau cuộc họp</span>
+              <h2>Biên bản</h2>
+            </div>
+          </div>
+          {minutesQuery.isPending || groupQuery.isPending ? (
+            <div className="state" role="status">
+              Đang tải biên bản…
+            </div>
+          ) : minutesQuery.isError && !minutesMissing ? (
+            <div className="state state-error" role="alert">
+              <strong>Chưa thể tải biên bản</strong>
+              <p>{minutesQuery.error.message}</p>
+              <button type="button" onClick={() => void minutesQuery.refetch()}>
+                Thử lại
+              </button>
+            </div>
+          ) : minutesMissing ? (
+            <div className="minutes-empty">
+              <strong>Chưa có biên bản</strong>
+              <p>Cuộc họp này chưa có phiên bản biên bản nào.</p>
+            </div>
+          ) : minutesQuery.data ? (
+            !isAdmin ? (
+              <MinutesReadView minutes={minutesQuery.data} group={groupQuery.data} />
+            ) : null
+          ) : null}
+          {(minutesMissing || minutesQuery.data) &&
+            isAdmin &&
+            groupQuery.data &&
+            meeting.status !== 'CANCELLED' && (
+              <MinutesEditor
+                key="minutes-editor"
+                meetingId={meetingId}
+                initial={minutesQuery.data}
+                group={groupQuery.data}
+                queryKey={minutesQueryKey}
+              />
+            )}
+          {(minutesMissing || minutesQuery.data) &&
+            isAdmin &&
+            meeting.status === 'CANCELLED' && (
+              <p className="state">Không thể chỉnh sửa biên bản của cuộc họp đã hủy.</p>
+            )}
+        </section>
         {isAdmin &&
           groupQuery.data &&
           meeting.status !== 'CANCELLED' &&
