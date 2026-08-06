@@ -37,7 +37,7 @@ export const googleOAuthCallbackHandler: APIGatewayProxyHandlerV2 = async (event
     if (!frontend) return ok({ connected: true }, requestId);
     return {
       statusCode: 302,
-      headers: { location: `${frontend}/app/meetings?google=connected` },
+      headers: { location: `${frontend}/app/settings?google=connected` },
     };
   } catch (error) {
     return handleError(error, requestId);

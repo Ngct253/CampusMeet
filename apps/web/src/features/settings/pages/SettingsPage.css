@@ -1,1 +1,16 @@
 .settings-panel { max-width: 38rem; }
+
+.settings-integration-panel {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.settings-integration-panel h2,
+.settings-integration-panel p {
+  margin-bottom: 0;
+}
+
+.settings-integration-panel button {
+  justify-self: start;
+}
