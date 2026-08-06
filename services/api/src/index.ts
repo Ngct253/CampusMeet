@@ -76,7 +76,7 @@ const findRoute = createRouter([
   { method: 'GET', path: '/tasks', handler: tasksHandler },
   { method: 'POST', path: '/tasks', handler: tasksHandler },
   { method: 'PATCH', path: '/tasks/:taskId/status', handler: taskStatusHandler },
-  { method: 'ANY', path: '/dashboard', handler: dashboardHandler },
+  { method: 'GET', path: '/dashboard', handler: dashboardHandler },
   { method: 'ANY', path: '/notifications', handler: notificationsHandler },
   { method: 'POST', path: '/notifications/:notificationId/read', handler: readNotificationHandler },
   { method: 'ANY', path: '/integrations', handler: integrationsHandler },

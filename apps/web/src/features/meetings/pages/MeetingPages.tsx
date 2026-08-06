@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type {
   CreateMeetingRequest,
@@ -7,13 +7,11 @@ import type {
   Meeting,
   MeetingMinutes,
   UpdateMeetingMinutesRequest,
-} from '@campusmeet/shared';import { FeaturePage } from '../../../components/FeaturePage';
-
+} from '@campusmeet/shared';
 import { useAuth } from '../../../auth/AuthProvider';
+import { FeaturePage } from '../../../components/FeaturePage';
 import { ApiClientError } from '../../../lib/api-client';
 import { MeetingAIWorkspace } from '../../ai';
-
-
 import { getGroup } from '../../groups/service';
 import {
   cancelMeeting,
@@ -74,6 +72,21 @@ const memberLabel = (group: GroupDetails | undefined, userId: string) => {
   const member = group?.members.find(({ membership }) => membership.userId === userId);
   return member?.user?.displayName || member?.user?.email || userId;
 };
+
+type AgendaDraft = {
+  localId: string;
+  id?: string;
+  title: string;
+  description: string;
+};
+
+let agendaDraftSequence = 0;
+const createAgendaDraft = (item?: Meeting['agenda'][number]): AgendaDraft => ({
+  localId: item?.id ?? `agenda-draft-${++agendaDraftSequence}`,
+  ...(item?.id ? { id: item.id } : {}),
+  title: item?.title ?? '',
+  description: item?.description ?? '',
+});
 
 type MinutesDraft = Omit<UpdateMeetingMinutesRequest, 'expectedVersion'>;
 
@@ -401,6 +414,10 @@ function MeetingForm({
   const [endTime, setEndTime] = useState(schedule.end.slice(11));
   const [timeError, setTimeError] = useState('');
   const [attendeeIds, setAttendeeIds] = useState(initial?.attendeeIds ?? []);
+  const [agenda, setAgenda] = useState<AgendaDraft[]>(() =>
+    [...(initial?.agenda ?? [])].sort((a, b) => a.order - b.order).map(createAgendaDraft),
+  );
+  const [agendaErrors, setAgendaErrors] = useState<Record<string, string>>({});
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -409,10 +426,26 @@ function MeetingForm({
       return;
     }
     setTimeError('');
+    const nextAgendaErrors = Object.fromEntries(
+      agenda
+        .filter((item) => !item.title.trim())
+        .map((item) => [item.localId, 'Mục chương trình cần có tiêu đề.']),
+    );
+    if (Object.keys(nextAgendaErrors).length) {
+      setAgendaErrors(nextAgendaErrors);
+      return;
+    }
+    setAgendaErrors({});
     onSubmit({
       title,
       ...(description.trim() ? { description } : {}),
       attendeeIds,
+      agenda: agenda.map((item, order) => ({
+        ...(item.id ? { id: item.id } : {}),
+        order,
+        title: item.title.trim(),
+        ...(item.description.trim() ? { description: item.description.trim() } : {}),
+      })),
       startsAt: new Date(`${meetingDate}T${startTime}`).toISOString(),
       endsAt: new Date(`${meetingDate}T${endTime}`).toISOString(),
     });
@@ -495,6 +528,122 @@ function MeetingForm({
           maxLength={2000}
         />
       </label>
+      <fieldset className="meeting-agenda-editor">
+        <legend>Chương trình họp</legend>
+        {agenda.length === 0 ? (
+          <p className="meeting-agenda-empty">Chưa có mục chương trình nào.</p>
+        ) : (
+          <div className="meeting-agenda-editor-list">
+            {agenda.map((item, index) => (
+              <div className="meeting-agenda-editor-item" key={item.localId}>
+                <div className="meeting-agenda-editor-heading">
+                  <strong>Mục chương trình {index + 1}</strong>
+                  <div className="meeting-agenda-actions">
+                    <button
+                      type="button"
+                      aria-label={`Di chuyển mục chương trình ${index + 1} lên`}
+                      disabled={index === 0}
+                      onClick={() =>
+                        setAgenda((current) => {
+                          const next = [...current];
+                          [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
+                          return next;
+                        })
+                      }
+                    >
+                      Di chuyển lên
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Di chuyển mục chương trình ${index + 1} xuống`}
+                      disabled={index === agenda.length - 1}
+                      onClick={() =>
+                        setAgenda((current) => {
+                          const next = [...current];
+                          [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
+                          return next;
+                        })
+                      }
+                    >
+                      Di chuyển xuống
+                    </button>
+                    <button
+                      className="button-danger-quiet"
+                      type="button"
+                      aria-label={`Xóa mục chương trình ${index + 1}`}
+                      onClick={() => {
+                        setAgenda((current) =>
+                          current.filter((entry) => entry.localId !== item.localId),
+                        );
+                        setAgendaErrors((current) => {
+                          const next = { ...current };
+                          delete next[item.localId];
+                          return next;
+                        });
+                      }}
+                    >
+                      Xóa
+                    </button>
+                  </div>
+                </div>
+                <label>
+                  Tiêu đề
+                  <input
+                    value={item.title}
+                    maxLength={200}
+                    aria-invalid={Boolean(agendaErrors[item.localId])}
+                    aria-describedby={
+                      agendaErrors[item.localId] ? `${item.localId}-error` : undefined
+                    }
+                    onChange={(event) => {
+                      const title = event.target.value;
+                      setAgenda((current) =>
+                        current.map((entry) =>
+                          entry.localId === item.localId ? { ...entry, title } : entry,
+                        ),
+                      );
+                      if (title.trim())
+                        setAgendaErrors((current) => {
+                          const next = { ...current };
+                          delete next[item.localId];
+                          return next;
+                        });
+                    }}
+                  />
+                </label>
+                {agendaErrors[item.localId] && (
+                  <p className="meeting-field-error" id={`${item.localId}-error`} role="alert">
+                    {agendaErrors[item.localId]}
+                  </p>
+                )}
+                <label>
+                  Mô tả <span>(không bắt buộc)</span>
+                  <textarea
+                    value={item.description}
+                    rows={2}
+                    maxLength={1000}
+                    onChange={(event) => {
+                      const description = event.target.value;
+                      setAgenda((current) =>
+                        current.map((entry) =>
+                          entry.localId === item.localId ? { ...entry, description } : entry,
+                        ),
+                      );
+                    }}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          className="button-secondary meeting-agenda-add"
+          type="button"
+          onClick={() => setAgenda((current) => [...current, createAgendaDraft()])}
+        >
+          Thêm mục chương trình
+        </button>
+      </fieldset>
       <fieldset className="meeting-attendees">
         <legend>Người tham dự</legend>
         <div>
@@ -687,6 +836,16 @@ export function MeetingDetailPage() {
   const { meetingId = '' } = useParams();
   const auth = useAuth();
   const queryClient = useQueryClient();
+  const [conflictMessage, setConflictMessage] = useState('');
+  const [reloadError, setReloadError] = useState('');
+  const [reloadSuccess, setReloadSuccess] = useState('');
+  const [isReloading, setIsReloading] = useState(false);
+  useEffect(() => {
+    setConflictMessage('');
+    setReloadError('');
+    setReloadSuccess('');
+    setIsReloading(false);
+  }, [meetingId]);
   const query = useQuery({
     queryKey: ['meetings', meetingId],
     queryFn: () => getMeeting(meetingId),
@@ -705,16 +864,29 @@ export function MeetingDetailPage() {
     retry: false,
   });
   const updateMutation = useMutation({
-    mutationFn: (input: CreateMeetingRequest) => updateMeeting(meetingId, input),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] }),
-        queryClient.invalidateQueries({ queryKey: ['groups', query.data?.groupId, 'meetings'] }),
-      ]);
+    mutationFn: (input: CreateMeetingRequest) =>
+      updateMeeting(meetingId, { ...input, version: query.data?.version }),
+    onMutate: () => {
+      setConflictMessage('');
+      setReloadError('');
+      setReloadSuccess('');
+    },
+    onSuccess: async (updated) => {
+      queryClient.setQueryData(['meetings', meetingId], updated);
+      await queryClient.invalidateQueries({
+        queryKey: ['groups', query.data?.groupId, 'meetings'],
+      });
+    },
+    onError: (error) => {
+      if (error instanceof ApiClientError && error.status === 409) {
+        setConflictMessage(
+          'Cuộc họp đã được cập nhật ở nơi khác. Dữ liệu bạn đang chỉnh sửa chưa được lưu. Hãy tải lại phiên bản mới nhất trước khi tiếp tục.',
+        );
+      }
     },
   });
   const cancelMutation = useMutation({
-    mutationFn: () => cancelMeeting(meetingId),
+    mutationFn: () => cancelMeeting(meetingId, { version: query.data?.version }),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] }),
@@ -745,7 +917,6 @@ export function MeetingDetailPage() {
   const isAdmin = groupQuery.data?.group.role === 'GROUP_ADMIN';
   const currentUserId = auth.status === 'authenticated' ? auth.user.userId : '';
   const canGenerateMeetingOutputs = isAdmin || meeting.organizerId === currentUserId;
-  
   const minutesMissing =
     minutesQuery.isError &&
     minutesQuery.error instanceof ApiClientError &&
@@ -779,6 +950,23 @@ export function MeetingDetailPage() {
           <div className="meeting-agenda">
             <small>Nội dung</small>
             <p>{meeting.description || 'Chưa có nội dung cho cuộc họp này.'}</p>
+          </div>
+          <div className="meeting-agenda-detail">
+            <h2>Chương trình họp</h2>
+            {meeting.agenda.length ? (
+              <ol>
+                {[...meeting.agenda]
+                  .sort((a, b) => a.order - b.order)
+                  .map((item) => (
+                    <li key={item.id}>
+                      <strong>{item.title}</strong>
+                      {item.description && <p>{item.description}</p>}
+                    </li>
+                  ))}
+              </ol>
+            ) : (
+              <p className="meeting-agenda-empty">Chưa có mục chương trình nào.</p>
+            )}
           </div>
         </section>
         <aside className="app-panel meeting-attendee-panel">
@@ -823,53 +1011,109 @@ export function MeetingDetailPage() {
             isAdmin &&
             groupQuery.data &&
             meeting.status !== 'CANCELLED' && (
-            <MinutesEditor
-              key="minutes-editor"
-              meetingId={meetingId}
-              initial={minutesQuery.data}
-              group={groupQuery.data}
-              queryKey={minutesQueryKey}
-            />
-          )}
-          {(minutesMissing || minutesQuery.data) && isAdmin && meeting.status === 'CANCELLED' && (
-            <p className="state">Không thể chỉnh sửa biên bản của cuộc họp đã hủy.</p>
-          )}
-        </section>
-        {isAdmin && groupQuery.data && meeting.status !== 'CANCELLED' && (
-          <details className="app-panel meeting-admin-panel">
-            <summary>Chỉnh sửa cuộc họp</summary>
-            <div className="meeting-admin-content">
-              <MeetingForm
-                key={`${meeting.id}-${meeting.startsAt}`}
+              <MinutesEditor
+                key="minutes-editor"
+                meetingId={meetingId}
+                initial={minutesQuery.data}
                 group={groupQuery.data}
-                initial={meeting}
-                submitLabel="Lưu thay đổi"
-                pending={updateMutation.isPending}
-                error={updateMutation.isError ? updateMutation.error.message : undefined}
-                onSubmit={(input) => updateMutation.mutate(input)}
+                queryKey={minutesQueryKey}
               />
-              <div className="meeting-cancel-row">
-                <div>
-                  <strong>Hủy cuộc họp</strong>
-                  <p>Cuộc họp vẫn được giữ trong lịch sử.</p>
+            )}
+          {(minutesMissing || minutesQuery.data) &&
+            isAdmin &&
+            meeting.status === 'CANCELLED' && (
+              <p className="state">Không thể chỉnh sửa biên bản của cuộc họp đã hủy.</p>
+            )}
+        </section>
+        {isAdmin &&
+          groupQuery.data &&
+          meeting.status !== 'CANCELLED' &&
+          meeting.status !== 'COMPLETED' && (
+            <details className="app-panel meeting-admin-panel">
+              <summary>Chỉnh sửa cuộc họp</summary>
+              <div className="meeting-admin-content">
+                <MeetingForm
+                  key={`${meeting.id}-${meeting.version}`}
+                  group={groupQuery.data}
+                  initial={meeting}
+                  submitLabel="Lưu thay đổi"
+                  pending={updateMutation.isPending}
+                  error={
+                    updateMutation.isError && !conflictMessage
+                      ? updateMutation.error.message
+                      : undefined
+                  }
+                  onSubmit={(input) => updateMutation.mutate(input)}
+                />
+                {conflictMessage && (
+                  <div className="meeting-conflict" role="alert">
+                    <p>{conflictMessage}</p>
+                    {reloadError && <p className="error">{reloadError}</p>}
+                    <div>
+                      <button
+                        type="button"
+                        disabled={isReloading}
+                        onClick={async () => {
+                          if (
+                            !window.confirm(
+                              'Tải phiên bản mới nhất sẽ thay thế dữ liệu bạn đang nhập. Tiếp tục?',
+                            )
+                          )
+                            return;
+                          setIsReloading(true);
+                          setReloadError('');
+                          try {
+                            const latest = await getMeeting(meetingId);
+                            queryClient.setQueryData(['meetings', meetingId], latest);
+                            updateMutation.reset();
+                            setConflictMessage('');
+                            setReloadSuccess('Đã tải phiên bản cuộc họp mới nhất.');
+                          } catch (error) {
+                            setReloadError(
+                              error instanceof Error
+                                ? `Không thể tải phiên bản mới nhất: ${error.message}`
+                                : 'Không thể tải phiên bản mới nhất.',
+                            );
+                          } finally {
+                            setIsReloading(false);
+                          }
+                        }}
+                      >
+                        {isReloading ? 'Đang tải…' : 'Tải phiên bản mới nhất'}
+                      </button>
+                      <button type="button" onClick={() => setConflictMessage('')}>
+                        Tiếp tục xem bản đang nhập
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {reloadSuccess && (
+                  <p className="meeting-reload-success" role="status">
+                    {reloadSuccess}
+                  </p>
+                )}
+                <div className="meeting-cancel-row">
+                  <div>
+                    <strong>Hủy cuộc họp</strong>
+                    <p>Cuộc họp vẫn được giữ trong lịch sử.</p>
+                  </div>
+                  <button
+                    className="button-danger-quiet"
+                    type="button"
+                    disabled={cancelMutation.isPending}
+                    onClick={() => window.confirm('Hủy cuộc họp này?') && cancelMutation.mutate()}
+                  >
+                    Hủy cuộc họp
+                  </button>
                 </div>
-                <button
-                  className="button-danger-quiet"
-                  type="button"
-                  disabled={cancelMutation.isPending}
-                  onClick={() => window.confirm('Hủy cuộc họp này?') && cancelMutation.mutate()}
-                >
-                  Hủy cuộc họp
-                </button>
+                {cancelMutation.isError && (
+                  <p className="error" role="alert">
+                    {cancelMutation.error.message}
+                  </p>
+                )}
               </div>
-              {cancelMutation.isError && (
-                <p className="error" role="alert">
-                  {cancelMutation.error.message}
-                </p>
-              )}
-            </div>
-          </details>
-        )}
+            </details>
+          )}
         {canGenerateMeetingOutputs && groupQuery.data && (
           <MeetingAIWorkspace meetingId={meeting.id} group={groupQuery.data} />
         )}

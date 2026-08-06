@@ -37,7 +37,7 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | GET | `/tasks` | `Task[]` | Đã triển khai; trả toàn bộ task có `assigneeId` bằng user từ JWT |
 | POST | `/tasks` | `CreateTaskRequest`, `Task` | Group Admin; bắt buộc `Idempotency-Key` |
 | PATCH | `/tasks/:taskId/status` | `UpdateTaskStatusRequest`, `Task` | Assignee hoặc active Group Admin; optimistic version |
-| GET                   | `/dashboard`                                                   | `DashboardResponse`                                                    | Handler skeleton, trả 501                      |
+| GET                   | `/dashboard`                                                   | `DashboardResponse`                                                    | M3 đã triển khai task summary cá nhân          |
 | GET                   | `/notifications`                                               | `Notification[]`                                                       | M1 đã triển khai                               |
 | POST                  | `/notifications/:notificationId/read`                          | `{read:true}`                                                          | M1 đã triển khai                               |
 | POST/DELETE           | `/integrations/google`                                         | Chưa chốt DTO                                                          | Dự kiến; skeleton hiện chỉ bắt `/integrations` |
@@ -101,6 +101,25 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 `PATCH /tasks/:taskId/status` nhận `{ status, expectedVersion }` và chỉ cho assignee hoặc active Group Admin của task cập nhật. API dùng `TODO|DOING|DONE`, cho phép `TODO→DOING|DONE`, `DOING→TODO|DONE`, `DONE→DOING`; `DONE→TODO` trả `422`. Same-status trả task hiện tại nhưng vẫn kiểm tra version, không tăng version và không ghi history. Task legacy thiếu `version` được xem là version `0`. Version cũ trả `409`; PATCH này không yêu cầu `Idempotency-Key`.
 
 `GET /meetings/:meetingId/minutes` lấy meeting từ path, kiểm tra actor là active member của `meeting.groupId` rồi trả immutable Minutes version mới nhất; meeting hoặc Minutes chưa tồn tại trả `404`. `PUT` chỉ cho active Group Admin, không nhận meeting/group/actor hoặc metadata server-managed từ body và từ chối meeting `CANCELLED` bằng `422`. Request gồm `summary`, `discussion`, `decisions`, `actionItems` và `expectedVersion`; mỗi action item nhận `id?`, `content`, `assigneeId?`, `dueAt?`, trong đó `dueAt` phải là ISO datetime có timezone. ID có trong request phải thuộc latest Minutes và không được lặp; ID lạ hoặc trùng trả `422`, còn item mới không có ID được server sinh UUID. `taskId` là metadata server-managed, client gửi sẽ trả `400`; liên kết này được giữ khi action item vẫn xuất hiện trong version mới. Assignee nếu có phải là active member cùng group. Chưa có Minutes dùng `expectedVersion=0` để tạo version `1`; version cũ trả `409`. PUT không dùng `Idempotency-Key`; retry sau success với expected version cũ trả `409` và không tạo phiên bản trùng.
+
+`GET /dashboard` trả task summary cá nhân của user đã xác thực. User scope chỉ lấy từ JWT `sub`; endpoint không nhận `userId` từ path, query hoặc body. Backend đọc toàn bộ task được giao qua access pattern GSI2 hiện có và chấp nhận eventual consistency ngắn của GSI.
+
+```ts
+interface DashboardTaskSummary {
+  total: number;
+  todo: number;
+  doing: number;
+  done: number;
+  overdue: number;
+}
+
+interface DashboardResponse {
+  generatedAt: ISODateTime;
+  tasks: DashboardTaskSummary;
+}
+```
+
+`generatedAt` là UTC ISO datetime do server tạo. `total = todo + doing + done`. Task chỉ được tính quá hạn khi có `dueAt < generatedAt` và status khác `DONE`; task không có `dueAt` hoặc có `dueAt === generatedAt` không quá hạn. Endpoint không trả raw Task và chưa bao gồm meeting, group, notification hoặc progress snapshot.
 
 Health response:
 

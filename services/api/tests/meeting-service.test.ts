@@ -93,6 +93,10 @@ describe('MeetingService', () => {
     await expect(
       service.update(first.id, { title: 'stale', version: 1 }, 'admin'),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await service.detail(first.id, 'admin')).toMatchObject({
+      title: 'Updated',
+      version: 2,
+    });
   });
   it('từ chối lifecycle invalid', async () => {
     const { service, repository } = setup();

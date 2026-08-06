@@ -6,9 +6,8 @@ import {
   type UpdateTaskStatusRequest,
 } from '@campusmeet/shared';
 import { requireGroupMembership } from '../middleware/authorization';
-import type { TaskRepository } from '../domain/ports';
+import type { MeetingAccessBoundary, TaskRepository } from '../domain/ports';
 import type { DynamoDbCollaborationRepository } from '../repositories/collaboration';
-import type { DynamoDbMeetingRepository } from '../repositories/dynamodb';
 import {
   ConflictError,
   ForbiddenError,
@@ -17,7 +16,7 @@ import {
 } from '../utils/errors';
 
 type MembershipReader = Pick<DynamoDbCollaborationRepository, 'getMembership'>;
-type MeetingReader = Pick<DynamoDbMeetingRepository, 'getById'>;
+type MeetingReader = Pick<MeetingAccessBoundary, 'resolveMeetingGroup'>;
 
 const allowedTransitions: Record<TaskStatus, readonly TaskStatus[]> = {
   [TaskStatus.TODO]: [TaskStatus.DOING, TaskStatus.DONE],
@@ -44,8 +43,8 @@ export class TaskService {
       );
     }
     if (input.sourceMeetingId) {
-      const meeting = await this.meetings.getById(input.sourceMeetingId);
-      if (!meeting || meeting.groupId !== input.groupId) {
+      const meetingGroupId = await this.meetings.resolveMeetingGroup(input.sourceMeetingId);
+      if (meetingGroupId !== input.groupId) {
         throw new ResourceNotFoundError('Không tìm thấy cuộc họp.');
       }
     }
@@ -61,10 +60,7 @@ export class TaskService {
     if (!task) throw new ResourceNotFoundError('Không tìm thấy công việc.');
 
     const membership = await this.groups.getMembership(task.groupId, actorId);
-    if (
-      !membership ||
-      (actorId !== task.assigneeId && membership.role !== GroupRole.GROUP_ADMIN)
-    ) {
+    if (!membership || (actorId !== task.assigneeId && membership.role !== GroupRole.GROUP_ADMIN)) {
       throw new ForbiddenError('Bạn không có quyền cập nhật công việc này.');
     }
 

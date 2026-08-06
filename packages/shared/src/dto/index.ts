@@ -1,11 +1,8 @@
 import type {
   AgendaItem,
   InvitationDetails,
+  ISODateTime,
   MeetingMinutes,
-  Notification,
-  Task,
-  User,
-  Group,
   Meeting,
 } from '../types';
 import { Priority, TaskStatus } from '../enums';
@@ -67,7 +64,9 @@ export const meetingInputSchema = meetingFieldsSchema.superRefine((value, contex
     });
   }
 });
-export const updateMeetingInputSchema = meetingFieldsSchema.partial();
+export const updateMeetingInputSchema = meetingFieldsSchema.partial().extend({
+  version: z.number().int().positive().optional(),
+});
 export const cancelMeetingInputSchema = z.object({
   reason: z.string().trim().max(500).optional(),
   version: z.number().int().positive().optional(),
@@ -161,12 +160,16 @@ export interface CreateMinutesRequest {
 export type UpdateMeetingMinutesRequest = z.infer<typeof meetingMinutesInputSchema>;
 export type CreateTaskRequest = z.infer<typeof taskInputSchema>;
 export type UpdateTaskStatusRequest = z.infer<typeof updateTaskStatusInputSchema>;
+export interface DashboardTaskSummary {
+  total: number;
+  todo: number;
+  doing: number;
+  done: number;
+  overdue: number;
+}
 export interface DashboardResponse {
-  user: User;
-  groups: Group[];
-  upcomingMeetings: Meeting[];
-  tasks: Task[];
-  notifications: Notification[];
+  generatedAt: ISODateTime;
+  tasks: DashboardTaskSummary;
 }
 export interface ApiSuccessResponse<T> {
   success: true;
