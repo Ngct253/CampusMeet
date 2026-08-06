@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CampusMeet user-content storage and AI job orchestration owned by M4.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  AIWorkerFunctionArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:.+$'
+
+Resources:
+  UserContentBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['content-type', 'x-amz-meta-checksum']
+            AllowedMethods: [PUT]
+            AllowedOrigins: ['*']
+            ExposedHeaders: [ETag]
+            MaxAge: 300
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireIncompleteUploads
+            Status: Enabled
+            Prefix: uploads/
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+          - Id: ExpireRawAudio
+            Status: Enabled
+            Prefix: uploads/
+            ExpirationInDays: 7
+            TagFilters:
+              - { Key: retention, Value: raw-audio }
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: Module, Value: M4 }
+
+  AIOrchestrationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: states.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeM5Worker
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Ref AIWorkerFunctionArn
+
+  AIJobStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt AIOrchestrationRole.Arn
+      StateMachineName: !Sub 'campusmeet-${Environment}-ai-jobs'
+      DefinitionString: !Sub |
+        {
+          "StartAt": "ExecuteAIJob",
+          "States": {
+            "ExecuteAIJob": {
+              "Type": "Task",
+              "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+              "Arguments": {
+                "FunctionName": "${AIWorkerFunctionArn}",
+                "Payload": {
+                  "aiJobId.$": "$.aiJobId",
+                  "action": "EXECUTE"
+                }
+              },
+              "Retry": [{
+                "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }],
+              "End": true
+            }
+          }
+        }
+      Tags:
+        - { Key: Project, Value: CampusMeet }
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: Module, Value: M4 }
+
+Outputs:
+  UserContentBucketName:
+    Value: !Ref UserContentBucket
+  AIStateMachineArn:
+    Value: !Ref AIJobStateMachine

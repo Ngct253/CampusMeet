@@ -3,7 +3,9 @@
   "DataTablePrefix": "campusmeet-dev",
   "DomainName": "campusmeet.example.com",
   "GoogleSecretReference": "/campusmeet/dev/google-oauth",
+  "SesFromEmail": "notifications@campusmeet.example.com",
   "UserContentBucketName": "replace-with-m4-user-content-bucket",
+  "AIStateMachineArn": "arn:aws:states:ap-southeast-1:123456789012:stateMachine:campusmeet-dev-ai-jobs",
   "BedrockEmbeddingModelId": "cohere.embed-multilingual-v3",
   "BedrockEmbeddingDimensions": 1024,
   "BedrockGenerationModelArn": "arn:aws:bedrock:ap-southeast-1::foundation-model/replace-with-approved-model-id"

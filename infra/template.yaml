@@ -21,10 +21,18 @@ Parameters:
     Default: /campusmeet/dev/google-oauth
     NoEcho: true
     Description: Secrets Manager or Parameter Store reference only; never put the secret value here.
+  SesFromEmail:
+    Type: String
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    Description: SES-verified sender address for reminder emails.
   UserContentBucketName:
     Type: String
     AllowedPattern: '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
     Description: Name of the M4-owned private user-content bucket; this stack does not create it.
+  AIStateMachineArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:states:[^:]+:[0-9]{12}:stateMachine:.+$'
+    Description: ARN of the M4-owned AI ingestion state machine.
   BedrockEmbeddingModelId:
     Type: String
     Default: cohere.embed-multilingual-v3
@@ -209,6 +217,16 @@ Resources:
                 Effect: Allow
                 Action: cognito-idp:AdminGetUser
                 Resource: !GetAtt UserPool.Arn
+              - Sid: ManageUserContentObjects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/uploads/*'
+              - Sid: StartM4AIOrchestration
+                Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref AIStateMachineArn
       Tags: *ResourceTags
 
   ApiFunction:
@@ -232,6 +250,12 @@ Resources:
           AI_WORK_TABLE: !Sub '${DataTablePrefix}-ai-work'
           USER_POOL_ID: !Ref UserPool
           GOOGLE_SECRET_REFERENCE: !Ref GoogleSecretReference
+          USER_CONTENT_BUCKET: !Ref UserContentBucketName
+          AI_STATE_MACHINE_ARN: !Ref AIStateMachineArn
+          REMINDER_FUNCTION_ARN: !GetAtt ReminderFunction.Arn
+          SCHEDULER_EXECUTION_ROLE_ARN: !GetAtt SchedulerExecutionRole.Arn
+          SES_FROM_EMAIL: !Ref SesFromEmail
+          SES_CONFIGURATION_SET: !Ref SesConfigurationSet
       Events:
         Health:
           Type: HttpApi
@@ -465,6 +489,7 @@ Resources:
         Minify: false
         Sourcemap: true
     Properties:
+      FunctionName: !Sub 'campusmeet-${Environment}-ai-worker'
       CodeUri: ..
       Handler: services/ai-worker/src/index.handler
       Role: !GetAtt AIWorkerRole.Arn
@@ -540,6 +565,7 @@ Resources:
           MEETING_DATA_TABLE: !Sub '${DataTablePrefix}-meeting-data'
           IDENTITY_TABLE: !Sub '${DataTablePrefix}-identity'
           SES_CONFIGURATION_SET: !Ref SesConfigurationSet
+          SES_FROM_EMAIL: !Ref SesFromEmail
       Tags: *SamTags
 
   SchedulerExecutionRole:
