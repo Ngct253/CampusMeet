@@ -1,21 +1,49 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { CreateMeetingRequest, GroupDetails, Meeting } from '@campusmeet/shared';
+import type {
+  CreateMeetingRequest,
+  GroupDetails,
+  Meeting,
+  MeetingMinutes,
+  UpdateMeetingMinutesRequest,
+} from '@campusmeet/shared';
 import { useAuth } from '../../../auth/AuthProvider';
 import { FeaturePage } from '../../../components/FeaturePage';
 import { ApiClientError } from '../../../lib/api-client';
 import { MeetingAIWorkspace } from '../../ai';
 import { getGroup } from '../../groups/service';
-import { cancelMeeting, createMeeting, getMeeting, getMeetings, updateMeeting } from '../service';
+import {
+  cancelMeeting,
+  createMeeting,
+  getMeeting,
+  getMeetingMinutes,
+  getMeetings,
+  updateMeeting,
+  updateMeetingMinutes,
+} from '../service';
 import './MeetingPages.css';
 
 const statusLabel: Record<string, string> = {
   SCHEDULED: 'Đã lên lịch',
   READY: 'Sẵn sàng',
   CANCELLED: 'Đã hủy',
-  COMPLETED: 'Đã kết thúc',
+  COMPLETED: 'Đã hoàn thành',
   INTEGRATION_PENDING: 'Đang đồng bộ',
+};
+
+const meetingErrorMessage = (error: Error, context: 'create' | 'detail' | 'update' | 'cancel') => {
+  if (!(error instanceof ApiClientError)) return error.message;
+  if (error.status === 403) return 'Bạn không có quyền thực hiện thao tác này với cuộc họp.';
+  if (error.status === 404)
+    return context === 'create'
+      ? 'Nhóm không còn tồn tại hoặc bạn không thể truy cập nhóm này.'
+      : 'Cuộc họp không tồn tại hoặc bạn không thể truy cập.';
+  if (error.status === 400 || error.status === 422)
+    return 'Thông tin cuộc họp chưa hợp lệ. Vui lòng kiểm tra các trường và thử lại.';
+  if (error.status >= 500)
+    return 'CampusMeet đang tạm thời gặp sự cố. Dữ liệu của bạn vẫn được giữ, vui lòng thử lại.';
+  return error.message;
 };
 
 const timeOptions = Array.from({ length: 96 }, (_, index) => {
@@ -74,6 +102,305 @@ const createAgendaDraft = (item?: Meeting['agenda'][number]): AgendaDraft => ({
   description: item?.description ?? '',
 });
 
+type MinutesDraft = Omit<UpdateMeetingMinutesRequest, 'expectedVersion'>;
+
+const minutesDraft = (minutes?: MeetingMinutes): MinutesDraft => ({
+  summary: minutes?.summary ?? '',
+  discussion: minutes?.discussion ?? '',
+  decisions: minutes?.decisions.map(({ content }) => ({ content })) ?? [],
+  actionItems:
+    minutes?.actionItems.map(({ id, content, assigneeId, dueAt }) => ({
+      id,
+      content,
+      ...(assigneeId ? { assigneeId } : {}),
+      ...(dueAt ? { dueAt } : {}),
+    })) ?? [],
+});
+
+function MinutesReadView({ minutes, group }: { minutes: MeetingMinutes; group?: GroupDetails }) {
+  return (
+    <div className="minutes-read-view">
+      <div className="minutes-version">Phiên bản {minutes.version}</div>
+      <section>
+        <h3>Tóm tắt</h3>
+        <p>{minutes.summary}</p>
+      </section>
+      <section>
+        <h3>Nội dung thảo luận</h3>
+        <p>{minutes.discussion || 'Không có nội dung thảo luận.'}</p>
+      </section>
+      <section>
+        <h3>Quyết định</h3>
+        {minutes.decisions.length ? (
+          <ul>
+            {minutes.decisions.map((item) => (
+              <li key={item.id}>{item.content}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>Chưa có quyết định.</p>
+        )}
+      </section>
+      <section>
+        <h3>Việc cần thực hiện</h3>
+        {minutes.actionItems.length ? (
+          <ul>
+            {minutes.actionItems.map((item) => (
+              <li key={item.id}>
+                {item.content}
+                {item.assigneeId ? ` — ${memberLabel(group, item.assigneeId)}` : ''}
+                {item.dueAt ? ` — hạn ${formatDate(item.dueAt)}` : ''}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>Chưa có việc cần thực hiện.</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function MinutesEditor({
+  meetingId,
+  initial,
+  group,
+  queryKey,
+}: {
+  meetingId: string;
+  initial?: MeetingMinutes;
+  group: GroupDetails;
+  queryKey: readonly unknown[];
+}) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState(() => minutesDraft(initial));
+  const [expectedVersion, setExpectedVersion] = useState(initial?.version ?? 0);
+  const [dirty, setDirty] = useState(false);
+  const [message, setMessage] = useState('');
+  const [hasConflict, setHasConflict] = useState(false);
+  const mutation = useMutation({
+    mutationFn: () => updateMeetingMinutes(meetingId, { ...draft, expectedVersion }),
+    onSuccess: async (minutes) => {
+      setDraft(minutesDraft(minutes));
+      setExpectedVersion(minutes.version);
+      setDirty(false);
+      setHasConflict(false);
+      setMessage(`Đã lưu phiên bản ${minutes.version}.`);
+      queryClient.setQueryData(queryKey, minutes);
+      await queryClient.invalidateQueries({ queryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiClientError && error.status === 409) {
+        setHasConflict(true);
+        setMessage('Biên bản đã thay đổi. Bản nháp của bạn vẫn được giữ để đối chiếu.');
+        await queryClient.invalidateQueries({ queryKey });
+        return;
+      }
+      if (error instanceof ApiClientError && error.status === 403) {
+        setMessage('Bạn không có quyền ghi biên bản này.');
+        return;
+      }
+      if (error instanceof ApiClientError && error.status === 422) {
+        setMessage(error.message);
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : 'Không thể lưu biên bản.');
+    },
+  });
+
+  const changeDraft = (next: MinutesDraft) => {
+    setDraft(next);
+    setDirty(true);
+    setMessage('');
+  };
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    setMessage('');
+    if (!mutation.isPending) mutation.mutate();
+  };
+
+  return (
+    <form className="minutes-editor" onSubmit={submit}>
+      <div className="minutes-editor-heading">
+        <span>Đang chỉnh sửa từ phiên bản {expectedVersion}</span>
+        {dirty && <span className="minutes-dirty">Có thay đổi chưa lưu</span>}
+      </div>
+      <label>
+        Tóm tắt
+        <textarea
+          value={draft.summary}
+          onChange={(event) => changeDraft({ ...draft, summary: event.target.value })}
+          minLength={1}
+          maxLength={2000}
+          rows={4}
+          required
+        />
+      </label>
+      <label>
+        Nội dung thảo luận
+        <textarea
+          value={draft.discussion}
+          onChange={(event) => changeDraft({ ...draft, discussion: event.target.value })}
+          maxLength={10000}
+          rows={7}
+        />
+      </label>
+      <fieldset>
+        <legend>Quyết định</legend>
+        {draft.decisions.map((decision, index) => (
+          <div className="minutes-row" key={`decision-${index}`}>
+            <input
+              aria-label={`Quyết định ${index + 1}`}
+              value={decision.content}
+              onChange={(event) =>
+                changeDraft({
+                  ...draft,
+                  decisions: draft.decisions.map((item, itemIndex) =>
+                    itemIndex === index ? { content: event.target.value } : item,
+                  ),
+                })
+              }
+              maxLength={1000}
+              required
+            />
+            <button
+              type="button"
+              disabled={mutation.isPending}
+              onClick={() =>
+                changeDraft({
+                  ...draft,
+                  decisions: draft.decisions.filter((_, itemIndex) => itemIndex !== index),
+                })
+              }
+            >
+              Xóa
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          disabled={mutation.isPending || draft.decisions.length >= 50}
+          onClick={() =>
+            changeDraft({ ...draft, decisions: [...draft.decisions, { content: '' }] })
+          }
+        >
+          Thêm quyết định
+        </button>
+      </fieldset>
+      <fieldset>
+        <legend>Việc cần thực hiện</legend>
+        {draft.actionItems.map((action, index) => (
+          <div className="minutes-action-row" key={action.id ?? `action-new-${index}`}>
+            <input
+              aria-label={`Việc cần thực hiện ${index + 1}`}
+              value={action.content}
+              onChange={(event) =>
+                changeDraft({
+                  ...draft,
+                  actionItems: draft.actionItems.map((item, itemIndex) =>
+                    itemIndex === index ? { ...item, content: event.target.value } : item,
+                  ),
+                })
+              }
+              maxLength={1000}
+              required
+            />
+            <select
+              aria-label={`Người phụ trách ${index + 1}`}
+              value={action.assigneeId ?? ''}
+              onChange={(event) =>
+                changeDraft({
+                  ...draft,
+                  actionItems: draft.actionItems.map((item, itemIndex) =>
+                    itemIndex === index
+                      ? {
+                          ...(item.id ? { id: item.id } : {}),
+                          content: item.content,
+                          ...(event.target.value ? { assigneeId: event.target.value } : {}),
+                          ...(item.dueAt ? { dueAt: item.dueAt } : {}),
+                        }
+                      : item,
+                  ),
+                })
+              }
+            >
+              <option value="">Chưa giao</option>
+              {group.members.map(({ membership, user }) => (
+                <option key={membership.userId} value={membership.userId}>
+                  {user?.displayName || user?.email || membership.userId}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label={`Hạn hoàn thành ${index + 1}`}
+              type="datetime-local"
+              value={action.dueAt ? toLocalInput(action.dueAt) : ''}
+              onChange={(event) =>
+                changeDraft({
+                  ...draft,
+                  actionItems: draft.actionItems.map((item, itemIndex) =>
+                    itemIndex === index
+                      ? {
+                          ...(item.id ? { id: item.id } : {}),
+                          content: item.content,
+                          ...(item.assigneeId ? { assigneeId: item.assigneeId } : {}),
+                          ...(event.target.value
+                            ? { dueAt: new Date(event.target.value).toISOString() }
+                            : {}),
+                        }
+                      : item,
+                  ),
+                })
+              }
+            />
+            <button
+              type="button"
+              disabled={mutation.isPending}
+              onClick={() =>
+                changeDraft({
+                  ...draft,
+                  actionItems: draft.actionItems.filter((_, itemIndex) => itemIndex !== index),
+                })
+              }
+            >
+              Xóa
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          disabled={mutation.isPending || draft.actionItems.length >= 100}
+          onClick={() =>
+            changeDraft({ ...draft, actionItems: [...draft.actionItems, { content: '' }] })
+          }
+        >
+          Thêm việc cần thực hiện
+        </button>
+      </fieldset>
+      {message && (
+        <p className={mutation.isError ? 'error' : 'minutes-success'} role="status">
+          {message}
+        </p>
+      )}
+      {hasConflict && initial && initial.version !== expectedVersion && (
+        <button
+          type="button"
+          onClick={() => {
+            setExpectedVersion(initial.version);
+            setHasConflict(false);
+            setMessage(`Đang đối chiếu với phiên bản ${initial.version}; bản nháp vẫn được giữ.`);
+          }}
+        >
+          Dùng phiên bản mới làm mốc
+        </button>
+      )}
+      <button type="submit" disabled={mutation.isPending}>
+        {mutation.isPending ? 'Đang lưu…' : 'Lưu biên bản'}
+      </button>
+    </form>
+  );
+}
+
 function MeetingForm({
   group,
   initial,
@@ -100,6 +427,8 @@ function MeetingForm({
   const [startTime, setStartTime] = useState(schedule.start.slice(11));
   const [endTime, setEndTime] = useState(schedule.end.slice(11));
   const [timeError, setTimeError] = useState('');
+  const [titleError, setTitleError] = useState('');
+  const [descriptionError, setDescriptionError] = useState('');
   const [attendeeIds, setAttendeeIds] = useState(initial?.attendeeIds ?? []);
   const [agenda, setAgenda] = useState<AgendaDraft[]>(() =>
     [...(initial?.agenda ?? [])].sort((a, b) => a.order - b.order).map(createAgendaDraft),
@@ -108,6 +437,17 @@ function MeetingForm({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    const normalizedTitle = title.trim();
+    if (normalizedTitle.length < 2) {
+      setTitleError('Tiêu đề cần ít nhất 2 ký tự.');
+      return;
+    }
+    if (description.trim().length > 2000) {
+      setDescriptionError('Nội dung không được vượt quá 2000 ký tự.');
+      return;
+    }
+    setTitleError('');
+    setDescriptionError('');
     if (endTime <= startTime) {
       setTimeError('Giờ kết thúc phải sau giờ bắt đầu.');
       return;
@@ -124,8 +464,8 @@ function MeetingForm({
     }
     setAgendaErrors({});
     onSubmit({
-      title,
-      ...(description.trim() ? { description } : {}),
+      title: normalizedTitle,
+      ...(description.trim() ? { description: description.trim() } : {}),
       attendeeIds,
       agenda: agenda.map((item, order) => ({
         ...(item.id ? { id: item.id } : {}),
@@ -144,12 +484,22 @@ function MeetingForm({
         Tiêu đề
         <input
           value={title}
-          onChange={(event) => setTitle(event.target.value)}
+          aria-invalid={Boolean(titleError)}
+          aria-describedby={titleError ? 'meeting-title-error' : undefined}
+          onChange={(event) => {
+            setTitle(event.target.value);
+            if (event.target.value.trim().length >= 2) setTitleError('');
+          }}
           minLength={2}
           maxLength={150}
           required
         />
       </label>
+      {titleError && (
+        <p className="meeting-field-error" id="meeting-title-error" role="alert">
+          {titleError}
+        </p>
+      )}
       <div className="meeting-time-fields">
         <label className="meeting-date-field">
           Ngày họp
@@ -169,6 +519,8 @@ function MeetingForm({
               setTimeError('');
             }}
             required
+            aria-invalid={Boolean(timeError)}
+            aria-describedby={timeError ? 'meeting-time-error' : undefined}
           >
             {startTime && !timeOptions.includes(startTime) && (
               <option value={startTime}>{startTime}</option>
@@ -189,6 +541,8 @@ function MeetingForm({
               setTimeError('');
             }}
             required
+            aria-invalid={Boolean(timeError)}
+            aria-describedby={timeError ? 'meeting-time-error' : undefined}
           >
             {endTime && !timeOptions.includes(endTime) && (
               <option value={endTime}>{endTime}</option>
@@ -202,7 +556,7 @@ function MeetingForm({
         </label>
       </div>
       {timeError && (
-        <p className="meeting-field-error" role="alert">
+        <p className="meeting-field-error" id="meeting-time-error" role="alert">
           {timeError}
         </p>
       )}
@@ -210,11 +564,21 @@ function MeetingForm({
         Nội dung <span>(không bắt buộc)</span>
         <textarea
           value={description}
-          onChange={(event) => setDescription(event.target.value)}
+          aria-invalid={Boolean(descriptionError)}
+          aria-describedby={descriptionError ? 'meeting-description-error' : undefined}
+          onChange={(event) => {
+            setDescription(event.target.value);
+            if (event.target.value.trim().length <= 2000) setDescriptionError('');
+          }}
           rows={3}
           maxLength={2000}
         />
       </label>
+      {descriptionError && (
+        <p className="meeting-field-error" id="meeting-description-error" role="alert">
+          {descriptionError}
+        </p>
+      )}
       <fieldset className="meeting-agenda-editor">
         <legend>Chương trình họp</legend>
         {agenda.length === 0 ? (
@@ -399,7 +763,10 @@ export function GroupMeetingsPage() {
     [meetingsQuery.data],
   );
   const upcoming = meetings.filter(
-    (meeting) => meeting.status !== 'CANCELLED' && Date.parse(meeting.endsAt) >= Date.now(),
+    (meeting) =>
+      meeting.status !== 'CANCELLED' &&
+      meeting.status !== 'COMPLETED' &&
+      Date.parse(meeting.endsAt) >= Date.now(),
   );
   const history = meetings.filter((meeting) => !upcoming.includes(meeting));
   const isAdmin = groupQuery.data?.group.role === 'GROUP_ADMIN';
@@ -491,7 +858,7 @@ export function GroupMeetingsPage() {
               group={groupQuery.data}
               submitLabel="Tạo cuộc họp"
               pending={mutation.isPending}
-              error={mutation.isError ? mutation.error.message : undefined}
+              error={mutation.isError ? meetingErrorMessage(mutation.error, 'create') : undefined}
               onSubmit={(input) => mutation.mutate(input)}
             />
           </section>
@@ -527,11 +894,15 @@ export function MeetingDetailPage() {
   const [reloadError, setReloadError] = useState('');
   const [reloadSuccess, setReloadSuccess] = useState('');
   const [isReloading, setIsReloading] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelReasonError, setCancelReasonError] = useState('');
   useEffect(() => {
     setConflictMessage('');
     setReloadError('');
     setReloadSuccess('');
     setIsReloading(false);
+    setCancelReason('');
+    setCancelReasonError('');
   }, [meetingId]);
   const query = useQuery({
     queryKey: ['meetings', meetingId],
@@ -542,6 +913,13 @@ export function MeetingDetailPage() {
     queryKey: ['groups', query.data?.groupId],
     queryFn: () => getGroup(query.data!.groupId),
     enabled: Boolean(query.data?.groupId),
+  });
+  const minutesQueryKey = ['meetings', meetingId, 'minutes'] as const;
+  const minutesQuery = useQuery({
+    queryKey: minutesQueryKey,
+    queryFn: () => getMeetingMinutes(meetingId),
+    enabled: Boolean(meetingId && query.data),
+    retry: false,
   });
   const updateMutation = useMutation({
     mutationFn: (input: CreateMeetingRequest) =>
@@ -566,12 +944,16 @@ export function MeetingDetailPage() {
     },
   });
   const cancelMutation = useMutation({
-    mutationFn: () => cancelMeeting(meetingId, { version: query.data?.version }),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] }),
-        queryClient.invalidateQueries({ queryKey: ['groups', query.data?.groupId, 'meetings'] }),
-      ]);
+    mutationFn: (reason?: string) =>
+      cancelMeeting(meetingId, {
+        ...(reason ? { reason } : {}),
+        version: query.data?.version,
+      }),
+    onSuccess: async (cancelled) => {
+      queryClient.setQueryData(['meetings', meetingId], cancelled);
+      await queryClient.invalidateQueries({
+        queryKey: ['groups', query.data?.groupId, 'meetings'],
+      });
     },
   });
 
@@ -585,7 +967,7 @@ export function MeetingDetailPage() {
     return (
       <FeaturePage title="Cuộc họp" description="Không thể mở cuộc họp.">
         <div className="state state-error" role="alert">
-          <strong>{query.error.message}</strong>
+          <strong>{meetingErrorMessage(query.error, 'detail')}</strong>
           <button type="button" onClick={() => void query.refetch()}>
             Thử lại
           </button>
@@ -597,6 +979,10 @@ export function MeetingDetailPage() {
   const isAdmin = groupQuery.data?.group.role === 'GROUP_ADMIN';
   const currentUserId = auth.status === 'authenticated' ? auth.user.userId : '';
   const canGenerateMeetingOutputs = isAdmin || meeting.organizerId === currentUserId;
+  const minutesMissing =
+    minutesQuery.isError &&
+    minutesQuery.error instanceof ApiClientError &&
+    minutesQuery.error.status === 404;
   return (
     <FeaturePage title={meeting.title} description={formatDate(meeting.startsAt)}>
       <div className="meeting-detail-layout">
@@ -644,6 +1030,22 @@ export function MeetingDetailPage() {
               <p className="meeting-agenda-empty">Chưa có mục chương trình nào.</p>
             )}
           </div>
+          {meeting.status === 'CANCELLED' &&
+            (meeting.cancellationReason || meeting.cancelledAt) && (
+              <div className="meeting-cancellation">
+                <h2>Thông tin hủy</h2>
+                {meeting.cancellationReason && (
+                  <p>
+                    <strong>Lý do:</strong> {meeting.cancellationReason}
+                  </p>
+                )}
+                {meeting.cancelledAt && (
+                  <p>
+                    <strong>Thời điểm:</strong> {formatDate(meeting.cancelledAt)}
+                  </p>
+                )}
+              </div>
+            )}
         </section>
         <aside className="app-panel meeting-attendee-panel">
           <span className="section-kicker">Thành phần</span>
@@ -654,6 +1056,53 @@ export function MeetingDetailPage() {
             ))}
           </div>
         </aside>
+        <section className="app-panel meeting-minutes-panel">
+          <div className="section-heading">
+            <div>
+              <span className="section-kicker">Sau cuộc họp</span>
+              <h2>Biên bản</h2>
+            </div>
+          </div>
+          {minutesQuery.isPending || groupQuery.isPending ? (
+            <div className="state" role="status">
+              Đang tải biên bản…
+            </div>
+          ) : minutesQuery.isError && !minutesMissing ? (
+            <div className="state state-error" role="alert">
+              <strong>Chưa thể tải biên bản</strong>
+              <p>{minutesQuery.error.message}</p>
+              <button type="button" onClick={() => void minutesQuery.refetch()}>
+                Thử lại
+              </button>
+            </div>
+          ) : minutesMissing ? (
+            <div className="minutes-empty">
+              <strong>Chưa có biên bản</strong>
+              <p>Cuộc họp này chưa có phiên bản biên bản nào.</p>
+            </div>
+          ) : minutesQuery.data ? (
+            !isAdmin ? (
+              <MinutesReadView minutes={minutesQuery.data} group={groupQuery.data} />
+            ) : null
+          ) : null}
+          {(minutesMissing || minutesQuery.data) &&
+            isAdmin &&
+            groupQuery.data &&
+            meeting.status !== 'CANCELLED' && (
+              <MinutesEditor
+                key="minutes-editor"
+                meetingId={meetingId}
+                initial={minutesQuery.data}
+                group={groupQuery.data}
+                queryKey={minutesQueryKey}
+              />
+            )}
+          {(minutesMissing || minutesQuery.data) &&
+            isAdmin &&
+            meeting.status === 'CANCELLED' && (
+              <p className="state">Không thể chỉnh sửa biên bản của cuộc họp đã hủy.</p>
+            )}
+        </section>
         {isAdmin &&
           groupQuery.data &&
           meeting.status !== 'CANCELLED' &&
@@ -669,7 +1118,7 @@ export function MeetingDetailPage() {
                   pending={updateMutation.isPending}
                   error={
                     updateMutation.isError && !conflictMessage
-                      ? updateMutation.error.message
+                      ? meetingErrorMessage(updateMutation.error, 'update')
                       : undefined
                   }
                   onSubmit={(input) => updateMutation.mutate(input)}
@@ -725,19 +1174,52 @@ export function MeetingDetailPage() {
                   <div>
                     <strong>Hủy cuộc họp</strong>
                     <p>Cuộc họp vẫn được giữ trong lịch sử.</p>
+                    <label>
+                      Lý do hủy <span>(không bắt buộc)</span>
+                      <textarea
+                        value={cancelReason}
+                        rows={2}
+                        maxLength={500}
+                        aria-invalid={Boolean(cancelReasonError)}
+                        aria-describedby={
+                          cancelReasonError ? 'meeting-cancel-reason-error' : undefined
+                        }
+                        onChange={(event) => {
+                          setCancelReason(event.target.value);
+                          if (event.target.value.trim().length <= 500) setCancelReasonError('');
+                        }}
+                      />
+                    </label>
+                    {cancelReasonError && (
+                      <p
+                        className="meeting-field-error"
+                        id="meeting-cancel-reason-error"
+                        role="alert"
+                      >
+                        {cancelReasonError}
+                      </p>
+                    )}
                   </div>
                   <button
                     className="button-danger-quiet"
                     type="button"
                     disabled={cancelMutation.isPending}
-                    onClick={() => window.confirm('Hủy cuộc họp này?') && cancelMutation.mutate()}
+                    onClick={() => {
+                      const reason = cancelReason.trim();
+                      if (reason.length > 500) {
+                        setCancelReasonError('Lý do hủy không được vượt quá 500 ký tự.');
+                        return;
+                      }
+                      if (window.confirm('Hủy cuộc họp này?'))
+                        cancelMutation.mutate(reason || undefined);
+                    }}
                   >
                     Hủy cuộc họp
                   </button>
                 </div>
                 {cancelMutation.isError && (
                   <p className="error" role="alert">
-                    {cancelMutation.error.message}
+                    {meetingErrorMessage(cancelMutation.error, 'cancel')}
                   </p>
                 )}
               </div>
