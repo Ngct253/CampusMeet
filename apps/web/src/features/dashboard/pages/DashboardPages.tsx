@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../../auth/AuthProvider';
 import { FeaturePage } from '../../../components/FeaturePage';
+import { getDashboard } from '../service';
 import { getGroups } from '../../groups/service';
 import { getMyMeetings } from '../../meetings/service';
 import { getNotifications } from '../../notifications/service';
@@ -82,6 +83,7 @@ const formatMeetingTime = (startsAt: string) =>
 
 export function DashboardPage() {
   const auth = useAuth();
+  const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: getDashboard });
   const groupsQuery = useQuery({ queryKey: ['groups'], queryFn: getGroups });
   const meetingsQuery = useQuery({ queryKey: ['meetings'], queryFn: getMyMeetings });
   const notificationsQuery = useQuery({ queryKey: ['notifications'], queryFn: getNotifications });
@@ -132,6 +134,53 @@ export function DashboardPage() {
       </div>
 
       <div className="dashboard-grid">
+        <section
+          className="dashboard-panel dashboard-task-summary"
+          aria-labelledby="dashboard-task-summary-title"
+        >
+          <header>
+            <div>
+              <span className="section-kicker">Công việc cá nhân</span>
+              <h2 id="dashboard-task-summary-title">Tổng quan công việc</h2>
+              <p>Các công việc đang được giao cho bạn.</p>
+            </div>
+            <Link to="/app/tasks">Mở công việc</Link>
+          </header>
+          {dashboardQuery.isPending ? (
+            <PanelSkeleton />
+          ) : dashboardQuery.isError ? (
+            <SyncNotice onRetry={() => void dashboardQuery.refetch()} />
+          ) : (
+            <>
+              <dl className="task-summary-counts">
+                <div>
+                  <dt>Tổng</dt>
+                  <dd>{dashboardQuery.data.tasks.total}</dd>
+                </div>
+                <div>
+                  <dt>Chưa làm</dt>
+                  <dd>{dashboardQuery.data.tasks.todo}</dd>
+                </div>
+                <div>
+                  <dt>Đang làm</dt>
+                  <dd>{dashboardQuery.data.tasks.doing}</dd>
+                </div>
+                <div>
+                  <dt>Hoàn thành</dt>
+                  <dd>{dashboardQuery.data.tasks.done}</dd>
+                </div>
+                <div className="task-summary-overdue">
+                  <dt>Quá hạn</dt>
+                  <dd>{dashboardQuery.data.tasks.overdue}</dd>
+                </div>
+              </dl>
+              {dashboardQuery.data.tasks.total === 0 ? (
+                <p className="task-summary-empty">Bạn chưa có công việc được giao.</p>
+              ) : null}
+            </>
+          )}
+        </section>
+
         <section className="dashboard-panel dashboard-meetings">
           <header>
             <div>
