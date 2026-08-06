@@ -4,10 +4,14 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1101.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.1101.0",
+    "@aws-sdk/client-dynamodb": "^3.1101.0",
+    "@aws-sdk/client-s3": "^3.1101.0",
+    "@aws-sdk/client-scheduler": "^3.967.0",
+    "@aws-sdk/client-sesv2": "^3.967.0",
     "@aws-sdk/client-sfn": "^3.1101.0",
     "@aws-sdk/lib-dynamodb": "^3.1101.0",
+    "@aws-sdk/s3-request-presigner": "^3.967.0",
     "@campusmeet/shared": "0.1.0",
     "esbuild": "0.25.12"
   },
