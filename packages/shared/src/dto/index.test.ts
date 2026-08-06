@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CreateMinutesRequest, MinutesResponse } from './index';
-import { meetingMinutesInputSchema } from './index';
+import { convertActionItemToTaskInputSchema, meetingMinutesInputSchema } from './index';
+import { Priority } from '../enums';
 
 const validInput = {
   summary: ' Tóm tắt ',
@@ -89,4 +90,51 @@ describe('meetingMinutesInputSchema', () => {
       ).toBe(false);
     },
   );
+});
+
+describe('convertActionItemToTaskInputSchema', () => {
+  const validInput = {
+    expectedMinutesVersion: 1,
+    priority: Priority.HIGH,
+    assigneeId: ' user-1 ',
+    title: ' Công việc ',
+  };
+
+  it('normalizes the strict conversion request', () => {
+    expect(convertActionItemToTaskInputSchema.parse(validInput)).toEqual({
+      expectedMinutesVersion: 1,
+      priority: Priority.HIGH,
+      assigneeId: 'user-1',
+      title: 'Công việc',
+    });
+  });
+
+  it.each([
+    ['zero version', { ...validInput, expectedMinutesVersion: 0 }],
+    ['fractional version', { ...validInput, expectedMinutesVersion: 1.5 }],
+    ['version above maximum', { ...validInput, expectedMinutesVersion: 1000000 }],
+    ['invalid priority', { ...validInput, priority: 'URGENT' }],
+    ['empty assignee', { ...validInput, assigneeId: ' ' }],
+    ['empty title', { ...validInput, title: ' ' }],
+    ['long title', { ...validInput, title: 'x'.repeat(201) }],
+  ])('rejects %s', (_label, input) => {
+    expect(convertActionItemToTaskInputSchema.safeParse(input).success).toBe(false);
+  });
+
+  it.each([
+    'meetingId',
+    'actionItemId',
+    'groupId',
+    'taskId',
+    'sourceMeetingId',
+    'sourceActionItemId',
+    'createdBy',
+    'status',
+    'version',
+    'role',
+  ])('rejects server-managed or unknown field %s', (field) => {
+    expect(
+      convertActionItemToTaskInputSchema.safeParse({ ...validInput, [field]: 'forged' }).success,
+    ).toBe(false);
+  });
 });

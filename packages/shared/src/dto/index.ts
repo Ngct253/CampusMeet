@@ -4,6 +4,7 @@ import type {
   ISODateTime,
   MeetingMinutes,
   Meeting,
+  Task,
 } from '../types';
 import { Priority, TaskStatus } from '../enums';
 import { z } from 'zod';
@@ -108,6 +109,14 @@ export const meetingMinutesInputSchema = z
     expectedVersion: z.number().int().min(0).max(999999),
   })
   .strict();
+export const convertActionItemToTaskInputSchema = z
+  .object({
+    expectedMinutesVersion: z.number().int().min(1).max(999999),
+    priority: z.nativeEnum(Priority),
+    assigneeId: z.string().trim().min(1).optional(),
+    title: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
 export interface CreateGroupRequest {
   name: string;
   description?: string;
@@ -158,6 +167,11 @@ export interface CreateMinutesRequest {
   actionItems: Array<{ content: string; assigneeId?: string }>;
 }
 export type UpdateMeetingMinutesRequest = z.infer<typeof meetingMinutesInputSchema>;
+export type ConvertActionItemToTaskRequest = z.infer<typeof convertActionItemToTaskInputSchema>;
+export interface ConvertActionItemToTaskResponse {
+  task: Task;
+  minutes: MeetingMinutes;
+}
 export type CreateTaskRequest = z.infer<typeof taskInputSchema>;
 export type UpdateTaskStatusRequest = z.infer<typeof updateTaskStatusInputSchema>;
 export interface DashboardTaskSummary {

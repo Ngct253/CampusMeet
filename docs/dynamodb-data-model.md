@@ -140,6 +140,10 @@ Minutes là các version item immutable có `entityType=MEETING_MINUTES`, `group
 
 PUT Minutes đọc latest nhất quán và yêu cầu `expectedVersion` khớp persisted version; chưa có item tương đương version logic `0`. Bản tiếp theo được ghi bằng `PutItem` với `attribute_not_exists(PK) AND attribute_not_exists(SK)`, nên không ghi đè bản cũ. Hai writer cùng base version sẽ cùng nhắm một sort key và chỉ một writer thắng; writer còn lại đọc latest nhất quán rồi trả `409`. Retry sau success với expected version cũ cũng trả `409`. Mutation chỉ ghi một item nên không dùng `TransactWriteItems`, không cần idempotency item và không ghi audit item riêng trong slice này.
 
+Conversion Action Item → Task là mutation xuyên `meeting-data` và `task-data`. Backend chỉ đọc Action Item từ latest Minutes bằng consistent Query, rồi dùng một `TransactWriteItems` gồm đúng hai conditional Put: `TASK#<deterministicTaskId>/META` trong `task-data` và `MEETING#<meetingId>/MINUTES#VERSION#<N+1>` trong `meeting-data`. Cả hai Put dùng `attribute_not_exists(PK) AND attribute_not_exists(SK)`. Minutes N+1 giữ nguyên logical Minutes ID, nội dung, Decision ID và Action Item ID; chỉ Action Item mục tiêu nhận `taskId`. Không update version cũ, không tạo latest pointer và không ghi Task History khi tạo Task.
+
+Task ID conversion được suy ra từ namespace operation cùng `meetingId + actionItemId`, không gồm actor. `actionItem.taskId` là replay marker, còn Task lưu `sourceMeetingId` và `sourceActionItemId`. Transaction cancellation chỉ được map thành replay success khi consistent re-read xác nhận đúng link/provenance, hoặc `409` khi latest Minutes đã tiến lên nhưng Action Item chưa link; lỗi DynamoDB khác không bị đổi thành conflict. Task và Action Item độc lập sau conversion: sửa/xóa Action Item không đồng bộ hoặc xóa Task.
+
 ### 6.2 Recording consent aggregate
 
 | Entity                    | PK                        | SK                 |
@@ -184,6 +188,7 @@ Access patterns:
 - Dashboard nhóm theo trạng thái và hạn: query `GSI1`.
 - Dashboard cá nhân: query `GSI2`.
 - Liệt kê task sinh từ meeting: query `GSI3`.
+- Task sinh từ Action Item giữ `sourceMeetingId` và `sourceActionItemId` trên metadata item; không cần GSI mới.
 - Update status dùng conditional expression để tránh ghi đè version cũ.
 
 Status update ghi atomically bằng `TransactWriteItems`: conditional Update item `META` và Put một history item. History status event có `entityType=TASK_EVENT`, `eventType=STATUS_CHANGED`, `taskId`, `groupId`, `actorId`, `fromStatus`, `toStatus`, `createdAt` và resulting `version`. Put history dùng `attribute_not_exists`.
