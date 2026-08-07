@@ -842,6 +842,16 @@ export function MeetingDetailPage() {
               phút
             </span>
           </div>
+          {meeting.meetUrl?.startsWith('https://meet.google.com/') && (
+            <a
+              className="button meeting-meet-link"
+              href={meeting.meetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Tham gia Google Meet
+            </a>
+          )}
           <div className="meeting-detail-grid">
             <div>
               <small>Bắt đầu</small>

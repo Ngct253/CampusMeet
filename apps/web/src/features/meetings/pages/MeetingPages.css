@@ -515,3 +515,8 @@
     flex-direction: column;
   }
 }
+.meeting-meet-link {
+  display: inline-flex;
+  width: fit-content;
+  margin-bottom: 1rem;
+}
