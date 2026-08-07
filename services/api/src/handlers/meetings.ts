@@ -1,18 +1,21 @@
 import { createHash } from 'node:crypto';
 import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
 import {
+  GroupRole,
   cancelMeetingInputSchema,
   meetingInputSchema,
   updateMeetingInputSchema,
   type CreateMeetingRequest,
 } from '@campusmeet/shared';
 import { MeetingService } from '../application/meeting-service';
+import type { MembershipAuthorizer } from '../domain/ports';
 import { authenticate } from '../middleware/authentication';
 import { SharedMembershipAuthorizer } from '../middleware/authorization';
 import { handleError } from '../middleware/error-handler';
 import { DynamoDbCollaborationRepository } from '../repositories/collaboration';
 import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
-import { EventBridgeSchedulerAdapter, GoogleCalendarAdapter } from '../integrations/adapters';
+import { DynamoDbGoogleMeetingSyncRepository } from '../repositories/google-meeting-sync';
+import { EventBridgeSchedulerAdapter } from '../integrations/adapters';
 import { ApiError, BadRequestError } from '../utils/errors';
 import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
 import { ok } from '../utils/response';
@@ -22,10 +25,11 @@ const service = new MeetingService(
   new SharedMembershipAuthorizer(),
   undefined,
   undefined,
-  new GoogleCalendarAdapter(),
   new EventBridgeSchedulerAdapter(),
 );
 const groups = new DynamoDbCollaborationRepository();
+const googleSync = new DynamoDbGoogleMeetingSyncRepository();
+const memberships = new SharedMembershipAuthorizer();
 
 const handler =
   (
@@ -128,3 +132,31 @@ export const createCancelMeetingHandler = (meetingService: MeetingService) =>
     );
   });
 export const cancelMeetingHandler = createCancelMeetingHandler(service);
+
+export const createGoogleSyncRetryHandler = (
+  meetingService: MeetingService,
+  authorizer: MembershipAuthorizer,
+  syncRepository: Pick<DynamoDbGoogleMeetingSyncRepository, 'retry'>,
+) =>
+  handler(async (event) => {
+    if (event.requestContext.http.method !== 'POST') {
+      throw new ApiError('METHOD_NOT_ALLOWED', 'Phương thức chưa được hỗ trợ.', 405);
+    }
+    const auth = authenticate(event);
+    const meetingId = getPathParameter(event, 'meetingId');
+    const meeting = await meetingService.detail(meetingId, auth.userId);
+    const membership = await authorizer.getMembership(meeting.groupId, auth.userId);
+    if (!membership?.active || membership.role !== GroupRole.GROUP_ADMIN) {
+      throw new ApiError('FORBIDDEN', 'Yêu cầu quyền Quản trị viên nhóm.', 403);
+    }
+    const sync = await syncRepository.retry(meeting);
+    return {
+      status: sync.syncStatus,
+      ...(sync.meetUrl ? { meetUrl: sync.meetUrl } : {}),
+    };
+  });
+export const googleSyncRetryHandler = createGoogleSyncRetryHandler(
+  service,
+  memberships,
+  googleSync,
+);

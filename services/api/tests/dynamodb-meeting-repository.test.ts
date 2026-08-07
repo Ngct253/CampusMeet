@@ -50,6 +50,15 @@ describe('DynamoDbMeetingRepository', () => {
     });
     expect(tx.map((x) => x.Put.Item.SK)).toContain('ATTENDEE#u2');
     expect(tx.map((x) => x.Put.Item.SK)).toContain('AGENDA#000000#a0');
+    expect(tx.map((x) => x.Put.Item)).toContainEqual(
+      expect.objectContaining({
+        SK: 'INTEGRATION#GOOGLE',
+        entityType: 'GoogleMeetingSyncRecord',
+        syncStatus: GoogleSyncStatus.PENDING,
+        syncRevision: 1,
+        desiredMeetingVersion: 1,
+      }),
+    );
   });
   it('list query GSI1 với limit/cursor, không Scan', async () => {
     let captured: Command | undefined;
@@ -103,6 +112,9 @@ describe('DynamoDbMeetingRepository', () => {
     expect(transaction[0]?.Put).toMatchObject({
       ConditionExpression: '#version = :version',
       ExpressionAttributeValues: { ':version': 1 },
+    });
+    expect(transaction.at(-1)?.Put).toMatchObject({
+      ConditionExpression: 'attribute_not_exists(PK)',
     });
   });
   it('cancel lần hai không update, không tăng version và không hard-delete', async () => {

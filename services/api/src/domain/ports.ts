@@ -6,6 +6,7 @@ import type {
   GroupRole,
   Meeting,
   MeetingMinutes,
+  GoogleMeetingSyncRecord,
   Notification,
   Priority,
   Task,
@@ -118,6 +119,22 @@ export interface GoogleCalendarGateway {
     meetUrl?: string;
     googleMeetingId?: string;
   }>;
+}
+
+export interface GoogleMeetingSyncGateway {
+  reconcile(
+    meeting: Meeting,
+    sync: GoogleMeetingSyncRecord,
+  ): Promise<{ eventId: string; meetUrl?: string }>;
+}
+
+export interface GoogleSyncRetrySchedulerGateway {
+  scheduleRetry(input: {
+    meetingId: string;
+    syncRevision: number;
+    retryOrdinal: number;
+    runAt: string;
+  }): Promise<void>;
 }
 
 export interface ReminderSchedulerGateway {

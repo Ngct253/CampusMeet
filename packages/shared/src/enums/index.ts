@@ -18,9 +18,16 @@ export enum MeetingStatus {
 export enum GoogleSyncStatus {
   NOT_REQUESTED = 'NOT_REQUESTED',
   PENDING = 'PENDING',
+  SYNCED = 'SYNCED',
+  FAILED = 'FAILED',
   READY = 'READY',
   FAILED_RETRYABLE = 'FAILED_RETRYABLE',
   ACTION_REQUIRED = 'ACTION_REQUIRED',
+}
+export enum GoogleSyncFailureClass {
+  RETRYABLE = 'RETRYABLE',
+  ACTION_REQUIRED = 'ACTION_REQUIRED',
+  PERMANENT = 'PERMANENT',
 }
 export enum TaskStatus {
   TODO = 'TODO',

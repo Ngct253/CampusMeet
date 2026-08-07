@@ -13,9 +13,10 @@ process.env.COLLABORATION_TABLE = 'collaboration-test';
 
 let createMeetingDetailHandler: typeof import('../src/handlers/meetings').createMeetingDetailHandler;
 let createCancelMeetingHandler: typeof import('../src/handlers/meetings').createCancelMeetingHandler;
+let createGoogleSyncRetryHandler: typeof import('../src/handlers/meetings').createGoogleSyncRetryHandler;
 
 beforeAll(async () => {
-  ({ createMeetingDetailHandler, createCancelMeetingHandler } =
+  ({ createMeetingDetailHandler, createCancelMeetingHandler, createGoogleSyncRetryHandler } =
     await import('../src/handlers/meetings'));
 });
 
@@ -103,5 +104,39 @@ describe('meeting handler cross-group authorization', () => {
       title: 'Client A',
       version: 2,
     });
+  });
+
+  it('manual Google retry requires Group Admin and uses current Meeting state', async () => {
+    const memberships = new InMemoryMembershipAuthorizer();
+    memberships.add('group-a', 'admin-a', GroupRole.GROUP_ADMIN);
+    memberships.add('group-a', 'member-a');
+    const service = new MeetingService(
+      new InMemoryMeetingRepository(),
+      memberships,
+      () => new Date('2029-01-01T00:00:00.000Z'),
+      () => 'm1',
+    );
+    await service.create('group-a', 'admin-a', {
+      title: 'Current state',
+      attendeeIds: ['member-a'],
+      startsAt: '2030-01-01T10:00:00.000Z',
+      endsAt: '2030-01-01T11:00:00.000Z',
+    });
+    const retried: string[] = [];
+    const retry = createGoogleSyncRetryHandler(service, memberships, {
+      retry: async (current) => {
+        retried.push(`${current.id}:${current.version}`);
+        return { syncStatus: 'PENDING', syncRevision: 2 } as never;
+      },
+    });
+
+    const forbidden = await retry(event('POST', 'member-a'), {} as never, () => undefined);
+    if (!forbidden || typeof forbidden === 'string') throw new Error('Expected response');
+    expect(forbidden.statusCode).toBe(403);
+
+    const accepted = await retry(event('POST', 'admin-a'), {} as never, () => undefined);
+    if (!accepted || typeof accepted === 'string') throw new Error('Expected response');
+    expect(accepted.statusCode).toBe(200);
+    expect(retried).toEqual(['m1:1']);
   });
 });

@@ -4,12 +4,12 @@ import {
   GetCommand,
   QueryCommand,
   TransactWriteCommand,
-  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
   GoogleSyncStatus,
   IntegrationStatus,
   MeetingStatus,
+  type GoogleMeetingSyncRecord,
   type Group,
   type Meeting,
 } from '@campusmeet/shared';
@@ -25,6 +25,7 @@ const metaItem = (meeting: Meeting): Item => ({
   SK: 'META',
   entityType: 'Meeting',
   ...meeting,
+  googleSync: undefined,
   startAt: meeting.startsAt,
   endAt: meeting.endsAt,
   GSI1PK: `GROUP#${meeting.groupId}`,
@@ -37,6 +38,31 @@ const metaItem = (meeting: Meeting): Item => ({
         GSI3SK: `MEETING#${meeting.id}`,
       }
     : {}),
+});
+const syncKey = (meetingId: string) => ({
+  PK: `MEETING#${meetingId}`,
+  SK: 'INTEGRATION#GOOGLE',
+});
+const toSyncRecord = (item?: Item): GoogleMeetingSyncRecord | undefined => {
+  if (!item || item.entityType !== 'GoogleMeetingSyncRecord') return undefined;
+  return item as unknown as GoogleMeetingSyncRecord;
+};
+const pendingSyncItem = (meeting: Meeting, current?: GoogleMeetingSyncRecord): Item => ({
+  ...syncKey(meeting.id),
+  entityType: 'GoogleMeetingSyncRecord',
+  meetingId: meeting.id,
+  groupId: meeting.groupId,
+  organizerId: meeting.organizerId,
+  provider: 'GOOGLE',
+  syncStatus: GoogleSyncStatus.PENDING,
+  syncRevision: (current?.syncRevision ?? 0) + 1,
+  desiredMeetingVersion: meeting.version,
+  desiredMeetingStatus: meeting.status,
+  googleEventId: current?.googleEventId,
+  meetUrl: current?.meetUrl,
+  attemptCount: 0,
+  createdAt: current?.createdAt ?? meeting.createdAt,
+  updatedAt: meeting.updatedAt,
 });
 const fromMeta = (item: Item): Meeting => ({
   id: String(item.id),
@@ -132,7 +158,16 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
       '__UNCONFIGURED_MEETING_DATA_TABLE__',
   ) {}
   async create(meeting: Meeting): Promise<Meeting> {
-    const items = this.puts(meeting);
+    const items = [
+      ...this.puts(meeting),
+      {
+        Put: {
+          TableName: this.table,
+          Item: pendingSyncItem(meeting),
+          ConditionExpression: 'attribute_not_exists(PK)',
+        },
+      },
+    ];
     if (items.length > 100)
       throw new MeetingError('VALIDATION_ERROR', 'Tổng attendee và agenda vượt giới hạn 99.');
     try {
@@ -154,6 +189,17 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
     const meta = result.Items?.find((i) => i.SK === 'META');
     if (!meta) return null;
     const meeting = fromMeta(meta);
+    const sync = toSyncRecord(result.Items?.find((i) => i.SK === 'INTEGRATION#GOOGLE'));
+    if (sync) {
+      meeting.googleSync = {
+        status: sync.syncStatus,
+        ...(sync.syncStatus === GoogleSyncStatus.SYNCED && sync.meetUrl
+          ? { meetUrl: sync.meetUrl }
+          : {}),
+        ...(sync.lastErrorCode ? { failureCode: sync.lastErrorCode } : {}),
+        ...(sync.nextRetryAt ? { nextRetryAt: sync.nextRetryAt } : {}),
+      };
+    }
     meeting.attendeeIds = (result.Items ?? [])
       .filter((i) => String(i.SK).startsWith('ATTENDEE#'))
       .map((i) => String(i.userId));
@@ -219,8 +265,10 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
         TableName: this.table,
         KeyConditionExpression: 'PK = :pk',
         ExpressionAttributeValues: { ':pk': `MEETING#${meeting.id}` },
-        ProjectionExpression: 'PK, SK',
       }),
+    );
+    const currentSync = toSyncRecord(
+      existing.Items?.find((item) => item.SK === 'INTEGRATION#GOOGLE'),
     );
     const puts = this.puts(meeting).slice(1);
     const desiredKeys = new Set(puts.map((operation) => String(operation.Put.Item.SK)));
@@ -240,6 +288,18 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
       },
       ...deletes,
       ...puts,
+      {
+        Put: {
+          TableName: this.table,
+          Item: pendingSyncItem(meeting, currentSync),
+          ...(currentSync
+            ? {
+                ConditionExpression: 'syncRevision = :syncRevision',
+                ExpressionAttributeValues: { ':syncRevision': currentSync.syncRevision },
+              }
+            : { ConditionExpression: 'attribute_not_exists(PK)' }),
+        },
+      },
     ];
     if (transactions.length > 100)
       throw new MeetingError(
@@ -260,6 +320,20 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
     if (current.status === MeetingStatus.COMPLETED)
       throw new MeetingError('VALIDATION_ERROR', 'Không thể hủy cuộc họp đã hoàn thành.');
     const now = new Date().toISOString();
+    const next: Meeting = {
+      ...current,
+      status: MeetingStatus.CANCELLED,
+      cancelledAt: now,
+      cancelledBy: actorId,
+      ...(reason ? { cancellationReason: reason } : {}),
+      updatedAt: now,
+      updatedBy: actorId,
+      version: current.version + 1,
+    };
+    const syncResult = await this.db.send(
+      new GetCommand({ TableName: this.table, Key: syncKey(id), ConsistentRead: true }),
+    );
+    const currentSync = toSyncRecord(syncResult.Item);
     const values: Item = {
       ':cancelled': MeetingStatus.CANCELLED,
       ':completed': MeetingStatus.COMPLETED,
@@ -274,15 +348,33 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
     }
     try {
       await this.db.send(
-        new UpdateCommand({
-          TableName: this.table,
-          Key: { PK: `MEETING#${id}`, SK: 'META' },
-          UpdateExpression:
-            'SET #status=:cancelled, cancelledAt=:now, cancelledBy=:actor, updatedAt=:now, updatedBy=:actor, #version=#version+:one' +
-            (reason ? ', cancellationReason=:reason' : ''),
-          ConditionExpression: condition,
-          ExpressionAttributeNames: { '#status': 'status', '#version': 'version' },
-          ExpressionAttributeValues: { ...values, ...(reason ? { ':reason': reason } : {}) },
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Update: {
+                TableName: this.table,
+                Key: { PK: `MEETING#${id}`, SK: 'META' },
+                UpdateExpression:
+                  'SET #status=:cancelled, cancelledAt=:now, cancelledBy=:actor, updatedAt=:now, updatedBy=:actor, #version=#version+:one' +
+                  (reason ? ', cancellationReason=:reason' : ''),
+                ConditionExpression: condition,
+                ExpressionAttributeNames: { '#status': 'status', '#version': 'version' },
+                ExpressionAttributeValues: { ...values, ...(reason ? { ':reason': reason } : {}) },
+              },
+            },
+            {
+              Put: {
+                TableName: this.table,
+                Item: pendingSyncItem(next, currentSync),
+                ...(currentSync
+                  ? {
+                      ConditionExpression: 'syncRevision = :syncRevision',
+                      ExpressionAttributeValues: { ':syncRevision': currentSync.syncRevision },
+                    }
+                  : { ConditionExpression: 'attribute_not_exists(PK)' }),
+              },
+            },
+          ],
         }),
       );
       return (await this.getById(id))!;
