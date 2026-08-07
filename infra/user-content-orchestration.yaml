@@ -115,7 +115,7 @@ Resources:
             "ExecuteAIJob": {
               "Type": "Task",
               "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
-              "Arguments": {
+              "Parameters": {
                 "FunctionName": "${AIWorkerFunctionArn}",
                 "Payload": {
                   "aiJobId.$": "$.aiJobId",

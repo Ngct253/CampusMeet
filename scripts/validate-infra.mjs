@@ -206,6 +206,17 @@ for (const marker of [
   assert.equal(m4Template.includes(marker), true, `M4 template is missing ${marker}.`);
 }
 
+assert.equal(
+  m4Template.includes('"Arguments":'),
+  false,
+  'The JSONPath Step Functions definition must use Parameters instead of JSONata Arguments.',
+);
+assert.equal(
+  m4Template.includes('"Parameters":'),
+  true,
+  'The Lambda optimized integration must define JSONPath Parameters.',
+);
+
 for (const marker of [
   '  ReminderFunction:',
   '  SchedulerExecutionRole:',
