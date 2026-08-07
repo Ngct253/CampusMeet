@@ -267,14 +267,6 @@ Resources:
           - Effect: Allow
             Principal: { Service: scheduler.amazonaws.com }
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: InvokeGoogleSyncWorkerOnly
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !GetAtt GoogleSyncWorkerFunction.Arn
       Tags: *ResourceTags
 
   GoogleSyncWorkerRole:
@@ -349,6 +341,18 @@ Resources:
               Filters:
                 - Pattern: '{ "eventName": ["INSERT", "MODIFY"], "dynamodb": { "NewImage": { "entityType": { "S": ["GoogleMeetingSyncRecord"] }, "provider": { "S": ["GOOGLE"] }, "syncStatus": { "S": ["PENDING"] } } } }'
       Tags: *SamTags
+
+  GoogleSyncSchedulerInvokePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: InvokeGoogleSyncWorkerOnly
+      Roles: [!Ref GoogleSyncSchedulerRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt GoogleSyncWorkerFunction.Arn
 
   GoogleSyncWorkerLogGroup:
     Type: AWS::Logs::LogGroup
