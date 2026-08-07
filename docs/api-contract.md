@@ -73,7 +73,7 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 
 ## Contract đồng bộ Google của Meeting
 
-Decision 4A runtime đã **ACCEPTED** ngày 2026-08-07; runtime và AWS chưa hoàn tất. Meeting create, update và cancel thành công khi transaction nội bộ đã ghi đồng thời Meeting và synchronization intent. Các response này không chờ Google; Google failure sau đó không biến mutation nội bộ đã thành công thành `5xx` hoặc rollback Meeting.
+Decision 4A runtime đã **ACCEPTED** ngày 2026-08-07; source runtime đã implement và local verified, còn AWS/browser verification chưa hoàn tất. Meeting create, update và cancel thành công khi transaction nội bộ đã ghi đồng thời Meeting và synchronization intent. Các response này không chờ Google; Google failure sau đó không biến mutation nội bộ đã thành công thành `5xx` hoặc rollback Meeting.
 
 Meeting detail mục tiêu bổ sung summary chỉ đọc, tách khỏi lifecycle:
 
@@ -95,7 +95,7 @@ Meeting detail mục tiêu bổ sung summary chỉ đọc, tách khỏi lifecycl
 
 - Authentication: Cognito JWT.
 - Authorization: actor là active member và `GROUP_ADMIN` của group được resolve server-side từ Meeting; không tin `groupId` trong body.
-- Request body: không chứa Meeting snapshot hoặc integration fields; body rỗng được chấp nhận theo parser contract mà implementation PR chốt.
+- Request body: object rỗng; không chứa Meeting snapshot hoặc integration fields.
 - Behavior: đọc Meeting và sync record hiện tại; không đổi Meeting lifecycle; tạo revision mới ở `PENDING`, reset attempt/failure metadata, rồi xử lý bất đồng bộ.
 - Success: `200` theo envelope hiện tại, `data` là read-only `GoogleMeetingSyncSummary` ở `PENDING`. Response xác nhận intent đã durable, không xác nhận Google đã đồng bộ.
 - `400`: malformed input; `401`: thiếu/sai authentication; `403`: không phải active Group Admin; `404`: Meeting hoặc sync resource không tồn tại theo access boundary; `409`: conditional revision conflict hoặc trạng thái không thể tạo retry an toàn; `5xx`: chỉ khi không thể persist retry intent/internal dependency lỗi, không dùng để biểu diễn Google attempt bất đồng bộ thất bại.
@@ -216,7 +216,7 @@ Nghiệp vụ khác chưa triển khai:
 | Tool allowlist | Chốt tool MVP, quyền, trường cần xác nhận, expiry và audit; không expose CRUD tùy ý cho model                                                                                                                                 |
 | Retention      | Upload chưa hoàn tất 1 ngày, raw audio 7 ngày, AIJob/conversation 30 ngày; source/vector tồn tại đến khi source hoặc meeting bị xóa                                                                                           |
 | Shared states  | Tách `MeetingStatus` khỏi `GoogleSyncStatus`; cập nhật `@campusmeet/shared` trước khi implement route mới                                                                                                                     |
-| Google sync    | Runtime design 4A đã ACCEPTED; implement sync record/transaction, Stream worker, Scheduler retry, manual retry và read-only detail summary; runtime/AWS chưa complete                                                         |
+| Google sync    | Runtime design 4A đã ACCEPTED; source implementation gồm sync record/transaction, Stream worker, Scheduler retry, manual retry và read-only detail summary đã local verified; AWS/browser pending                             |
 
 Không triển khai route hoặc CRUD thật chỉ để làm bảng này trông hoàn chỉnh.
 
@@ -226,4 +226,4 @@ For Meeting creation, the authenticated creator is the organizer; `organizerId` 
 
 `GET /groups/{groupId}/meetings` returns `CursorPage<Meeting>` in the success envelope. Query `limit` defaults to 20 and must be an integer from 1 through 100. `cursor` is an opaque, versioned logical cursor scoped to the group and stable `startsAt + meetingId` ordering; malformed or wrong-group cursors return `400`. `nextCursor` is omitted at the end. Clients must not decode the cursor.
 
-Google synchronization follows eventual consistency: an external failure does not roll back the internal Meeting. The complete runtime design is ACCEPTED in `docs/decisions/m2-m4-synchronization.md`. Latest main has OAuth and Calendar create code, but sync-record persistence, Stream worker, `syncRevision`, update/cancel reconciliation and bounded retry remain unimplemented and are not AWS-runtime verified.
+Google synchronization follows eventual consistency: an external failure does not roll back the internal Meeting. The complete runtime design is ACCEPTED in `docs/decisions/m2-m4-synchronization.md`. The implementation branch contains sync-record persistence, Stream worker, `syncRevision`, update/cancel reconciliation and bounded retry with local automated evidence; it is not AWS-runtime verified.

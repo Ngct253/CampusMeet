@@ -41,4 +41,4 @@ Mọi PR thay đổi physical schema phải sửa `dynamodb-data-model.md`, `inf
 
 [Accepted M2 Meeting contract decisions](decisions/m2-contract-decisions.md) cover organizer, PATCH version, Meeting pagination, and decision 4A principle. Status: ACCEPTED.
 
-[Accepted M2–M4 synchronization runtime contract](decisions/m2-m4-synchronization.md) closes the persistence, Stream, revision, reconciliation, retry, UX, security, and observability design. Runtime implementation: NOT YET COMPLETE. AWS verification: NOT YET COMPLETE.
+[Accepted M2–M4 synchronization runtime contract](decisions/m2-m4-synchronization.md) closes the persistence, Stream, revision, reconciliation, retry, UX, security, and observability design. Source implementation: IMPLEMENTED / LOCAL VERIFIED. AWS verification: NOT YET COMPLETE. Browser verification: HUMAN VERIFICATION PENDING.
