@@ -123,6 +123,9 @@ const findRoute = createRouter([
 ]);
 
 export const handler: APIGatewayProxyHandlerV2 = async (event, context, callback) => {
+  if (event.requestContext.http.method === 'OPTIONS') {
+    return { statusCode: 204 };
+  }
   const stage = event.requestContext.stage;
   const stagePrefix = `/${stage}`;
   const rawPath =
