@@ -22,6 +22,7 @@ import {
   getMeeting,
   getMeetingMinutes,
   getMeetings,
+  retryGoogleMeetingSync,
   updateMeeting,
   updateMeetingMinutes,
 } from '../service';
@@ -1213,6 +1214,12 @@ export function MeetingDetailPage() {
       });
     },
   });
+  const googleRetryMutation = useMutation({
+    mutationFn: () => retryGoogleMeetingSync(meetingId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] });
+    },
+  });
 
   if (query.isPending)
     return (
@@ -1233,6 +1240,7 @@ export function MeetingDetailPage() {
     );
 
   const meeting = query.data;
+  const meetUrl = meeting.googleSync?.meetUrl ?? meeting.meetUrl;
   const isAdmin = groupQuery.data?.group.role === 'GROUP_ADMIN';
   const currentUserId = auth.status === 'authenticated' ? auth.user.userId : '';
   const canGenerateMeetingOutputs = isAdmin || meeting.organizerId === currentUserId;
@@ -1256,15 +1264,54 @@ export function MeetingDetailPage() {
               phút
             </span>
           </div>
-          {meeting.meetUrl?.startsWith('https://meet.google.com/') && (
+          {meetUrl?.startsWith('https://meet.google.com/') && (
             <a
               className="button meeting-meet-link"
-              href={meeting.meetUrl}
+              href={meetUrl}
               target="_blank"
               rel="noopener noreferrer"
             >
               Tham gia Google Meet
             </a>
+          )}
+          {meeting.googleSync?.status === 'PENDING' && (
+            <p role="status">Google Calendar và Meet đang được đồng bộ.</p>
+          )}
+          {meeting.googleSync?.status === 'ACTION_REQUIRED' && (
+            <div className="state state-error" role="alert">
+              <strong>Cần kết nối lại tài khoản Google để đồng bộ cuộc họp.</strong>
+              {isAdmin && (
+                <button
+                  type="button"
+                  disabled={googleRetryMutation.isPending}
+                  onClick={() => googleRetryMutation.mutate()}
+                >
+                  Thử đồng bộ lại
+                </button>
+              )}
+            </div>
+          )}
+          {meeting.googleSync?.status === 'FAILED' && (
+            <div className="state state-error" role="alert">
+              <strong>Đồng bộ Google Calendar/Meet thất bại.</strong>
+              {meeting.googleSync.nextRetryAt && (
+                <small>Hệ thống sẽ thử lại lúc {formatDate(meeting.googleSync.nextRetryAt)}.</small>
+              )}
+              {isAdmin && !meeting.googleSync.nextRetryAt && (
+                <button
+                  type="button"
+                  disabled={googleRetryMutation.isPending}
+                  onClick={() => googleRetryMutation.mutate()}
+                >
+                  Thử đồng bộ lại
+                </button>
+              )}
+            </div>
+          )}
+          {googleRetryMutation.isError && (
+            <p className="form-error" role="alert">
+              Không thể tạo yêu cầu đồng bộ lại. Vui lòng thử sau.
+            </p>
           )}
           <div className="meeting-detail-grid">
             <div>
