@@ -4,7 +4,6 @@ import {
   GetCommand,
   QueryCommand,
   TransactWriteCommand,
-  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
   GoogleSyncStatus,
@@ -12,9 +11,11 @@ import {
   MeetingStatus,
   type Group,
   type Meeting,
+  type GoogleMeetingSyncRecord,
 } from '@campusmeet/shared';
 import type { GroupRepository, MeetingPage, MeetingRepository } from '../domain/ports';
 import { MeetingError } from '../domain/meeting-errors';
+import { googleSyncItem } from './google-meeting-sync';
 
 type Item = Record<string, unknown>;
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
@@ -131,8 +132,21 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
     private readonly table = process.env.MEETING_DATA_TABLE ??
       '__UNCONFIGURED_MEETING_DATA_TABLE__',
   ) {}
-  async create(meeting: Meeting): Promise<Meeting> {
-    const items = this.puts(meeting);
+  async create(meeting: Meeting, sync?: GoogleMeetingSyncRecord): Promise<Meeting> {
+    const items = [
+      ...this.puts(meeting),
+      ...(sync
+        ? [
+            {
+              Put: {
+                TableName: this.table,
+                Item: googleSyncItem(sync),
+                ConditionExpression: 'attribute_not_exists(PK)',
+              },
+            },
+          ]
+        : []),
+    ];
     if (items.length > 100)
       throw new MeetingError('VALIDATION_ERROR', 'Tổng attendee và agenda vượt giới hạn 99.');
     try {
@@ -213,7 +227,12 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
         : {}),
     };
   }
-  async update(meeting: Meeting, expectedVersion: number) {
+  async update(
+    meeting: Meeting,
+    expectedVersion: number,
+    sync?: GoogleMeetingSyncRecord,
+    expectedSyncRevision?: number,
+  ) {
     const existing = await this.db.send(
       new QueryCommand({
         TableName: this.table,
@@ -240,6 +259,23 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
       },
       ...deletes,
       ...puts,
+      ...(sync
+        ? [
+            {
+              Put: {
+                TableName: this.table,
+                Item: googleSyncItem(sync),
+                ConditionExpression:
+                  expectedSyncRevision === undefined
+                    ? 'attribute_not_exists(PK)'
+                    : 'syncRevision = :syncRevision',
+                ...(expectedSyncRevision === undefined
+                  ? {}
+                  : { ExpressionAttributeValues: { ':syncRevision': expectedSyncRevision } }),
+              },
+            },
+          ]
+        : []),
     ];
     if (transactions.length > 100)
       throw new MeetingError(
@@ -253,46 +289,31 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
       return mapAwsError(error);
     }
   }
-  async cancel(id: string, actorId: string, reason?: string, expectedVersion?: number) {
+  async cancel(
+    id: string,
+    actorId: string,
+    reason?: string,
+    expectedVersion?: number,
+    sync?: GoogleMeetingSyncRecord,
+    expectedSyncRevision?: number,
+  ) {
     const current = await this.getById(id);
     if (!current) throw new MeetingError('NOT_FOUND', 'Không tìm thấy cuộc họp.');
     if (current.status === MeetingStatus.CANCELLED) return current;
     if (current.status === MeetingStatus.COMPLETED)
       throw new MeetingError('VALIDATION_ERROR', 'Không thể hủy cuộc họp đã hoàn thành.');
     const now = new Date().toISOString();
-    const values: Item = {
-      ':cancelled': MeetingStatus.CANCELLED,
-      ':completed': MeetingStatus.COMPLETED,
-      ':now': now,
-      ':actor': actorId,
-      ':one': 1,
+    const next: Meeting = {
+      ...current,
+      status: MeetingStatus.CANCELLED,
+      cancelledAt: now,
+      cancelledBy: actorId,
+      ...(reason ? { cancellationReason: reason } : {}),
+      updatedAt: now,
+      updatedBy: actorId,
+      version: current.version + 1,
     };
-    let condition = '#status <> :cancelled AND #status <> :completed';
-    if (expectedVersion !== undefined) {
-      condition += ' AND #version = :version';
-      values[':version'] = expectedVersion;
-    }
-    try {
-      await this.db.send(
-        new UpdateCommand({
-          TableName: this.table,
-          Key: { PK: `MEETING#${id}`, SK: 'META' },
-          UpdateExpression:
-            'SET #status=:cancelled, cancelledAt=:now, cancelledBy=:actor, updatedAt=:now, updatedBy=:actor, #version=#version+:one' +
-            (reason ? ', cancellationReason=:reason' : ''),
-          ConditionExpression: condition,
-          ExpressionAttributeNames: { '#status': 'status', '#version': 'version' },
-          ExpressionAttributeValues: { ...values, ...(reason ? { ':reason': reason } : {}) },
-        }),
-      );
-      return (await this.getById(id))!;
-    } catch (error) {
-      if (error instanceof Error && error.name === 'ConditionalCheckFailedException') {
-        const latest = await this.getById(id);
-        if (latest?.status === MeetingStatus.CANCELLED) return latest;
-      }
-      return mapAwsError(error);
-    }
+    return this.update(next, expectedVersion ?? current.version, sync, expectedSyncRevision);
   }
   private puts(meeting: Meeting) {
     return [

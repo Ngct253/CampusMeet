@@ -6,7 +6,7 @@ ACCEPTED
 
 Accepted runtime design date: 2026-08-07
 
-Implementation status: NOT YET COMPLETE. AWS verification status: NOT YET COMPLETE.
+Source implementation status: IMPLEMENTED and LOCAL VERIFIED on 2026-08-07. AWS verification status: NOT YET COMPLETE. Browser verification status: HUMAN VERIFICATION PENDING.
 
 ## 1. Context
 
@@ -14,11 +14,11 @@ M2 owns the internal Meeting lifecycle. M4 integrates that Meeting with the orga
 
 This record supersedes the earlier principle-only design and closes the previously unresolved runtime details. It is the implementation contract, not evidence that runtime code or AWS resources already exist.
 
-### Repository maturity after latest-main merge
+### Repository maturity
 
-Latest main has implemented required Meeting PATCH version and paginated group Meeting lists, Google OAuth connect/callback with one-time state, a Calendar create adapter, attachment flows, and one-shot Meeting reminders. Meeting create currently persists the Meeting and then calls Google Calendar synchronously; failures are caught and written back using legacy status fields on the Meeting. This preserves the no-rollback principle but does **not** implement this accepted runtime contract: there is no `GoogleMeetingSyncRecord` repository, atomic Meeting + sync-intent transaction, DynamoDB Stream, `GoogleSyncWorker`, `syncRevision`, bounded Google retry, manual retry route, or update/cancel reconciliation. The adapter does not yet prove the at-most-one-active-event invariant for ambiguous retries.
+The implementation branch now contains `GoogleMeetingSyncRecord` persistence, atomic Meeting + sync-intent transactions, `syncRevision`, a DynamoDB Stream worker, current-state Calendar reconciliation, bounded Scheduler retries, the manual retry route, read-side summary, frontend states, and corresponding IaC and automated tests. The former synchronous Calendar create path has been removed.
 
-The source includes OAuth/token persistence in the `identity` table and working reminder infrastructure, but source presence is not AWS verification. Consequently 4A implementation and AWS verification remain **NOT YET COMPLETE**.
+The implementation reuses OAuth/token persistence in the `identity` table and the one-shot Reminder Scheduler conventions without changing their ownership. Local source/test evidence is not AWS evidence: deployment, Stream delivery, Scheduler invocation, real Google reconciliation, and browser behavior remain unverified.
 
 ## 2. Scope
 
@@ -234,27 +234,26 @@ The implementation adds a dedicated GoogleSyncWorker log group, error/duration a
 
 ## 21. AWS infrastructure mapping
 
-| Accepted component | Existing mapping                                                                                                                                                                                                                                   | Implementation change required later                                                                                                                             |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Persistence        | `MeetingDataTable`, physical `campusmeet-<env>-meeting-data`                                                                                                                                                                                       | Add logical record repository only; no sixth table                                                                                                               |
-| Initial trigger    | No stream currently configured                                                                                                                                                                                                                     | Enable Stream `NEW_AND_OLD_IMAGES`, filtered event source mapping                                                                                                |
-| Worker             | API/Reminder/AI Lambda conventions exist                                                                                                                                                                                                           | Add M4 `GoogleSyncWorker` Lambda, role, env, logs, alarms                                                                                                        |
-| Retry              | Reminder uses `campusmeet-<sha256(meetingId)[0:24]>`, `at(...)`, `FlexibleTimeWindow=OFF`, `ActionAfterCompletion=DELETE`, payload `{reminderId,meetingId}`, create client token then update on conflict; its Scheduler role invokes Reminder only | Reuse one-shot/idempotent naming convention with Google-specific identity/payload `{meetingId,syncRevision}` and add scoped Google-worker invoke role/permission |
-| API                | Existing authenticated proxy and success/error envelope                                                                                                                                                                                            | Add manual retry route and read-side summary                                                                                                                     |
-| Google             | OAuth connect/callback and token refresh plus Calendar create are implemented; create is currently synchronous and adapter has no update/cancel/current-state reconciliation                                                                       | Refactor behind the accepted asynchronous reconcile contract and failure mapping                                                                                 |
-| OAuth              | Google connection records live in `identity`; current repository persists token material there                                                                                                                                                     | Preserve M4 ownership; harden storage/secret handling and never expose credentials through Meeting DTOs or logs                                                  |
-| Monitoring         | CloudWatch log group/alarm/SNS conventions exist                                                                                                                                                                                                   | Add Google sync semantic observability                                                                                                                           |
+| Accepted component | Implemented source mapping                                                                                                                                                                                               | Verification status                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| Persistence        | `GoogleMeetingSyncRecord` at `MEETING#<meetingId>/INTEGRATION#GOOGLE` in `MeetingDataTable`; no sixth table                                                                                                              | Locally tested; AWS pending                    |
+| Initial trigger    | `MeetingDataTable` `NEW_AND_OLD_IMAGES` Stream plus filtered `INSERT`/`MODIFY` event source mapping for pending Google records                                                                                           | IaC validated; AWS pending                     |
+| Worker             | `GoogleSyncWorker` Lambda normalizes Stream/Scheduler input, rereads current records, guards revisions, and reconciles current desired state                                                                             | Locally tested; AWS pending                    |
+| Retry              | Google-specific one-shot Scheduler adapter uses deterministic names, `at(...)`, `FlexibleTimeWindow=OFF`, `ActionAfterCompletion=DELETE`, identity-only payload, Google worker target, and zero Scheduler target retries | Locally tested; AWS pending                    |
+| API                | Authenticated proxy route `POST /meetings/:meetingId/google-sync/retry` and read-only Meeting detail summary                                                                                                             | Locally tested; AWS/browser pending            |
+| Google             | Existing adapter refactored to deterministic event identity and idempotent ensure-scheduled/ensure-cancelled reconciliation                                                                                              | Adapter tested with fakes; real Google pending |
+| OAuth              | Existing Google connection/token refresh repository in `identity`; credentials remain excluded from Meeting/sync DTOs and structured logs                                                                                | Locally audited; AWS pending                   |
+| Monitoring         | Structured semantic events and EMF metrics, dedicated worker log group, and final-failure alarm                                                                                                                          | IaC validated; AWS pending                     |
 
 No SQS or Step Functions is introduced for this contract.
 
-## 22. Implementation prerequisites
+## 22. Deployment and verification prerequisites
 
-1. Align shared status/read DTOs without allowing integration fields in Meeting mutation schemas.
-2. Add sync-record repository and transaction boundary used by create/update/cancel/manual retry.
-3. Implement current-state Google adapter, deterministic identity or metadata fallback, and OAuth classification.
-4. Add Stream, worker, Scheduler target/role, least-privilege IAM, logs, metrics, and alarms through reviewed IaC.
-5. Add migration/compatibility handling for current Meeting META fields (`googleSyncStatus`, deprecated `integrationStatus`, `meetUrl`) without inventing a new table.
-6. Deploy and smoke-test only in a later reviewed implementation/IaC change.
+1. Review and merge the source/IaC implementation.
+2. Identify a verified project DEV AWS identity and deploy through the repository-supported process.
+3. Verify Stream delivery, Lambda state, Scheduler permissions, CloudWatch semantics, and no seventh external attempt.
+4. Exercise missing/revoked connection, real Google create/update/cancel, at-most-one-event, and manual retry with safe test accounts.
+5. Complete authenticated browser review; do not treat local component tests as browser evidence.
 
 ## 23. Implementation acceptance tests
 
@@ -312,4 +311,4 @@ No SQS or Step Functions is introduced for this contract.
 
 ## 25. Out of scope
 
-This docs/design PR includes no runtime implementation, AWS deployment, table creation, Stream enablement, Scheduler creation, Google OAuth code change, frontend implementation, retry worker code, or secret-management change. It does not modify TypeScript, tests, or IaC.
+Production deployment, destructive legacy-field migration, a sixth DynamoDB table, a new OAuth store, frontend-editable trusted integration fields, SQS/Step Functions replacement, production smoke data, and removal of legacy persisted values remain out of scope. This implementation branch changes source and IaC but has not deployed or mutated AWS resources.

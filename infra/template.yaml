@@ -12,6 +12,10 @@ Parameters:
     Default: campusmeet-dev
     AllowedPattern: '^[a-z0-9-]+$'
     Description: Prefix of the separately deployed DynamoDB data foundation.
+  MeetingDataStreamArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:dynamodb:[^:]+:[0-9]{12}:table/.+/stream/.+$'
+    Description: LatestStreamArn output of the separately deployed MeetingDataTable.
   DomainName:
     Type: String
     Default: example.invalid
@@ -251,6 +255,106 @@ Resources:
                 Effect: Allow
                 Action: states:StartExecution
                 Resource: !Ref AIStateMachineArn
+      Tags: *ResourceTags
+
+  GoogleSyncSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-google-sync-scheduler'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeGoogleSyncWorkerOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt GoogleSyncWorkerFunction.Arn
+      Tags: *ResourceTags
+
+  GoogleSyncWorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-google-sync-worker'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: GoogleSyncRuntime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity'
+              - Effect: Allow
+                Action: [dynamodb:DescribeStream, dynamodb:GetRecords, dynamodb:GetShardIterator]
+                Resource: !Ref MeetingDataStreamArn
+              - Effect: Allow
+                Action: dynamodb:ListStreams
+                Resource: '*'
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GoogleSecretReference}*'
+              - Effect: Allow
+                Action: [scheduler:CreateSchedule, scheduler:UpdateSchedule]
+                Resource: !Sub 'arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/campusmeet-google-*'
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt GoogleSyncSchedulerRole.Arn
+      Tags: *ResourceTags
+
+  GoogleSyncWorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints: [services/api/src/index.ts]
+        Target: es2022
+        Minify: false
+    Properties:
+      FunctionName: !Sub 'campusmeet-${Environment}-google-sync-worker'
+      CodeUri: ..
+      Handler: services/api/src/index.googleSyncWorkerHandler
+      Role: !GetAtt GoogleSyncWorkerRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          IDENTITY_TABLE: !Sub '${DataTablePrefix}-identity'
+          MEETING_DATA_TABLE: !Sub '${DataTablePrefix}-meeting-data'
+          GOOGLE_SECRET_REFERENCE: !Ref GoogleSecretReference
+          GOOGLE_SYNC_WORKER_ARN: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:campusmeet-${Environment}-google-sync-worker'
+          GOOGLE_SYNC_SCHEDULER_ROLE_ARN: !GetAtt GoogleSyncSchedulerRole.Arn
+      Events:
+        GoogleSyncRecords:
+          Type: DynamoDB
+          Properties:
+            Stream: !Ref MeetingDataStreamArn
+            StartingPosition: LATEST
+            BatchSize: 10
+            MaximumRetryAttempts: 3
+            FilterCriteria:
+              Filters:
+                - Pattern: '{ "eventName": ["INSERT", "MODIFY"], "dynamodb": { "NewImage": { "entityType": { "S": ["GoogleMeetingSyncRecord"] }, "provider": { "S": ["GOOGLE"] }, "syncStatus": { "S": ["PENDING"] } } } }'
+      Tags: *SamTags
+
+  GoogleSyncWorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${GoogleSyncWorkerFunction}'
+      RetentionInDays: 14
       Tags: *ResourceTags
 
   ApiFunction:
@@ -652,6 +756,21 @@ Resources:
         - { Key: Component, Value: AI }
         - { Key: Module, Value: M5 }
 
+  GoogleSyncFinalFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'campusmeet-${Environment}-google-sync-final-failure'
+      Namespace: CampusMeet/GoogleSync
+      MetricName: SYNC_FAILED_FINAL
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+      Tags: *ResourceTags
+
   AIWorkerDurationAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -685,6 +804,10 @@ Outputs:
   IdentityTableName: { Value: !Sub '${DataTablePrefix}-identity' }
   CollaborationTableName: { Value: !Sub '${DataTablePrefix}-collaboration' }
   MeetingDataTableName: { Value: !Sub '${DataTablePrefix}-meeting-data' }
+  GoogleSyncWorkerFunctionName: { Value: !Ref GoogleSyncWorkerFunction }
+  GoogleSyncWorkerFunctionArn: { Value: !GetAtt GoogleSyncWorkerFunction.Arn }
+  GoogleSyncWorkerLogGroupName: { Value: !Ref GoogleSyncWorkerLogGroup }
+  GoogleSyncFinalFailureAlarmName: { Value: !Ref GoogleSyncFinalFailureAlarm }
   TaskDataTableName: { Value: !Sub '${DataTablePrefix}-task-data' }
   AIWorkTableName: { Value: !Sub '${DataTablePrefix}-ai-work' }
   AIWorkerFunctionName: { Value: !Ref AIWorkerFunction }

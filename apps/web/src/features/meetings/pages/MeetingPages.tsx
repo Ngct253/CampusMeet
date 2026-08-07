@@ -22,6 +22,7 @@ import {
   getMeeting,
   getMeetingMinutes,
   getMeetings,
+  retryGoogleMeetingSync,
   updateMeeting,
   updateMeetingMinutes,
 } from '../service';
@@ -1213,6 +1214,10 @@ export function MeetingDetailPage() {
       });
     },
   });
+  const googleRetryMutation = useMutation({
+    mutationFn: () => retryGoogleMeetingSync(meetingId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] }),
+  });
 
   if (query.isPending)
     return (
@@ -1256,16 +1261,48 @@ export function MeetingDetailPage() {
               phút
             </span>
           </div>
-          {meeting.meetUrl?.startsWith('https://meet.google.com/') && (
-            <a
-              className="button meeting-meet-link"
-              href={meeting.meetUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Tham gia Google Meet
-            </a>
+          {meeting.googleSync?.status === 'PENDING' && (
+            <p className="state" role="status">
+              Google Meet đang được đồng bộ.
+            </p>
           )}
+          {meeting.googleSync?.status === 'FAILED' && (
+            <div className="state state-error" role="status">
+              <p>Đồng bộ Google Calendar/Meet thất bại.</p>
+              {isAdmin && (
+                <button
+                  type="button"
+                  disabled={googleRetryMutation.isPending}
+                  onClick={() => googleRetryMutation.mutate()}
+                  aria-label="Thử đồng bộ lại Google Meet"
+                >
+                  {googleRetryMutation.isPending ? 'Đang gửi yêu cầu…' : 'Thử đồng bộ lại'}
+                </button>
+              )}
+              {googleRetryMutation.isError && (
+                <p role="alert">Không thể gửi yêu cầu đồng bộ lại. Vui lòng thử lại.</p>
+              )}
+            </div>
+          )}
+          {meeting.googleSync?.status === 'ACTION_REQUIRED' && (
+            <div className="state state-error" role="status">
+              <p>Cần kết nối lại tài khoản Google để đồng bộ cuộc họp.</p>
+              {meeting.organizerId === currentUserId && (
+                <Link to="/app/settings">Kết nối lại Google</Link>
+              )}
+            </div>
+          )}
+          {meeting.googleSync?.status === 'SYNCED' &&
+            meeting.googleSync.meetUrl?.startsWith('https://meet.google.com/') && (
+              <a
+                className="button meeting-meet-link"
+                href={meeting.googleSync.meetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Tham gia Google Meet
+              </a>
+            )}
           <div className="meeting-detail-grid">
             <div>
               <small>Bắt đầu</small>

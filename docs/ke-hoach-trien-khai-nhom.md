@@ -215,8 +215,9 @@ M5 không ghi task hoặc minutes chính thức trực tiếp. M5 tạo draft c�
 ### Trạng thái M2–M4
 
 - M2–M4 runtime design 4A: **ACCEPTED** ngày 2026-08-07; chi tiết tại [runtime contract](decisions/m2-m4-synchronization.md).
-- M4 Google synchronization runtime: **NOT YET COMPLETE**.
+- M4 Google synchronization source/runtime: **IMPLEMENTED / LOCAL VERIFIED**.
 - M4 Google synchronization AWS verification: **NOT YET COMPLETE**.
+- M4 Google synchronization browser verification: **HUMAN VERIFICATION PENDING**.
 - Implementation phải dùng sync record riêng trong `meeting-data`, DynamoDB Stream cho initial attempt và EventBridge Scheduler one-shot cho tối đa năm retry; không thêm physical table.
 
 ### Kết quả phải bàn giao

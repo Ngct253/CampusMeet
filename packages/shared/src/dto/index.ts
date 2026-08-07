@@ -4,6 +4,7 @@ import type {
   ISODateTime,
   MeetingMinutes,
   Meeting,
+  GoogleMeetingSyncSummary,
   Task,
 } from '../types';
 import { Priority, TaskStatus } from '../enums';
@@ -153,7 +154,9 @@ export interface MeetingDetailResponse extends MeetingResponse {
   organizer: { userId: string };
   attendees: Array<{ userId: string }>;
   agenda: AgendaItem[];
+  googleSync?: GoogleMeetingSyncSummary;
 }
+export type GoogleMeetingSyncRetryResponse = GoogleMeetingSyncSummary;
 export interface CursorPage<T> {
   items: T[];
   nextCursor?: string;

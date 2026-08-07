@@ -13,9 +13,10 @@ process.env.COLLABORATION_TABLE = 'collaboration-test';
 
 let createMeetingDetailHandler: typeof import('../src/handlers/meetings').createMeetingDetailHandler;
 let createCancelMeetingHandler: typeof import('../src/handlers/meetings').createCancelMeetingHandler;
+let createRetryGoogleSyncHandler: typeof import('../src/handlers/meetings').createRetryGoogleSyncHandler;
 
 beforeAll(async () => {
-  ({ createMeetingDetailHandler, createCancelMeetingHandler } =
+  ({ createMeetingDetailHandler, createCancelMeetingHandler, createRetryGoogleSyncHandler } =
     await import('../src/handlers/meetings'));
 });
 
@@ -69,6 +70,49 @@ describe('meeting handler cross-group authorization', () => {
         requestId: 'test-request-id',
       });
     }
+  });
+
+  it('enforces authentication and active Group Admin authorization for manual Google retry', async () => {
+    const memberships = new InMemoryMembershipAuthorizer();
+    memberships.add('group-a', 'admin-a', GroupRole.GROUP_ADMIN);
+    memberships.add('group-a', 'member-a');
+    memberships.add('group-b', 'admin-b', GroupRole.GROUP_ADMIN);
+    const repository = new InMemoryMeetingRepository();
+    const service = new MeetingService(
+      repository,
+      memberships,
+      undefined,
+      () => 'm1',
+      undefined,
+      undefined,
+      repository,
+    );
+    await service.create('group-a', 'admin-a', {
+      title: 'Retry meeting',
+      attendeeIds: [],
+      startsAt: '2030-01-01T10:00:00.000Z',
+      endsAt: '2030-01-01T11:00:00.000Z',
+    });
+    const handler = createRetryGoogleSyncHandler(service);
+    for (const userId of ['member-a', 'admin-b']) {
+      const response = await handler(event('POST', userId, {}), {} as never, () => undefined);
+      if (!response || typeof response === 'string')
+        throw new Error('Expected structured response');
+      expect(response.statusCode).toBe(403);
+    }
+    const allowed = await handler(event('POST', 'admin-a', {}), {} as never, () => undefined);
+    if (!allowed || typeof allowed === 'string') throw new Error('Expected structured response');
+    expect(allowed.statusCode).toBe(200);
+    expect(JSON.parse(allowed.body ?? '{}')).toMatchObject({
+      success: true,
+      data: { provider: 'GOOGLE', status: 'PENDING' },
+    });
+
+    const unauthenticated = event('POST', 'admin-a', {});
+    unauthenticated.requestContext.authorizer = undefined as never;
+    const denied = await handler(unauthenticated, {} as never, () => undefined);
+    if (!denied || typeof denied === 'string') throw new Error('Expected structured response');
+    expect(denied.statusCode).toBe(401);
   });
 
   it('trả 409 cho PATCH stale version và không ghi đè dữ liệu mới', async () => {

@@ -1,6 +1,8 @@
 import type {
   GroupRole,
   GoogleSyncStatus,
+  GoogleMeetingFailureClass,
+  GoogleMeetingSyncStatus,
   IntegrationStatus,
   InvitationStatus,
   MeetingStatus,
@@ -89,6 +91,7 @@ export interface Meeting {
   googleEventId?: string;
   googleMeetingId?: string;
   meetUrl?: string;
+  googleSync?: GoogleMeetingSyncSummary;
   createdAt: ISODateTime;
   createdBy: string;
   updatedAt: ISODateTime;
@@ -97,6 +100,32 @@ export interface Meeting {
   cancelledAt?: ISODateTime;
   cancelledBy?: string;
   cancellationReason?: string;
+}
+export interface GoogleMeetingSyncRecord {
+  meetingId: string;
+  groupId: string;
+  organizerId: string;
+  provider: 'GOOGLE';
+  syncStatus: GoogleMeetingSyncStatus;
+  syncRevision: number;
+  desiredMeetingVersion: number;
+  desiredMeetingStatus: MeetingStatus;
+  googleEventId?: string;
+  meetUrl?: string;
+  attemptCount: number;
+  failureClass?: GoogleMeetingFailureClass;
+  lastErrorCode?: string;
+  lastErrorAt?: ISODateTime;
+  nextRetryAt?: ISODateTime;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+export interface GoogleMeetingSyncSummary {
+  provider: 'GOOGLE';
+  status: GoogleMeetingSyncStatus;
+  meetUrl?: string;
+  failureCode?: string;
+  nextRetryAt?: ISODateTime;
 }
 export interface Reminder {
   id: string;

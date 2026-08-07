@@ -1,15 +1,18 @@
 import {
   GoogleSyncStatus,
+  GoogleMeetingSyncStatus,
   GroupRole,
   IntegrationStatus,
   MeetingStatus,
   type CreateMeetingRequest,
   type Meeting,
+  type GoogleMeetingSyncRecord,
   type UpdateMeetingRequest,
 } from '@campusmeet/shared';
 import { randomUUID } from 'node:crypto';
 import type {
   GoogleCalendarGateway,
+  GoogleMeetingSyncRepository,
   MembershipAuthorizer,
   MeetingAccessBoundary,
   MeetingRepository,
@@ -17,7 +20,6 @@ import type {
 } from '../domain/ports';
 import {
   ConflictError,
-  ApiError,
   ForbiddenError,
   ResourceNotFoundError,
   UnprocessableEntityError,
@@ -56,9 +58,36 @@ export class MeetingService implements MeetingAccessBoundary {
     private readonly memberships: MembershipAuthorizer,
     private readonly now: () => Date = () => new Date(),
     private readonly id: () => string = () => crypto.randomUUID(),
-    private readonly calendar?: GoogleCalendarGateway,
+    _calendar?: GoogleCalendarGateway,
     private readonly reminders?: ReminderSchedulerGateway,
+    private readonly syncs?: GoogleMeetingSyncRepository,
   ) {}
+
+  private desiredSync(
+    meeting: Meeting,
+    previous: GoogleMeetingSyncRecord | null,
+    now: string,
+  ): GoogleMeetingSyncRecord {
+    return {
+      meetingId: meeting.id,
+      groupId: meeting.groupId,
+      organizerId: meeting.organizerId,
+      provider: 'GOOGLE',
+      syncStatus: GoogleMeetingSyncStatus.PENDING,
+      syncRevision: (previous?.syncRevision ?? 0) + 1,
+      desiredMeetingVersion: meeting.version,
+      desiredMeetingStatus: meeting.status,
+      ...(previous?.googleEventId || meeting.googleEventId
+        ? { googleEventId: previous?.googleEventId ?? meeting.googleEventId }
+        : {}),
+      ...(previous?.meetUrl || meeting.meetUrl
+        ? { meetUrl: previous?.meetUrl ?? meeting.meetUrl }
+        : {}),
+      attemptCount: 0,
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now,
+    };
+  }
 
   private async scheduleReminder(meeting: Meeting) {
     if (!this.reminders) return;
@@ -137,42 +166,12 @@ export class MeetingService implements MeetingAccessBoundary {
       updatedBy: actorId,
       version: 1,
     };
-    const created = await this.meetings.create(meeting);
-    let result = created;
-    if (this.calendar) {
-      try {
-        const google = await this.calendar.createEvent(created);
-        result = await this.meetings.update(
-          {
-            ...created,
-            googleSyncStatus: GoogleSyncStatus.READY,
-            integrationStatus: IntegrationStatus.READY,
-            googleEventId: google.eventId,
-            ...(google.googleMeetingId ? { googleMeetingId: google.googleMeetingId } : {}),
-            ...(google.meetUrl ? { meetUrl: google.meetUrl } : {}),
-            updatedAt: this.now().toISOString(),
-            version: created.version + 1,
-          },
-          created.version,
-        );
-      } catch (error) {
-        const actionRequired = error instanceof ApiError && error.code === 'UNAUTHORIZED';
-        result = await this.meetings.update(
-          {
-            ...created,
-            googleSyncStatus: actionRequired
-              ? GoogleSyncStatus.ACTION_REQUIRED
-              : GoogleSyncStatus.FAILED_RETRYABLE,
-            integrationStatus: IntegrationStatus.FAILED,
-            updatedAt: this.now().toISOString(),
-            version: created.version + 1,
-          },
-          created.version,
-        );
-      }
-    }
-    await this.scheduleReminder(result);
-    return result;
+    const created = await this.meetings.create(
+      meeting,
+      this.syncs ? this.desiredSync(meeting, null, now) : undefined,
+    );
+    await this.scheduleReminder(created);
+    return created;
   }
 
   async list(groupId: string, actorId: string, limit = 20, cursor?: string) {
@@ -180,8 +179,31 @@ export class MeetingService implements MeetingAccessBoundary {
     return this.meetings.listByGroup(groupId, limit, cursor);
   }
 
-  detail(meetingId: string, actorId: string) {
-    return this.requireMeeting(meetingId, actorId);
+  async detail(meetingId: string, actorId: string) {
+    const meeting = await this.requireMeeting(meetingId, actorId);
+    const sync = await this.syncs?.get(meetingId);
+    return {
+      ...meeting,
+      ...(sync
+        ? {
+            googleSync: {
+              provider: 'GOOGLE' as const,
+              status: sync.syncStatus,
+              ...(sync.meetUrl ? { meetUrl: sync.meetUrl } : {}),
+              ...(sync.lastErrorCode ? { failureCode: sync.lastErrorCode } : {}),
+              ...(sync.nextRetryAt ? { nextRetryAt: sync.nextRetryAt } : {}),
+            },
+          }
+        : meeting.meetUrl
+          ? {
+              googleSync: {
+                provider: 'GOOGLE' as const,
+                status: GoogleMeetingSyncStatus.SYNCED,
+                meetUrl: meeting.meetUrl,
+              },
+            }
+          : {}),
+    };
   }
 
   async update(meetingId: string, input: UpdateMeetingRequest, actorId: string) {
@@ -216,7 +238,16 @@ export class MeetingService implements MeetingAccessBoundary {
       updatedBy: actorId,
       version: current.version + 1,
     };
-    const updated = await this.meetings.update(next, input.version);
+    const previousSync = await this.syncs?.get(meetingId);
+    const desired = this.syncs
+      ? this.desiredSync(next, previousSync ?? null, next.updatedAt)
+      : undefined;
+    const updated = await this.meetings.update(
+      next,
+      input.version,
+      desired,
+      previousSync?.syncRevision,
+    );
     await this.scheduleReminder(updated);
     return updated;
   }
@@ -227,14 +258,46 @@ export class MeetingService implements MeetingAccessBoundary {
     if (expectedVersion !== undefined && expectedVersion !== current.version) {
       throw new ConflictError('Phiên bản cuộc họp đã thay đổi.');
     }
+    const cancelledMeeting: Meeting = {
+      ...current,
+      status: MeetingStatus.CANCELLED,
+      updatedAt: this.now().toISOString(),
+      updatedBy: actorId,
+      version: current.version + 1,
+    };
+    const previousSync = await this.syncs?.get(meetingId);
+    const desired = this.syncs
+      ? this.desiredSync(cancelledMeeting, previousSync ?? null, cancelledMeeting.updatedAt)
+      : undefined;
     const cancelled = await this.meetings.cancel(
       meetingId,
       actorId,
       reason?.trim() || undefined,
       current.version,
+      desired,
+      previousSync?.syncRevision,
     );
     await this.cancelReminder(meetingId);
     return cancelled;
+  }
+
+  async retryGoogleSync(meetingId: string, actorId: string) {
+    const meeting = await this.requireMeeting(meetingId, actorId, true);
+    if (!this.syncs) throw new ResourceNotFoundError('Không tìm thấy trạng thái đồng bộ Google.');
+    const current = await this.syncs.get(meetingId);
+    if (!current) {
+      const adopted = await this.syncs.createForLegacy(meeting, this.now().toISOString());
+      return { provider: 'GOOGLE' as const, status: adopted.syncStatus };
+    }
+    const next = await this.syncs.manualRetry(
+      meeting,
+      current.syncRevision,
+      this.now().toISOString(),
+    );
+    return {
+      provider: 'GOOGLE' as const,
+      status: next.syncStatus,
+    };
   }
 
   getMeeting(meetingId: string) {
