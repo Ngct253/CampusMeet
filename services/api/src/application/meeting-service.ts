@@ -110,9 +110,9 @@ export class MeetingService implements MeetingAccessBoundary {
     return this.meetings.create(meeting);
   }
 
-  async list(groupId: string, actorId: string) {
+  async list(groupId: string, actorId: string, limit = 20, cursor?: string) {
     await this.requireMember(groupId, actorId);
-    return (await this.meetings.listByGroup(groupId)).items;
+    return this.meetings.listByGroup(groupId, limit, cursor);
   }
 
   detail(meetingId: string, actorId: string) {
@@ -124,7 +124,7 @@ export class MeetingService implements MeetingAccessBoundary {
     if (current.status === MeetingStatus.CANCELLED || current.status === MeetingStatus.COMPLETED) {
       throw new ConflictError('Không thể sửa cuộc họp đã kết thúc hoặc bị hủy.');
     }
-    if (input.version !== undefined && input.version !== current.version) {
+    if (input.version !== current.version) {
       throw new ConflictError('Phiên bản cuộc họp đã thay đổi.');
     }
     const attendeeIds = input.attendeeIds
@@ -151,15 +151,10 @@ export class MeetingService implements MeetingAccessBoundary {
       updatedBy: actorId,
       version: current.version + 1,
     };
-    return this.meetings.update(next, current.version);
+    return this.meetings.update(next, input.version);
   }
 
-  async cancel(
-    meetingId: string,
-    actorId: string,
-    reason?: string,
-    expectedVersion?: number,
-  ) {
+  async cancel(meetingId: string, actorId: string, reason?: string, expectedVersion?: number) {
     const current = await this.requireMeeting(meetingId, actorId, true);
     if (current.status === MeetingStatus.CANCELLED) return current;
     if (expectedVersion !== undefined && expectedVersion !== current.version) {

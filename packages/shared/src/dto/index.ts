@@ -66,7 +66,7 @@ export const meetingInputSchema = meetingFieldsSchema.superRefine((value, contex
   }
 });
 export const updateMeetingInputSchema = meetingFieldsSchema.partial().extend({
-  version: z.number().int().positive().optional(),
+  version: z.number().int().positive(),
 });
 export const cancelMeetingInputSchema = z.object({
   reason: z.string().trim().max(500).optional(),
@@ -141,7 +141,7 @@ export interface CreateMeetingRequest {
   startsAt: string;
   endsAt: string;
 }
-export type UpdateMeetingRequest = Partial<CreateMeetingRequest> & { version?: number };
+export type UpdateMeetingRequest = Partial<CreateMeetingRequest> & { version: number };
 export interface CancelMeetingRequest {
   reason?: string;
   version?: number;
