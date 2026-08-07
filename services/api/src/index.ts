@@ -38,6 +38,7 @@ import {
 } from './handlers/meetings';
 import { meHandler } from './handlers/me';
 import { minutesHandler } from './handlers/minutes';
+import { actionItemTaskHandler } from './handlers/action-item-tasks';
 import { notificationsHandler, readNotificationHandler } from './handlers/notifications';
 import { meetContextHandler } from './handlers/meet-context';
 import { tasksHandler, taskStatusHandler } from './handlers/tasks';
@@ -95,6 +96,11 @@ const findRoute = createRouter([
   { method: 'POST', path: '/invitations/:token/decline', handler: declineInvitationHandler },
   { method: 'GET', path: '/meetings/:meetingId/minutes', handler: minutesHandler },
   { method: 'PUT', path: '/meetings/:meetingId/minutes', handler: minutesHandler },
+  {
+    method: 'POST',
+    path: '/meetings/:meetingId/minutes/action-items/:actionItemId/task',
+    handler: actionItemTaskHandler,
+  },
   { method: 'GET', path: '/tasks', handler: tasksHandler },
   { method: 'POST', path: '/tasks', handler: tasksHandler },
   { method: 'PATCH', path: '/tasks/:taskId/status', handler: taskStatusHandler },
