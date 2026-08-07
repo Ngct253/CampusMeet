@@ -21,7 +21,7 @@ vi.mock('../service', () => groupServices);
 
 afterEach(cleanup);
 
-const meetingServices = vi.hoisted(() => ({ getMeetings: vi.fn().mockResolvedValue([]) }));
+const meetingServices = vi.hoisted(() => ({ getAllMeetings: vi.fn().mockResolvedValue([]) }));
 vi.mock('../../meetings/service', () => meetingServices);
 
 vi.mock('../../../auth/AuthProvider', () => ({

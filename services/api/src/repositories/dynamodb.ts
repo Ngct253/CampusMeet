@@ -57,16 +57,44 @@ const fromMeta = (item: Item): Meeting => ({
   ...(item.cancelledBy ? { cancelledBy: String(item.cancelledBy) } : {}),
   ...(item.cancellationReason ? { cancellationReason: String(item.cancellationReason) } : {}),
 });
-const encodeCursor = (key?: Item) =>
-  key ? Buffer.from(JSON.stringify(key), 'utf8').toString('base64url') : undefined;
-const decodeCursor = (cursor?: string): Item | undefined => {
+type MeetingCursor = { v: 1; groupId: string; startsAt: string; meetingId: string };
+const encodeCursor = (groupId: string, key?: Item) => {
+  if (!key) return undefined;
+  const match = /^MEETING#(.+)#([^#]+)$/.exec(String(key.GSI1SK ?? ''));
+  if (!match || key.GSI1PK !== `GROUP#${groupId}` || key.PK !== `MEETING#${match[2]}`) {
+    throw new MeetingError('VALIDATION_ERROR', 'KhÃ´ng thá»ƒ táº¡o cursor cuá»™c há»p.');
+  }
+  const value: MeetingCursor = { v: 1, groupId, startsAt: match[1]!, meetingId: match[2]! };
+  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+};
+const decodeCursor = (groupId: string, cursor?: string): Item | undefined => {
   if (!cursor) return undefined;
   try {
-    const value: unknown = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
-    return value as Item;
+    if (!/^[A-Za-z0-9_-]+$/.test(cursor)) throw new Error();
+    const value = JSON.parse(
+      Buffer.from(cursor, 'base64url').toString('utf8'),
+    ) as Partial<MeetingCursor>;
+    if (
+      value.v !== 1 ||
+      value.groupId !== groupId ||
+      typeof value.startsAt !== 'string' ||
+      !Number.isFinite(Date.parse(value.startsAt)) ||
+      typeof value.meetingId !== 'string' ||
+      !value.meetingId ||
+      value.meetingId.includes('#')
+    )
+      throw new Error();
+    return {
+      PK: `MEETING#${value.meetingId}`,
+      SK: 'META',
+      GSI1PK: `GROUP#${groupId}`,
+      GSI1SK: `MEETING#${value.startsAt}#${value.meetingId}`,
+    };
   } catch {
-    throw new MeetingError('VALIDATION_ERROR', 'Cursor không hợp lệ.');
+    throw new MeetingError(
+      'VALIDATION_ERROR',
+      'Cursor khÃ´ng há»£p lá»‡ hoáº·c khÃ´ng thuá»™c nhÃ³m.',
+    );
   }
 };
 const mapAwsError = (error: unknown): never => {
@@ -143,7 +171,7 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
     );
     return result.Item?.groupId ? String(result.Item.groupId) : null;
   }
-  async listByGroup(groupId: string, limit = 100, cursor?: string): Promise<MeetingPage> {
+  async listByGroup(groupId: string, limit = 20, cursor?: string): Promise<MeetingPage> {
     const result = await this.db.send(
       new QueryCommand({
         TableName: this.table,
@@ -151,13 +179,15 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
         KeyConditionExpression: 'GSI1PK = :pk AND begins_with(GSI1SK, :prefix)',
         ExpressionAttributeValues: { ':pk': `GROUP#${groupId}`, ':prefix': 'MEETING#' },
         Limit: limit,
-        ExclusiveStartKey: decodeCursor(cursor),
+        ExclusiveStartKey: decodeCursor(groupId, cursor),
         ScanIndexForward: true,
       }),
     );
     return {
       items: (result.Items ?? []).map(fromMeta),
-      ...(result.LastEvaluatedKey ? { nextCursor: encodeCursor(result.LastEvaluatedKey) } : {}),
+      ...(result.LastEvaluatedKey
+        ? { nextCursor: encodeCursor(groupId, result.LastEvaluatedKey) }
+        : {}),
     };
   }
   async update(meeting: Meeting, expectedVersion: number) {

@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { GroupRole, MeetingStatus, type CreateMeetingRequest } from '@campusmeet/shared';
 import { MeetingService } from '../src/application/meeting-service';
 import {
@@ -35,9 +35,9 @@ describe('MeetingService', () => {
   it('tạo, đọc và list meeting cho active member', async () => {
     const { service } = setup();
     const created = await service.create('g1', 'admin', input());
-    expect(created.createdBy).toBe('admin');
+    expect(created).toMatchObject({ createdBy: 'admin', organizerId: 'admin' });
     expect((await service.detail(created.id, 'member')).agenda[0]?.title).toBe('Goals');
-    expect(await service.list('g1', 'member')).toHaveLength(1);
+    expect((await service.list('g1', 'member')).items).toHaveLength(1);
   });
   it('từ chối end time không sau start time', async () => {
     const { service } = setup();
@@ -87,6 +87,7 @@ describe('MeetingService', () => {
       id: first.id,
       groupId: 'g1',
       createdBy: 'admin',
+      organizerId: 'admin',
       title: 'Updated',
       version: 2,
     });

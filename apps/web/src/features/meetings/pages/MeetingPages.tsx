@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type {
@@ -6,6 +6,7 @@ import type {
   GroupDetails,
   Meeting,
   MeetingMinutes,
+  MeetingTimelineResponse,
   UpdateMeetingMinutesRequest,
 } from '@campusmeet/shared';
 import { useAuth } from '../../../auth/AuthProvider';
@@ -743,9 +744,14 @@ export function GroupMeetingsPage() {
     queryFn: () => getGroup(groupId),
     enabled: Boolean(groupId),
   });
-  const meetingsQuery = useQuery({
+  const meetingsQuery = useInfiniteQuery({
     queryKey: ['groups', groupId, 'meetings'],
-    queryFn: () => getMeetings(groupId),
+    queryFn: async ({ pageParam }) => {
+      const page = await getMeetings(groupId, pageParam ? { cursor: pageParam } : {});
+      return (Array.isArray(page) ? { items: page } : page) as MeetingTimelineResponse;
+    },
+    initialPageParam: '' as string,
+    getNextPageParam: (page) => page.nextCursor,
     enabled: Boolean(groupId),
   });
   const mutation = useMutation({
@@ -757,7 +763,7 @@ export function GroupMeetingsPage() {
   });
   const meetings = useMemo(
     () =>
-      [...(meetingsQuery.data ?? [])].sort(
+      [...(meetingsQuery.data?.pages.flatMap((page) => page.items) ?? [])].sort(
         (a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt),
       ),
     [meetingsQuery.data],
@@ -838,6 +844,20 @@ export function GroupMeetingsPage() {
               </p>
             </div>
           )}
+          {meetingsQuery.hasNextPage && (
+            <button
+              type="button"
+              disabled={meetingsQuery.isFetchingNextPage}
+              onClick={() => void meetingsQuery.fetchNextPage()}
+            >
+              {meetingsQuery.isFetchingNextPage ? 'Äang táº£i thÃªmâ€¦' : 'Xem thÃªm'}
+            </button>
+          )}
+          {meetingsQuery.isFetchNextPageError && (
+            <p className="error" role="alert">
+              KhÃ´ng thá»ƒ táº£i trang tiáº¿p theo. Danh sÃ¡ch Ä‘Ã£ táº£i váº«n Ä‘Æ°á»£c giá»¯.
+            </p>
+          )}{' '}
           {history.length > 0 && (
             <details className="meeting-history">
               <summary>Lịch sử ({history.length})</summary>
@@ -923,7 +943,7 @@ export function MeetingDetailPage() {
   });
   const updateMutation = useMutation({
     mutationFn: (input: CreateMeetingRequest) =>
-      updateMeeting(meetingId, { ...input, version: query.data?.version }),
+      updateMeeting(meetingId, { ...input, version: query.data!.version }),
     onMutate: () => {
       setConflictMessage('');
       setReloadError('');
@@ -1097,11 +1117,9 @@ export function MeetingDetailPage() {
                 queryKey={minutesQueryKey}
               />
             )}
-          {(minutesMissing || minutesQuery.data) &&
-            isAdmin &&
-            meeting.status === 'CANCELLED' && (
-              <p className="state">Không thể chỉnh sửa biên bản của cuộc họp đã hủy.</p>
-            )}
+          {(minutesMissing || minutesQuery.data) && isAdmin && meeting.status === 'CANCELLED' && (
+            <p className="state">Không thể chỉnh sửa biên bản của cuộc họp đã hủy.</p>
+          )}
         </section>
         {isAdmin &&
           groupQuery.data &&

@@ -13,7 +13,7 @@ const services = vi.hoisted(() => ({
   updateTaskStatus: vi.fn(),
   getGroups: vi.fn(),
   getGroup: vi.fn(),
-  getMeetings: vi.fn(),
+  getAllMeetings: vi.fn(),
 }));
 vi.mock('../service', () => ({
   getTasks: services.getTasks,
@@ -24,7 +24,7 @@ vi.mock('../../groups/service', () => ({
   getGroups: services.getGroups,
   getGroup: services.getGroup,
 }));
-vi.mock('../../meetings/service', () => ({ getMeetings: services.getMeetings }));
+vi.mock('../../meetings/service', () => ({ getAllMeetings: services.getAllMeetings }));
 
 const adminGroup = {
   id: 'group-1',
@@ -34,7 +34,12 @@ const adminGroup = {
   createdAt: '2026-08-01T00:00:00.000Z',
   joinedAt: '2026-08-01T00:00:00.000Z',
 };
-const memberGroup = { ...adminGroup, id: 'group-2', name: 'Nhóm thành viên', role: GroupRole.MEMBER };
+const memberGroup = {
+  ...adminGroup,
+  id: 'group-2',
+  name: 'Nhóm thành viên',
+  role: GroupRole.MEMBER,
+};
 const groupDetails = {
   group: adminGroup,
   members: [
@@ -78,7 +83,7 @@ const renderPage = () => {
 const enableCreateForm = () => {
   services.getGroups.mockResolvedValue([adminGroup, memberGroup]);
   services.getGroup.mockResolvedValue(groupDetails);
-  services.getMeetings.mockResolvedValue([
+  services.getAllMeetings.mockResolvedValue([
     {
       id: 'meeting-1',
       groupId: 'group-1',
@@ -111,7 +116,7 @@ describe('TasksPage', () => {
     services.updateTaskStatus.mockReset();
     services.getGroups.mockReset().mockResolvedValue([]);
     services.getGroup.mockReset();
-    services.getMeetings.mockReset();
+    services.getAllMeetings.mockReset();
     vi.spyOn(globalThis.crypto, 'randomUUID')
       .mockReturnValueOnce('00000000-0000-4000-8000-000000000001')
       .mockReturnValueOnce('00000000-0000-4000-8000-000000000002')
@@ -157,16 +162,31 @@ describe('TasksPage', () => {
   it('shows status actions allowed for TODO, DOING, and DONE', async () => {
     services.getTasks.mockResolvedValue([
       {
-        id: 'task-todo', groupId: 'group-1', title: 'Task TODO', assigneeId: 'admin-1',
-        status: 'TODO', priority: 'HIGH', version: 1,
+        id: 'task-todo',
+        groupId: 'group-1',
+        title: 'Task TODO',
+        assigneeId: 'admin-1',
+        status: 'TODO',
+        priority: 'HIGH',
+        version: 1,
       },
       {
-        id: 'task-doing', groupId: 'group-1', title: 'Task DOING', assigneeId: 'admin-1',
-        status: 'DOING', priority: 'MEDIUM', version: 2,
+        id: 'task-doing',
+        groupId: 'group-1',
+        title: 'Task DOING',
+        assigneeId: 'admin-1',
+        status: 'DOING',
+        priority: 'MEDIUM',
+        version: 2,
       },
       {
-        id: 'task-done', groupId: 'group-1', title: 'Task DONE', assigneeId: 'admin-1',
-        status: 'DONE', priority: 'LOW', version: 3,
+        id: 'task-done',
+        groupId: 'group-1',
+        title: 'Task DONE',
+        assigneeId: 'admin-1',
+        status: 'DONE',
+        priority: 'LOW',
+        version: 3,
       },
     ]);
     renderPage();
@@ -180,8 +200,12 @@ describe('TasksPage', () => {
   it('sends legacy version 0 and prevents a double status update while pending', async () => {
     services.getTasks.mockResolvedValue([
       {
-        id: 'task-1', groupId: 'group-1', title: 'Task TODO', assigneeId: 'admin-1',
-        status: 'TODO', priority: 'HIGH',
+        id: 'task-1',
+        groupId: 'group-1',
+        title: 'Task TODO',
+        assigneeId: 'admin-1',
+        status: 'TODO',
+        priority: 'HIGH',
       },
     ]);
     services.updateTaskStatus.mockReturnValue(new Promise(() => undefined));
@@ -203,8 +227,13 @@ describe('TasksPage', () => {
 
   it('invalidates tasks after a successful status update', async () => {
     const todo = {
-      id: 'task-1', groupId: 'group-1', title: 'Task TODO', assigneeId: 'admin-1',
-      status: 'TODO', priority: 'HIGH', version: 1,
+      id: 'task-1',
+      groupId: 'group-1',
+      title: 'Task TODO',
+      assigneeId: 'admin-1',
+      status: 'TODO',
+      priority: 'HIGH',
+      version: 1,
     };
     services.getTasks.mockResolvedValue([todo]);
     services.updateTaskStatus.mockResolvedValue({ ...todo, status: 'DOING', version: 2 });
@@ -212,25 +241,28 @@ describe('TasksPage', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Bắt đầu' }));
-    await waitFor(() =>
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tasks'] }),
-    );
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tasks'] }));
   });
 
   it('refetches after a 409 and keeps the rendered status unchanged', async () => {
     const todo = {
-      id: 'task-1', groupId: 'group-1', title: 'Task TODO', assigneeId: 'admin-1',
-      status: 'TODO', priority: 'HIGH', version: 1,
+      id: 'task-1',
+      groupId: 'group-1',
+      title: 'Task TODO',
+      assigneeId: 'admin-1',
+      status: 'TODO',
+      priority: 'HIGH',
+      version: 1,
     };
     services.getTasks.mockResolvedValue([todo]);
-    services.updateTaskStatus.mockRejectedValue(
-      new ApiClientError('conflict', 409, 'CONFLICT'),
-    );
+    services.updateTaskStatus.mockRejectedValue(new ApiClientError('conflict', 409, 'CONFLICT'));
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Bắt đầu' }));
     expect(
-      await screen.findByText('Công việc đã được cập nhật ở nơi khác. Danh sách đang được làm mới.'),
+      await screen.findByText(
+        'Công việc đã được cập nhật ở nơi khác. Danh sách đang được làm mới.',
+      ),
     ).toBeInTheDocument();
     await waitFor(() => expect(services.getTasks.mock.calls.length).toBeGreaterThan(1));
     expect(screen.getByText('TODO')).toBeInTheDocument();
@@ -242,8 +274,13 @@ describe('TasksPage', () => {
   ])('shows status error %s without applying an optimistic status', async (status, message) => {
     services.getTasks.mockResolvedValue([
       {
-        id: 'task-1', groupId: 'group-1', title: 'Task TODO', assigneeId: 'admin-1',
-        status: 'TODO', priority: 'HIGH', version: 1,
+        id: 'task-1',
+        groupId: 'group-1',
+        title: 'Task TODO',
+        assigneeId: 'admin-1',
+        status: 'TODO',
+        priority: 'HIGH',
+        version: 1,
       },
     ]);
     services.updateTaskStatus.mockRejectedValue(
@@ -278,16 +315,18 @@ describe('TasksPage', () => {
     expect(await screen.findByRole('option', { name: 'Lan' })).toBeInTheDocument();
     expect(await screen.findByRole('option', { name: 'Họp tuần' })).toBeInTheDocument();
     expect(services.getGroup).toHaveBeenCalledWith('group-1');
-    expect(services.getMeetings).toHaveBeenCalledWith('group-1');
+    expect(services.getAllMeetings).toHaveBeenCalledWith('group-1');
   });
 
   it('resets assignee and meeting when the admin group changes', async () => {
     const secondAdmin = { ...adminGroup, id: 'group-3', name: 'Nhóm quản trị B' };
     services.getGroups.mockResolvedValue([adminGroup, secondAdmin]);
     services.getGroup.mockResolvedValue(groupDetails);
-    services.getMeetings.mockResolvedValue([{ id: 'meeting-1', title: 'Họp tuần' }]);
+    services.getAllMeetings.mockResolvedValue([{ id: 'meeting-1', title: 'Họp tuần' }]);
     renderPage();
-    fireEvent.change(await screen.findByLabelText('Người phụ trách'), { target: { value: 'user-2' } });
+    fireEvent.change(await screen.findByLabelText('Người phụ trách'), {
+      target: { value: 'user-2' },
+    });
     fireEvent.change(screen.getByLabelText('Cuộc họp nguồn (không bắt buộc)'), {
       target: { value: 'meeting-1' },
     });
@@ -338,8 +377,13 @@ describe('TasksPage', () => {
   it('converts datetime-local to UTC ISO and sends an optional meeting', async () => {
     enableCreateForm();
     services.createTask.mockResolvedValue({
-      id: 'task-1', groupId: 'group-1', title: 'Task mới', assigneeId: 'user-2',
-      priority: Priority.HIGH, status: 'TODO', createdBy: 'admin-1',
+      id: 'task-1',
+      groupId: 'group-1',
+      title: 'Task mới',
+      assigneeId: 'user-2',
+      priority: Priority.HIGH,
+      status: 'TODO',
+      createdBy: 'admin-1',
     });
     renderPage();
     await fillRequiredFields();
@@ -376,8 +420,13 @@ describe('TasksPage', () => {
       .mockRejectedValueOnce(new Error('Mất mạng'))
       .mockRejectedValueOnce(new Error('Mất mạng'))
       .mockResolvedValueOnce({
-        id: 'task-1', groupId: 'group-1', title: 'Task khác', assigneeId: 'user-2',
-        priority: Priority.MEDIUM, status: 'TODO', createdBy: 'admin-1',
+        id: 'task-1',
+        groupId: 'group-1',
+        title: 'Task khác',
+        assigneeId: 'user-2',
+        priority: Priority.MEDIUM,
+        status: 'TODO',
+        createdBy: 'admin-1',
       });
     renderPage();
     await fillRequiredFields(' Task mới ');
@@ -397,8 +446,13 @@ describe('TasksPage', () => {
   it('invalidates tasks, keeps group, resets fields, and does not optimistic-add another user task', async () => {
     enableCreateForm();
     services.createTask.mockResolvedValue({
-      id: 'new-task', groupId: 'group-1', title: 'Task mới', assigneeId: 'user-2',
-      priority: Priority.MEDIUM, status: 'TODO', createdBy: 'admin-1',
+      id: 'new-task',
+      groupId: 'group-1',
+      title: 'Task mới',
+      assigneeId: 'user-2',
+      priority: Priority.MEDIUM,
+      status: 'TODO',
+      createdBy: 'admin-1',
     });
     const { client } = renderPage();
     const invalidate = vi.spyOn(client, 'invalidateQueries');
@@ -415,20 +469,30 @@ describe('TasksPage', () => {
 
   it('shows a distinct success message when assigning to the authenticated admin', async () => {
     enableCreateForm();
-    services.getTasks
-      .mockResolvedValueOnce([])
-      .mockResolvedValue([
-        {
-          id: 'task-1', groupId: 'group-1', title: 'Task của tôi', assigneeId: 'admin-1',
-          priority: Priority.MEDIUM, status: 'TODO', createdBy: 'admin-1',
-        },
-      ]);
+    services.getTasks.mockResolvedValueOnce([]).mockResolvedValue([
+      {
+        id: 'task-1',
+        groupId: 'group-1',
+        title: 'Task của tôi',
+        assigneeId: 'admin-1',
+        priority: Priority.MEDIUM,
+        status: 'TODO',
+        createdBy: 'admin-1',
+      },
+    ]);
     services.createTask.mockResolvedValue({
-      id: 'task-1', groupId: 'group-1', title: 'Task của tôi', assigneeId: 'admin-1',
-      priority: Priority.MEDIUM, status: 'TODO', createdBy: 'admin-1',
+      id: 'task-1',
+      groupId: 'group-1',
+      title: 'Task của tôi',
+      assigneeId: 'admin-1',
+      priority: Priority.MEDIUM,
+      status: 'TODO',
+      createdBy: 'admin-1',
     });
     renderPage();
-    fireEvent.change(await screen.findByLabelText('Tiêu đề'), { target: { value: 'Task của tôi' } });
+    fireEvent.change(await screen.findByLabelText('Tiêu đề'), {
+      target: { value: 'Task của tôi' },
+    });
     await screen.findByRole('option', { name: 'An' });
     fireEvent.change(screen.getByLabelText('Người phụ trách'), { target: { value: 'admin-1' } });
     submitForm();
@@ -441,8 +505,13 @@ describe('TasksPage', () => {
     services.createTask
       .mockRejectedValueOnce(new ApiClientError('conflict', 409, 'CONFLICT'))
       .mockResolvedValueOnce({
-        id: 'task-1', groupId: 'group-1', title: 'Task mới', assigneeId: 'user-2',
-        priority: Priority.MEDIUM, status: 'TODO', createdBy: 'admin-1',
+        id: 'task-1',
+        groupId: 'group-1',
+        title: 'Task mới',
+        assigneeId: 'user-2',
+        priority: Priority.MEDIUM,
+        status: 'TODO',
+        createdBy: 'admin-1',
       });
     renderPage();
     await fillRequiredFields();
@@ -511,14 +580,21 @@ describe('TasksPage', () => {
 
   it('allows creation without a source meeting when the meeting query fails', async () => {
     enableCreateForm();
-    services.getMeetings.mockRejectedValue(new Error('meeting network'));
+    services.getAllMeetings.mockRejectedValue(new Error('meeting network'));
     services.createTask.mockResolvedValue({
-      id: 'task-1', groupId: 'group-1', title: 'Task mới', assigneeId: 'user-2',
-      priority: Priority.MEDIUM, status: 'TODO', createdBy: 'admin-1',
+      id: 'task-1',
+      groupId: 'group-1',
+      title: 'Task mới',
+      assigneeId: 'user-2',
+      priority: Priority.MEDIUM,
+      status: 'TODO',
+      createdBy: 'admin-1',
     });
     renderPage();
     await fillRequiredFields();
-    expect(await screen.findByText('Bạn vẫn có thể tạo công việc không liên kết cuộc họp.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Bạn vẫn có thể tạo công việc không liên kết cuộc họp.'),
+    ).toBeInTheDocument();
     submitForm();
     await waitFor(() => expect(services.createTask).toHaveBeenCalled());
     expect(services.createTask.mock.calls[0]?.[0]).not.toHaveProperty('sourceMeetingId');
