@@ -52,14 +52,17 @@ describe('meeting handler cross-group authorization', () => {
     });
     const requests = [
       [createMeetingDetailHandler(service), event('GET', 'admin-b')],
-      [createMeetingDetailHandler(service), event('PATCH', 'admin-b', { title: 'Forbidden' })],
+      [
+        createMeetingDetailHandler(service),
+        event('PATCH', 'admin-b', { title: 'Forbidden', version: 1 }),
+      ],
       [createCancelMeetingHandler(service), event('POST', 'admin-b', {})],
     ] as const;
     for (const [handler, request] of requests) {
       const response = await handler(request, {} as never, () => undefined);
       if (!response || typeof response === 'string')
         throw new Error('Expected structured response');
-      expect(response.statusCode).toBe(403);
+      expect(response.statusCode, request.requestContext.http.method).toBe(403);
       expect(JSON.parse(response.body ?? '{}')).toMatchObject({
         success: false,
         error: { code: 'FORBIDDEN' },

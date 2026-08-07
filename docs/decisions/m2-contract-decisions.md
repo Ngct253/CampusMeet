@@ -147,13 +147,13 @@ Option 2B closes the stale-client gap consistently for all Meeting PATCH callers
 
 ### Implementation checklist
 
-- [ ] Make `UpdateMeetingRequest.version` required.
-- [ ] Require `version` in the PATCH Zod schema.
-- [ ] Add missing-version validation test.
-- [ ] Retain/add stale-version `409` test.
-- [ ] Ensure every Meeting PATCH caller sends version.
-- [ ] Remove persisted-version fallback.
-- [ ] Update API contract in the implementation PR.
+- [x] Make `UpdateMeetingRequest.version` required.
+- [x] Require `version` in the PATCH Zod schema.
+- [x] Add missing-version validation test.
+- [x] Retain/add stale-version `409` test.
+- [x] Ensure every Meeting PATCH caller sends version.
+- [x] Remove persisted-version fallback.
+- [x] Update API contract in the implementation PR.
 
 ## Decision 3 rationale, consumer impact, and alternatives
 
@@ -188,17 +188,17 @@ Option 4A preserves an internally successful Meeting mutation when an external p
 
 Do not implement any follow-up on this documentation branch.
 
-### Follow-up 1 - Required PATCH version
+### Completed follow-up 1 - Required PATCH version
 
-Proposed branch: `fix/m2-require-update-version`
+Merged implementation branch: `fix/m2-require-update-version`.
 
-Scope: required DTO; required Zod schema; remove service fallback; audit/update all callers; missing-version validation; stale-version `409`; regression tests; API contract update.
+Implemented on main: required DTO/Zod version, no service fallback, updated first-party callers, validation/conflict coverage, and API contract.
 
-### Follow-up 2 - Meeting pagination
+### Completed follow-up 2 - Meeting pagination
 
-Proposed branch: `feature/m2-meeting-pagination`
+Merged implementation branch: `feature/m2-meeting-pagination`.
 
-Scope: public page DTO; handler limit/cursor; opaque cursor; service preserves `nextCursor`; M2 timeline; M3 Task selector; M5 consumers; Dashboard; coordinated tests.
+Implemented on main: public page DTO, handler limit/cursor, opaque cursor, preserved `nextCursor`, migrated first-party consumers, and coordinated coverage.
 
 ### Follow-up 3 - M2-M4 synchronization implementation
 

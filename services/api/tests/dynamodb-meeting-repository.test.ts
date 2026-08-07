@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import {
   GoogleSyncStatus,
@@ -62,7 +62,7 @@ describe('DynamoDbMeetingRepository', () => {
             PK: 'MEETING#m1',
             SK: 'META',
             GSI1PK: 'GROUP#g1',
-            GSI1SK: 'MEETING#x',
+            GSI1SK: 'MEETING#' + meeting.startsAt + '#' + meeting.id,
           },
         });
       },

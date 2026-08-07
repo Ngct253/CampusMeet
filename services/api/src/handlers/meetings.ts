@@ -12,13 +12,18 @@ import { SharedMembershipAuthorizer } from '../middleware/authorization';
 import { handleError } from '../middleware/error-handler';
 import { DynamoDbCollaborationRepository } from '../repositories/collaboration';
 import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
-import { ApiError } from '../utils/errors';
+import { EventBridgeSchedulerAdapter, GoogleCalendarAdapter } from '../integrations/adapters';
+import { ApiError, BadRequestError } from '../utils/errors';
 import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
 import { ok } from '../utils/response';
 
 const service = new MeetingService(
   new DynamoDbMeetingRepository(),
   new SharedMembershipAuthorizer(),
+  undefined,
+  undefined,
+  new GoogleCalendarAdapter(),
+  new EventBridgeSchedulerAdapter(),
 );
 const groups = new DynamoDbCollaborationRepository();
 
@@ -38,7 +43,14 @@ const handler =
 export const groupMeetingsHandler = handler(async (event) => {
   const auth = authenticate(event);
   const groupId = getPathParameter(event, 'groupId');
-  if (event.requestContext.http.method === 'GET') return service.list(groupId, auth.userId);
+  if (event.requestContext.http.method === 'GET') {
+    const rawLimit = event.queryStringParameters?.limit;
+    const limit = rawLimit === undefined ? 20 : Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new BadRequestError('limit must be an integer from 1 to 100.');
+    }
+    return service.list(groupId, auth.userId, limit, event.queryStringParameters?.cursor);
+  }
   if (event.requestContext.http.method === 'POST') {
     const input = parseBody(event, meetingInputSchema) as CreateMeetingRequest;
     const key = requireIdempotencyKey(event);
@@ -65,7 +77,22 @@ export const myMeetingsHandler = handler(async (event) => {
   }
   const auth = authenticate(event);
   const memberships = await groups.listForUser(auth.userId);
-  const result = await Promise.all(memberships.map(({ id }) => service.list(id, auth.userId)));
+  const result = await Promise.all(
+    memberships.map(async ({ id }) => {
+      const items = [];
+      let cursor: string | undefined;
+      const seen = new Set<string>();
+      do {
+        const page = await service.list(id, auth.userId, 100, cursor);
+        items.push(...page.items);
+        cursor = page.nextCursor;
+        if (cursor && seen.has(cursor))
+          throw new ApiError('INTERNAL_ERROR', 'Cursor repeated.', 500);
+        if (cursor) seen.add(cursor);
+      } while (cursor);
+      return items;
+    }),
+  );
   return result.flat().sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
 });
 

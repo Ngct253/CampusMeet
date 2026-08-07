@@ -1,12 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type {
+  Attachment,
   CreateMeetingRequest,
   GroupDetails,
   Meeting,
   MeetingMinutes,
+  MeetingTimelineResponse,
   UpdateMeetingMinutesRequest,
+  UploadAttachmentRequest,
 } from '@campusmeet/shared';
 import { useAuth } from '../../../auth/AuthProvider';
 import { FeaturePage } from '../../../components/FeaturePage';
@@ -22,6 +25,12 @@ import {
   updateMeeting,
   updateMeetingMinutes,
 } from '../service';
+import {
+  completeAttachmentUpload,
+  createAttachmentUploadTarget,
+  getAttachmentDownloadTarget,
+  getMeetingAttachments,
+} from '../attachments.service';
 import './MeetingPages.css';
 
 const statusLabel: Record<string, string> = {
@@ -401,6 +410,235 @@ function MinutesEditor({
   );
 }
 
+const supportedContentTypes = [
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'text/tab-separated-values',
+  'application/json',
+  'application/x-ndjson',
+  'text/html',
+  'application/xhtml+xml',
+  'application/xml',
+  'text/yaml',
+  'text/calendar',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.oasis.opendocument.text',
+  'application/vnd.oasis.opendocument.presentation',
+  'application/vnd.oasis.opendocument.spreadsheet',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/webm',
+  'audio/mp4',
+] as const;
+
+type SupportedContentType = (typeof supportedContentTypes)[number];
+
+const maxAttachmentSizeBytes = 50 * 1024 * 1024;
+
+const fileTypeByExtension: Record<string, SupportedContentType> = {
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.csv': 'text/csv',
+  '.tsv': 'text/tab-separated-values',
+  '.json': 'application/json',
+  '.ndjson': 'application/x-ndjson',
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.xhtml': 'application/xhtml+xml',
+  '.xml': 'application/xml',
+  '.yaml': 'text/yaml',
+  '.yml': 'text/yaml',
+  '.ics': 'text/calendar',
+  '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.odt': 'application/vnd.oasis.opendocument.text',
+  '.odp': 'application/vnd.oasis.opendocument.presentation',
+  '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.webm': 'audio/webm',
+  '.m4a': 'audio/mp4',
+};
+
+const inferContentType = (fileName: string) => {
+  const extension = fileName.slice(fileName.lastIndexOf('.')).toLowerCase();
+  return fileTypeByExtension[extension];
+};
+
+const toHex = (buffer: ArrayBuffer) =>
+  [...new Uint8Array(buffer)].map((value) => value.toString(16).padStart(2, '0')).join('');
+
+const checksumFile = async (file: File) => {
+  const bytes = await file.arrayBuffer();
+  return toHex(await crypto.subtle.digest('SHA-256', bytes));
+};
+
+function AttachmentListItem({
+  attachment,
+  onDownload,
+  downloading,
+}: {
+  attachment: Attachment;
+  onDownload: (attachmentId: string) => void;
+  downloading: boolean;
+}) {
+  return (
+    <li className="meeting-attachment-item">
+      <div className="meeting-attachment-copy">
+        <strong>{attachment.fileName}</strong>
+        <small>
+          {attachment.contentType} · {(attachment.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+        </small>
+      </div>
+      <span className={`meeting-status meeting-status-${attachment.status.toLowerCase()}`}>
+        {attachment.status}
+      </span>
+      <button
+        type="button"
+        className="button-quiet"
+        onClick={() => onDownload(attachment.attachmentId)}
+        disabled={downloading}
+      >
+        {downloading ? 'Đang lấy link…' : 'Tải xuống'}
+      </button>
+    </li>
+  );
+}
+
+function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
+  const queryClient = useQueryClient();
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const attachmentsQuery = useQuery({
+    queryKey: ['meetings', meeting.id, 'attachments'],
+    queryFn: () => getMeetingAttachments(meeting.id),
+    enabled: Boolean(meeting.id),
+  });
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const contentType = (file.type || inferContentType(file.name)) as
+        SupportedContentType | undefined;
+      if (
+        !contentType ||
+        !supportedContentTypes.includes(contentType as (typeof supportedContentTypes)[number])
+      ) {
+        throw new Error('Định dạng file này chưa được hỗ trợ.');
+      }
+      if (file.size > maxAttachmentSizeBytes) {
+        throw new Error('File vượt quá giới hạn 50 MB.');
+      }
+      const checksum = await checksumFile(file);
+      const target = await createAttachmentUploadTarget(meeting.id, {
+        meetingId: meeting.id,
+        fileName: file.name,
+        contentType,
+        sizeBytes: file.size,
+        checksum,
+      } satisfies UploadAttachmentRequest);
+      const response = await fetch(target.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'content-type': contentType,
+          'x-amz-meta-checksum': checksum,
+        },
+        body: file,
+      });
+      if (!response.ok) {
+        throw new Error('Không thể tải file lên kho lưu trữ.');
+      }
+      return completeAttachmentUpload(meeting.id, target.attachment.attachmentId, {
+        attachmentId: target.attachment.attachmentId,
+        checksum,
+      });
+    },
+    onSuccess: async () => {
+      setSelectedFile(null);
+      await queryClient.invalidateQueries({ queryKey: ['meetings', meeting.id, 'attachments'] });
+    },
+  });
+  const downloadMutation = useMutation({
+    mutationFn: async (attachmentId: string) => getAttachmentDownloadTarget(attachmentId),
+    onSuccess: (target) => {
+      window.open(target.downloadUrl, '_blank', 'noopener,noreferrer');
+    },
+  });
+
+  const attachments = attachmentsQuery.data ?? [];
+
+  return (
+    <section className="app-panel meeting-attachment-panel">
+      <span className="section-kicker">Tệp đính kèm</span>
+      <h2>Upload tài liệu hoặc audio</h2>
+      <p>
+        Tối đa 10 file cho mỗi cuộc họp, mỗi file tối đa 50 MB. Sau khi upload, hệ thống sẽ tạo một
+        AIJob để xử lý tiếp.
+      </p>
+      <label className="meeting-upload-field">
+        Chọn file
+        <input
+          type="file"
+          accept={supportedContentTypes.join(',')}
+          onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+        />
+      </label>
+      {selectedFile && (
+        <div className="meeting-upload-preview">
+          <strong>{selectedFile.name}</strong>
+          <small>{(selectedFile.size / (1024 * 1024)).toFixed(2)} MB</small>
+        </div>
+      )}
+      <button
+        type="button"
+        disabled={!selectedFile || uploadMutation.isPending}
+        onClick={() => {
+          if (selectedFile) void uploadMutation.mutateAsync(selectedFile);
+        }}
+      >
+        {uploadMutation.isPending ? 'Đang upload…' : 'Upload file'}
+      </button>
+      {uploadMutation.isError && (
+        <p className="error" role="alert">
+          {uploadMutation.error.message}
+        </p>
+      )}
+      {attachmentsQuery.isPending ? (
+        <div className="meeting-attachment-state" role="status">
+          Đang tải danh sách file…
+        </div>
+      ) : attachmentsQuery.isError ? (
+        <div className="meeting-attachment-state error" role="status">
+          <strong>Không tải được danh sách file</strong>
+          <button
+            type="button"
+            className="button-quiet"
+            onClick={() => void attachmentsQuery.refetch()}
+          >
+            Thử lại tải tệp
+          </button>
+        </div>
+      ) : attachments.length ? (
+        <ul className="meeting-attachment-list">
+          {attachments.map((attachment) => (
+            <AttachmentListItem
+              key={attachment.attachmentId}
+              attachment={attachment}
+              downloading={downloadMutation.isPending}
+              onDownload={(attachmentId) => downloadMutation.mutate(attachmentId)}
+            />
+          ))}
+        </ul>
+      ) : (
+        <div className="meeting-attachment-state">Chưa có file nào được gắn vào cuộc họp này.</div>
+      )}
+    </section>
+  );
+}
+
 function MeetingForm({
   group,
   initial,
@@ -743,9 +981,14 @@ export function GroupMeetingsPage() {
     queryFn: () => getGroup(groupId),
     enabled: Boolean(groupId),
   });
-  const meetingsQuery = useQuery({
+  const meetingsQuery = useInfiniteQuery({
     queryKey: ['groups', groupId, 'meetings'],
-    queryFn: () => getMeetings(groupId),
+    queryFn: async ({ pageParam }) => {
+      const page = await getMeetings(groupId, pageParam ? { cursor: pageParam } : {});
+      return (Array.isArray(page) ? { items: page } : page) as MeetingTimelineResponse;
+    },
+    initialPageParam: '' as string,
+    getNextPageParam: (page) => page.nextCursor,
     enabled: Boolean(groupId),
   });
   const mutation = useMutation({
@@ -757,7 +1000,7 @@ export function GroupMeetingsPage() {
   });
   const meetings = useMemo(
     () =>
-      [...(meetingsQuery.data ?? [])].sort(
+      [...(meetingsQuery.data?.pages.flatMap((page) => page.items) ?? [])].sort(
         (a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt),
       ),
     [meetingsQuery.data],
@@ -838,6 +1081,20 @@ export function GroupMeetingsPage() {
               </p>
             </div>
           )}
+          {meetingsQuery.hasNextPage && (
+            <button
+              type="button"
+              disabled={meetingsQuery.isFetchingNextPage}
+              onClick={() => void meetingsQuery.fetchNextPage()}
+            >
+              {meetingsQuery.isFetchingNextPage ? 'Äang táº£i thÃªmâ€¦' : 'Xem thÃªm'}
+            </button>
+          )}
+          {meetingsQuery.isFetchNextPageError && (
+            <p className="error" role="alert">
+              KhÃ´ng thá»ƒ táº£i trang tiáº¿p theo. Danh sÃ¡ch Ä‘Ã£ táº£i váº«n Ä‘Æ°á»£c giá»¯.
+            </p>
+          )}{' '}
           {history.length > 0 && (
             <details className="meeting-history">
               <summary>Lịch sử ({history.length})</summary>
@@ -923,7 +1180,7 @@ export function MeetingDetailPage() {
   });
   const updateMutation = useMutation({
     mutationFn: (input: CreateMeetingRequest) =>
-      updateMeeting(meetingId, { ...input, version: query.data?.version }),
+      updateMeeting(meetingId, { ...input, version: query.data!.version }),
     onMutate: () => {
       setConflictMessage('');
       setReloadError('');
@@ -999,6 +1256,16 @@ export function MeetingDetailPage() {
               phút
             </span>
           </div>
+          {meeting.meetUrl?.startsWith('https://meet.google.com/') && (
+            <a
+              className="button meeting-meet-link"
+              href={meeting.meetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Tham gia Google Meet
+            </a>
+          )}
           <div className="meeting-detail-grid">
             <div>
               <small>Bắt đầu</small>
@@ -1047,6 +1314,7 @@ export function MeetingDetailPage() {
               </div>
             )}
         </section>
+        <MeetingAttachmentsPanel meeting={meeting} />
         <aside className="app-panel meeting-attendee-panel">
           <span className="section-kicker">Thành phần</span>
           <h2>Người tham dự</h2>
@@ -1097,11 +1365,9 @@ export function MeetingDetailPage() {
                 queryKey={minutesQueryKey}
               />
             )}
-          {(minutesMissing || minutesQuery.data) &&
-            isAdmin &&
-            meeting.status === 'CANCELLED' && (
-              <p className="state">Không thể chỉnh sửa biên bản của cuộc họp đã hủy.</p>
-            )}
+          {(minutesMissing || minutesQuery.data) && isAdmin && meeting.status === 'CANCELLED' && (
+            <p className="state">Không thể chỉnh sửa biên bản của cuộc họp đã hủy.</p>
+          )}
         </section>
         {isAdmin &&
           groupQuery.data &&

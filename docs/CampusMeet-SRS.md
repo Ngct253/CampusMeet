@@ -916,3 +916,11 @@ Nếu mục tiêu là hoàn thiện toàn bộ ba pha với kiểm thử bảo m
 | ADR-18 | M2 Meeting và M4 Google sync dùng eventual consistency; internal mutation + sync intent được ghi durable trước Google, retry idempotent và không tạo duplicate event. | Google failure không rollback Meeting; Stream kích hoạt initial attempt và EventBridge Scheduler one-shot thực hiện retry hữu hạn theo accepted runtime contract. |
 
 > **Ghi chú:** Trạng thái nền tảng: Đây là bản tài liệu để nhóm dùng thống nhất phạm vi, triển khai và trao đổi với mentor. Sau khi mentor góp ý, nhóm chỉ cần cập nhật những phần chịu ảnh hưởng: phạm vi, yêu cầu, kiến trúc, kiểm thử và kế hoạch thực hiện.
+
+## Accepted M2 contract implementation (2026-08-06)
+
+For Meeting creation, the authenticated creator is the organizer; `organizerId` is server-managed and cannot be supplied or reassigned by clients. Every `PATCH /meetings/{meetingId}` request requires a positive integer `version`; missing/malformed versions return the standard `400 BAD_REQUEST` envelope and stale versions return `409 CONFLICT`.
+
+`GET /groups/{groupId}/meetings` returns `CursorPage<Meeting>` in the success envelope. Query `limit` defaults to 20 and must be an integer from 1 through 100. `cursor` is an opaque, versioned logical cursor scoped to the group and stable `startsAt + meetingId` ordering; malformed or wrong-group cursors return `400`. `nextCursor` is omitted at the end. Clients must not decode the cursor.
+
+Google synchronization follows eventual consistency: an external failure does not roll back the internal Meeting. Runtime failure persistence and idempotent retry remain pending the M4 design prerequisites in `docs/decisions/m2-m4-synchronization.md`; they are not AWS-runtime verified.

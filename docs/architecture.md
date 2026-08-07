@@ -84,7 +84,7 @@ Bucket user-content phải có lifecycle/retention phù hợp với loại dữ 
 - CampusMeet không tự xây video call hoặc WebRTC. Calendar API là đường chính để tạo/cập nhật/hủy event và Meet link.
 - Meet REST API chỉ đồng bộ participant, recording hoặc transcript khi artifact đã tồn tại và OAuth scope thực tế cho phép.
 - Upload và live capture là fallback bắt buộc; luồng họp không phụ thuộc giả định rằng Google luôn trả transcript.
-- Google adapter giữ logic OAuth, mapping trạng thái, idempotency và retry bên ngoài application service. Token/secret chỉ được tham chiếu từ nơi lưu bí mật, không ghi vào DynamoDB hoặc log.
+- M4 sở hữu Google OAuth và adapter. OAuth client secret nằm trong Secrets Manager; latest main hiện lưu user token material trong encrypted `identity` table. Token không được đặt trong Meeting, trả cho browser hoặc ghi log; secret-reference/application-encryption hardening vẫn là follow-up. Google sync idempotency/retry theo accepted 4A contract chưa hoàn tất.
 
 ### Email và dịch vụ AI
 
@@ -104,7 +104,7 @@ Bucket user-content phải có lifecycle/retention phù hợp với loại dữ 
 
 Mỗi entity logic vẫn tồn tại. Việc gom bảng dùng composite `PK/SK`, sparse GSI và item collection; không nhồi toàn bộ project thành một item hoặc một partition.
 
-`infra/data-foundation.yaml` là data stack độc lập. `infra/template.yaml` là application stack và chỉ tham chiếu tên 5 bảng qua `DataTablePrefix`; nó không tạo lại DynamoDB tables.
+`infra/data-foundation.yaml` là data stack độc lập. `infra/user-content-orchestration.yaml` là stack do M4 sở hữu cho S3 user-content, Step Functions, Reminder Lambda, Scheduler role và SES configuration set. `infra/template.yaml` là application stack; nó tham chiếu năm bảng qua `DataTablePrefix` và nhận outputs của stack M4 qua parameters, không tạo lại các resource đó.
 
 ## Quyết định AI và Google đã chốt
 

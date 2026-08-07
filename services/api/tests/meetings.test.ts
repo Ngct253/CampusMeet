@@ -20,4 +20,5 @@ it('giữ version hợp lệ trong PATCH contract và từ chối version malfor
   });
   expect(updateMeetingInputSchema.safeParse({ version: 0 }).success).toBe(false);
   expect(updateMeetingInputSchema.safeParse({ version: '3' }).success).toBe(false);
+  expect(updateMeetingInputSchema.safeParse({ title: 'Missing version' }).success).toBe(false);
 });

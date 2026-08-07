@@ -11,3 +11,10 @@ export async function updateProfile(input: UpdateProfileRequest): Promise<UserPr
     body: JSON.stringify(input),
   })).data;
 }
+
+export async function connectGoogleCalendar(): Promise<{ authorizationUrl: string; expiresAt: string }> {
+  return (await apiClient.request<ApiSuccessResponse<{ authorizationUrl: string; expiresAt: string }>>(
+    '/integrations/google/connect',
+    { method: 'POST' },
+  )).data;
+}
