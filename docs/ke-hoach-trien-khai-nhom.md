@@ -185,6 +185,7 @@ Meeting
   - transcript version/edit history trong `meeting-data`;
   - minutes trong `meeting-data`;
   - tasks trong `task-data`;
+  - immutable `GroupProgressSnapshot` VERSION + full LATEST trong `task-data` (contract PROPOSED, chờ duyệt; writer chưa implement);
   - proposal state/execution reference trong `ai-work`.
 
 ### Cách truy vấn
@@ -207,6 +208,7 @@ Meeting
 - Proposal retry chỉ thực thi Task/Minutes API một lần.
 - Group khác không đọc minutes/task.
 - `GroupProgressSnapshot` chỉ chứa dữ liệu xác định của một group; không chấm điểm/xếp hạng cá nhân.
+- Snapshot contract/schema và key model đang là proposal chờ team/maintainer duyệt tại [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md); runtime producer chưa implement. Nếu được duyệt, M3 sở hữu aggregate/validation/version allocation/atomic persistence; M5 chỉ orchestration và diễn giải exact immutable version, không tự aggregate hoặc fallback sang latest.
 
 M5 không ghi task hoặc minutes chính thức trực tiếp. M5 tạo draft có citation; M3 sở hữu preview, xác nhận và gọi API nghiệp vụ chuẩn.
 
