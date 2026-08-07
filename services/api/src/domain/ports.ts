@@ -105,6 +105,7 @@ export interface GoogleCalendarGateway {
 
 export interface ReminderSchedulerGateway {
   schedule(meeting: Meeting): Promise<{ scheduleId: string }>;
+  cancel(meetingId: string): Promise<void>;
 }
 
 export interface EmailGateway {

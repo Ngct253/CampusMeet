@@ -12,7 +12,7 @@ import { SharedMembershipAuthorizer } from '../middleware/authorization';
 import { handleError } from '../middleware/error-handler';
 import { DynamoDbCollaborationRepository } from '../repositories/collaboration';
 import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
-import { GoogleCalendarAdapter } from '../integrations/adapters';
+import { EventBridgeSchedulerAdapter, GoogleCalendarAdapter } from '../integrations/adapters';
 import { ApiError, BadRequestError } from '../utils/errors';
 import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
 import { ok } from '../utils/response';
@@ -23,6 +23,7 @@ const service = new MeetingService(
   undefined,
   undefined,
   new GoogleCalendarAdapter(),
+  new EventBridgeSchedulerAdapter(),
 );
 const groups = new DynamoDbCollaborationRepository();
 

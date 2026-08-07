@@ -1,6 +1,11 @@
 import type { Meeting } from '@campusmeet/shared';
 import { createHash } from 'node:crypto';
-import { CreateScheduleCommand, SchedulerClient } from '@aws-sdk/client-scheduler';
+import {
+  CreateScheduleCommand,
+  DeleteScheduleCommand,
+  SchedulerClient,
+  UpdateScheduleCommand,
+} from '@aws-sdk/client-scheduler';
 import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import type {
   EmailGateway,
@@ -43,8 +48,12 @@ export class GoogleCalendarAdapter implements GoogleCalendarGateway {
         grant_type: 'refresh_token',
       }),
     });
-    const body = await response.json() as Record<string, unknown>;
-    if (!response.ok || typeof body.access_token !== 'string' || typeof body.expires_in !== 'number') {
+    const body = (await response.json()) as Record<string, unknown>;
+    if (
+      !response.ok ||
+      typeof body.access_token !== 'string' ||
+      typeof body.expires_in !== 'number'
+    ) {
       throw new UnauthorizedError('Phiên Google đã hết hạn. Hãy kết nối lại.');
     }
     await this.integrations.saveTokens(userId, {
@@ -77,7 +86,7 @@ export class GoogleCalendarAdapter implements GoogleCalendarGateway {
         }),
       },
     );
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     if (!response.ok || typeof body.id !== 'string') {
       throw new Error(`GOOGLE_CALENDAR_CREATE_FAILED:${response.status}`);
     }
@@ -95,26 +104,51 @@ export class GoogleCalendarAdapter implements GoogleCalendarGateway {
 export class EventBridgeSchedulerAdapter implements ReminderSchedulerGateway {
   constructor(private readonly client = new SchedulerClient({})) {}
 
-  async schedule(meeting: Meeting): Promise<{ scheduleId: string }> {
-    const scheduleId = `campusmeet-${createHash('sha256').update(meeting.id).digest('hex').slice(0, 24)}`;
+  private scheduleId(meetingId: string) {
+    return `campusmeet-${createHash('sha256').update(meetingId).digest('hex').slice(0, 24)}`;
+  }
+
+  private scheduleInput(meeting: Meeting) {
+    const scheduleId = this.scheduleId(meeting.id);
     const reminderAt = new Date(new Date(meeting.startsAt).getTime() - 15 * 60 * 1000)
       .toISOString()
       .replace(/\.\d{3}Z$/, '');
-    await this.client.send(
-      new CreateScheduleCommand({
-        Name: scheduleId,
-        ScheduleExpression: `at(${reminderAt})`,
-        FlexibleTimeWindow: { Mode: 'OFF' },
-        ActionAfterCompletion: 'DELETE',
-        Target: {
-          Arn: required('REMINDER_FUNCTION_ARN'),
-          RoleArn: required('SCHEDULER_EXECUTION_ROLE_ARN'),
-          Input: JSON.stringify({ reminderId: scheduleId, meetingId: meeting.id }),
-        },
-        ClientToken: `meeting-${meeting.id}-v${meeting.version}`,
-      }),
-    );
+    return {
+      Name: scheduleId,
+      ScheduleExpression: `at(${reminderAt})`,
+      FlexibleTimeWindow: { Mode: 'OFF' as const },
+      ActionAfterCompletion: 'DELETE' as const,
+      Target: {
+        Arn: required('REMINDER_FUNCTION_ARN'),
+        RoleArn: required('SCHEDULER_EXECUTION_ROLE_ARN'),
+        Input: JSON.stringify({ reminderId: scheduleId, meetingId: meeting.id }),
+      },
+    };
+  }
+
+  async schedule(meeting: Meeting): Promise<{ scheduleId: string }> {
+    const input = this.scheduleInput(meeting);
+    try {
+      await this.client.send(
+        new CreateScheduleCommand({
+          ...input,
+          ClientToken: `meeting-${meeting.id}-v${meeting.version}`,
+        }),
+      );
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== 'ConflictException') throw error;
+      await this.client.send(new UpdateScheduleCommand(input));
+    }
+    const scheduleId = this.scheduleId(meeting.id);
     return { scheduleId };
+  }
+
+  async cancel(meetingId: string): Promise<void> {
+    try {
+      await this.client.send(new DeleteScheduleCommand({ Name: this.scheduleId(meetingId) }));
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== 'ResourceNotFoundException') throw error;
+    }
   }
 }
 
