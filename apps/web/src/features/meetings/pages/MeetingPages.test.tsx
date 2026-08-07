@@ -180,8 +180,7 @@ beforeEach(() => {
   services.convertActionItemToTask.mockReset();
 });
 
-function renderPage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
 
   return render(
     <QueryClientProvider client={client}>
@@ -219,6 +218,17 @@ it('hiển thị loading state trong khi tải timeline', () => {
   services.getMeetings.mockReturnValue(new Promise(() => undefined));
   renderPage();
   expect(screen.getByRole('status')).toBeInTheDocument();
+});
+
+it('không dùng nhầm cache danh sách meeting của trang nhóm làm infinite timeline', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(['groups', 'group-1', 'meetings'], [meetingFixture('cached')]);
+  services.getMeetings.mockResolvedValue({ items: [meetingFixture('timeline')] });
+
+  renderPage(client);
+
+  await waitFor(() => expect(services.getMeetings).toHaveBeenCalledWith('group-1', {}));
+  expect(await screen.findByText('Họp tuần')).toBeInTheDocument();
 });
 
 it('validate form và submit create thành công', async () => {
