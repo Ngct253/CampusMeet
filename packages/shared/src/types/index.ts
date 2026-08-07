@@ -136,6 +136,7 @@ export interface Task {
   priority: Priority;
   dueAt?: ISODateTime;
   sourceMeetingId?: string;
+  sourceActionItemId?: string;
   createdBy?: string;
   createdAt?: ISODateTime;
   updatedAt?: ISODateTime;

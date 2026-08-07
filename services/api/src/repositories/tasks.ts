@@ -47,6 +47,9 @@ const toTask = (item: DynamoItem): Task | undefined => {
     ...(stringValue(item, 'sourceMeetingId')
       ? { sourceMeetingId: stringValue(item, 'sourceMeetingId') }
       : {}),
+    ...(stringValue(item, 'sourceActionItemId')
+      ? { sourceActionItemId: stringValue(item, 'sourceActionItemId') }
+      : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),

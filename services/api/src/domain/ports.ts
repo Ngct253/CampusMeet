@@ -1,11 +1,13 @@
 import type {
   ActionItem,
+  ConvertActionItemToTaskResponse,
   CreateTaskRequest,
   Group,
   GroupRole,
   Meeting,
   MeetingMinutes,
   Notification,
+  Priority,
   Task,
   TaskStatus,
   UpdateMeetingMinutesRequest,
@@ -76,6 +78,21 @@ export interface MinutesRepository {
     nextVersion: number,
     minutesId?: string,
   ): Promise<MeetingMinutes>;
+}
+
+export interface ActionItemTaskWrite {
+  actorId: string;
+  meeting: Meeting;
+  minutes: MeetingMinutes;
+  actionItemId: string;
+  title: string;
+  assigneeId: string;
+  priority: Priority;
+}
+
+export interface ActionItemTaskRepository {
+  getTaskById(taskId: string): Promise<Task | undefined>;
+  create(input: ActionItemTaskWrite): Promise<ConvertActionItemToTaskResponse>;
 }
 
 export interface TaskRepository {
