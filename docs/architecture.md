@@ -84,7 +84,7 @@ Bucket user-content phải có lifecycle/retention phù hợp với loại dữ 
 - CampusMeet không tự xây video call hoặc WebRTC. Calendar API là đường chính để tạo/cập nhật/hủy event và Meet link.
 - Meet REST API chỉ đồng bộ participant, recording hoặc transcript khi artifact đã tồn tại và OAuth scope thực tế cho phép.
 - Upload và live capture là fallback bắt buộc; luồng họp không phụ thuộc giả định rằng Google luôn trả transcript.
-- M4 sở hữu Google OAuth và adapter. OAuth client secret nằm trong Secrets Manager; latest main hiện lưu user token material trong encrypted `identity` table. Token không được đặt trong Meeting, trả cho browser hoặc ghi log; secret-reference/application-encryption hardening vẫn là follow-up. Google sync idempotency/retry theo accepted 4A contract chưa hoàn tất.
+- M4 sở hữu Google OAuth và adapter. OAuth client secret nằm trong Secrets Manager; user token material hiện nằm trong encrypted `identity` table. Token không được đặt trong Meeting, trả cho browser hoặc ghi log; secret-reference/application-encryption hardening vẫn là follow-up. Source hiện có durable sync intent, deterministic Google event identity, DynamoDB Stream worker, stale-revision guard, bounded Scheduler retry và manual Group Admin retry; AWS smoke verification vẫn phải hoàn tất sau deploy.
 
 ### Email và dịch vụ AI
 

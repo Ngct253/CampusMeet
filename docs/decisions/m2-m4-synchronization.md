@@ -6,7 +6,7 @@ ACCEPTED
 
 Accepted runtime design date: 2026-08-07
 
-Implementation status: NOT YET COMPLETE. AWS verification status: NOT YET COMPLETE.
+Implementation status: IMPLEMENTED IN SOURCE; verification pending. AWS verification status: NOT YET COMPLETE.
 
 ## 1. Context
 

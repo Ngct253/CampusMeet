@@ -32,7 +32,7 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | GET/POST  | `/groups/:groupId/meetings`                                    | `MeetingTimelineResponse`, `CreateMeetingRequest`                   | Đã triển khai pagination; POST yêu cầu Group Admin và `Idempotency-Key` |
 | GET/PATCH | `/meetings/:meetingId`                                         | `Meeting`, `UpdateMeetingRequest`                                   | Đã triển khai; PATCH yêu cầu Group Admin và required `version`          |
 | POST      | `/meetings/:meetingId/cancel`                                  | `CancelMeetingRequest`, `Meeting`                                   | Đã triển khai; yêu cầu Group Admin                                      |
-| POST      | `/meetings/:meetingId/google-sync/retry`                       | `GoogleMeetingSyncSummary`                                          | Contract ACCEPTED; chưa implement                                       |
+| POST      | `/meetings/:meetingId/google-sync/retry`                       | `GoogleMeetingSyncSummary`                                          | M4 đã triển khai; active Group Admin, retry từ current Meeting state    |
 | GET       | `/meetings/:meetingId/minutes`                                 | `MeetingMinutes`                                                    | Active member; trả latest version, chưa có trả `404`                    |
 | PUT       | `/meetings/:meetingId/minutes`                                 | `UpdateMeetingMinutesRequest`, `MeetingMinutes`                     | Active Group Admin; optimistic version                                  |
 | POST      | `/meetings/:meetingId/minutes/action-items/:actionItemId/task` | `ConvertActionItemToTaskRequest`, `ConvertActionItemToTaskResponse` | Active Group Admin; atomic Task + Minutes version                       |
@@ -73,7 +73,7 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 
 ## Contract đồng bộ Google của Meeting
 
-Decision 4A runtime đã **ACCEPTED** ngày 2026-08-07; runtime và AWS chưa hoàn tất. Meeting create, update và cancel thành công khi transaction nội bộ đã ghi đồng thời Meeting và synchronization intent. Các response này không chờ Google; Google failure sau đó không biến mutation nội bộ đã thành công thành `5xx` hoặc rollback Meeting.
+Decision 4A runtime đã **ACCEPTED** ngày 2026-08-07 và đã được triển khai trong source; AWS smoke verification còn pending. Meeting create, update và cancel thành công khi transaction nội bộ đã ghi đồng thời Meeting và synchronization intent. Các response này không chờ Google; Google failure sau đó không biến mutation nội bộ đã thành công thành `5xx` hoặc rollback Meeting.
 
 Meeting detail mục tiêu bổ sung summary chỉ đọc, tách khỏi lifecycle:
 

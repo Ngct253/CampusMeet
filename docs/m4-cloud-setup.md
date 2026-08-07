@@ -10,13 +10,16 @@ Code and infrastructure are committed without credentials. Complete these accoun
 
 ## AWS deployment order
 
-The standalone M4 stack owns the private user-content bucket, Step Functions state machine, Reminder Lambda, Scheduler execution role and SES configuration set. The application stack owns the API and the M5 AI Worker. The worker has a deterministic name, so deploy in this order:
+The standalone M4 stack owns the private user-content bucket, Step Functions state machine, Reminder Lambda, Scheduler execution role and SES configuration set. The data-foundation stack owns the Meeting table and its DynamoDB Stream. The application stack owns the API, Google Sync Worker and the M5 AI Worker. The worker has a deterministic name, so deploy in this order:
 
-1. Determine the worker ARN: `arn:aws:lambda:<region>:<account-id>:function:campusmeet-<environment>-ai-worker`.
-2. Deploy `infra/user-content-orchestration.yaml` using that ARN, the data-table prefix and the verified SES sender. CloudFormation can create the state machine before the AI Worker exists.
-3. Copy the `UserContentBucketName`, `AIStateMachineArn`, `ReminderFunctionArn`, `SchedulerExecutionRoleArn` and `SesConfigurationSetName` outputs.
-4. Put those outputs in the parameters used to deploy `infra/template.yaml`.
-5. Deploy `infra/template.yaml`, which creates the shared API and the M5 AI resources while consuming the M4 outputs.
+1. Deploy/update `infra/data-foundation.yaml`. Copy its `MeetingDataTableStreamArn` output.
+2. Determine the worker ARN: `arn:aws:lambda:<region>:<account-id>:function:campusmeet-<environment>-ai-worker`.
+3. Deploy `infra/user-content-orchestration.yaml` using that ARN, the data-table prefix and the verified SES sender. CloudFormation can create the state machine before the AI Worker exists.
+4. Copy the `UserContentBucketName`, `AIStateMachineArn`, `ReminderFunctionArn`, `SchedulerExecutionRoleArn` and `SesConfigurationSetName` outputs.
+5. Put those outputs and `MeetingDataTableStreamArn` in the parameters used to deploy `infra/template.yaml`.
+6. Deploy `infra/template.yaml`, which creates the shared API, M4 Google Sync Worker and M5 AI resources while consuming the M4 outputs.
+
+The Google Sync Worker asynchronously reconciles create/update/cancel operations. It uses a durable `GoogleMeetingSyncRecord`, deterministic Google event identity, stale-revision guards and at most five one-shot retries after 1 minute, 5 minutes, 15 minutes, 1 hour and 6 hours. `POST /meetings/:meetingId/google-sync/retry` is restricted to active Group Admins.
 
 Do not deploy the standalone M4 stack over manually-created resources with the same physical names. Import/adopt those resources into CloudFormation first, or deploy the stack with non-conflicting names and migrate deliberately.
 
