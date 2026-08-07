@@ -613,10 +613,14 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     expect(screen.getByRole('option', { name: 'MEDIUM' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'HIGH' })).toBeInTheDocument();
     const assigneeSelect = screen.getByLabelText('Người phụ trách Task cho Việc A');
-    expect(within(assigneeSelect).queryByRole('option', { name: 'Không hoạt động' })).not.toBeInTheDocument();
+    expect(
+      within(assigneeSelect).queryByRole('option', { name: 'Không hoạt động' }),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
-    expect(await screen.findByText('Vui lòng chọn người phụ trách đang hoạt động.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Vui lòng chọn người phụ trách đang hoạt động.'),
+    ).toBeInTheDocument();
     expect(services.convertActionItemToTask).not.toHaveBeenCalled();
 
     fireEvent.change(assigneeSelect, {
@@ -695,7 +699,9 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     resolveConversion(response);
     expect(await screen.findByText('Đã chuyển thành công việc')).toBeInTheDocument();
     expect(client.getQueryData(['meetings', 'meeting-1', 'minutes'])).toEqual(response.minutes);
-    expect(screen.getByText(`Đang chỉnh sửa từ phiên bản ${response.minutes.version}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(`Đang chỉnh sửa từ phiên bản ${response.minutes.version}`),
+    ).toBeInTheDocument();
     await waitFor(() => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tasks'] });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['dashboard'] });
@@ -724,32 +730,37 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
     fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
-    expect(await screen.findByText('Bạn không còn quyền Quản trị viên để tạo Task.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Bạn không còn quyền Quản trị viên để tạo Task.'),
+    ).toBeInTheDocument();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['groups', 'group-1'] });
   });
 
   it.each([
     [404, 'Việc cần thực hiện không còn trong phiên bản biên bản mới nhất.'],
     [409, 'Biên bản đã thay đổi hoặc việc này vừa được chuyển thành Task ở nơi khác.'],
-  ])('refetches latest Minutes on conversion error %s and retains valid input', async (status, message) => {
-    services.getMeetingMinutes.mockResolvedValue(unconvertedMinutes());
-    services.convertActionItemToTask.mockRejectedValue(
-      new ApiClientError(message, status, status === 404 ? 'NOT_FOUND' : 'CONFLICT'),
-    );
-    const { invalidate } = renderDetail('GROUP_ADMIN');
+  ])(
+    'refetches latest Minutes on conversion error %s and retains valid input',
+    async (status, message) => {
+      services.getMeetingMinutes.mockResolvedValue(unconvertedMinutes());
+      services.convertActionItemToTask.mockRejectedValue(
+        new ApiClientError(message, status, status === 404 ? 'NOT_FOUND' : 'CONFLICT'),
+      );
+      const { invalidate } = renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
-    fireEvent.change(screen.getByLabelText('Tiêu đề Task cho Việc A'), {
-      target: { value: 'Giữ input này' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
+      fireEvent.change(screen.getByLabelText('Tiêu đề Task cho Việc A'), {
+        target: { value: 'Giữ input này' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
 
-    expect(await screen.findByText(message)).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Giữ input này')).toBeInTheDocument();
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: ['meetings', 'meeting-1', 'minutes'],
-    });
-  });
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Giữ input này')).toBeInTheDocument();
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: ['meetings', 'meeting-1', 'minutes'],
+      });
+    },
+  );
 
   it('drops local conversion input when a 404 refresh removes the Action Item', async () => {
     const source = unconvertedMinutes();

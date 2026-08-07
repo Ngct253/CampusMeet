@@ -316,7 +316,10 @@ function ActionItemTaskConversionPanel({
         {minutes.actionItems.map((actionItem, index) => {
           const selected = selectedActionId === actionItem.id;
           return (
-            <li key={actionItem.id || `persisted-action-${index}`} className="action-item-task-entry">
+            <li
+              key={actionItem.id || `persisted-action-${index}`}
+              className="action-item-task-entry"
+            >
               <div className="action-item-task-heading">
                 <span>
                   <strong>{actionItem.content}</strong>
@@ -494,182 +497,182 @@ function MinutesEditor({
   return (
     <>
       <form className="minutes-editor" onSubmit={submit}>
-      <div className="minutes-editor-heading">
-        <span>Đang chỉnh sửa từ phiên bản {expectedVersion}</span>
-        {dirty && <span className="minutes-dirty">Có thay đổi chưa lưu</span>}
-      </div>
-      <label>
-        Tóm tắt
-        <textarea
-          value={draft.summary}
-          onChange={(event) => changeDraft({ ...draft, summary: event.target.value })}
-          minLength={1}
-          maxLength={2000}
-          rows={4}
-          required
-        />
-      </label>
-      <label>
-        Nội dung thảo luận
-        <textarea
-          value={draft.discussion}
-          onChange={(event) => changeDraft({ ...draft, discussion: event.target.value })}
-          maxLength={10000}
-          rows={7}
-        />
-      </label>
-      <fieldset>
-        <legend>Quyết định</legend>
-        {draft.decisions.map((decision, index) => (
-          <div className="minutes-row" key={`decision-${index}`}>
-            <input
-              aria-label={`Quyết định ${index + 1}`}
-              value={decision.content}
-              onChange={(event) =>
-                changeDraft({
-                  ...draft,
-                  decisions: draft.decisions.map((item, itemIndex) =>
-                    itemIndex === index ? { content: event.target.value } : item,
-                  ),
-                })
-              }
-              maxLength={1000}
-              required
-            />
-            <button
-              type="button"
-              disabled={mutation.isPending}
-              onClick={() =>
-                changeDraft({
-                  ...draft,
-                  decisions: draft.decisions.filter((_, itemIndex) => itemIndex !== index),
-                })
-              }
-            >
-              Xóa
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          disabled={mutation.isPending || draft.decisions.length >= 50}
-          onClick={() =>
-            changeDraft({ ...draft, decisions: [...draft.decisions, { content: '' }] })
-          }
-        >
-          Thêm quyết định
+        <div className="minutes-editor-heading">
+          <span>Đang chỉnh sửa từ phiên bản {expectedVersion}</span>
+          {dirty && <span className="minutes-dirty">Có thay đổi chưa lưu</span>}
+        </div>
+        <label>
+          Tóm tắt
+          <textarea
+            value={draft.summary}
+            onChange={(event) => changeDraft({ ...draft, summary: event.target.value })}
+            minLength={1}
+            maxLength={2000}
+            rows={4}
+            required
+          />
+        </label>
+        <label>
+          Nội dung thảo luận
+          <textarea
+            value={draft.discussion}
+            onChange={(event) => changeDraft({ ...draft, discussion: event.target.value })}
+            maxLength={10000}
+            rows={7}
+          />
+        </label>
+        <fieldset>
+          <legend>Quyết định</legend>
+          {draft.decisions.map((decision, index) => (
+            <div className="minutes-row" key={`decision-${index}`}>
+              <input
+                aria-label={`Quyết định ${index + 1}`}
+                value={decision.content}
+                onChange={(event) =>
+                  changeDraft({
+                    ...draft,
+                    decisions: draft.decisions.map((item, itemIndex) =>
+                      itemIndex === index ? { content: event.target.value } : item,
+                    ),
+                  })
+                }
+                maxLength={1000}
+                required
+              />
+              <button
+                type="button"
+                disabled={mutation.isPending}
+                onClick={() =>
+                  changeDraft({
+                    ...draft,
+                    decisions: draft.decisions.filter((_, itemIndex) => itemIndex !== index),
+                  })
+                }
+              >
+                Xóa
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            disabled={mutation.isPending || draft.decisions.length >= 50}
+            onClick={() =>
+              changeDraft({ ...draft, decisions: [...draft.decisions, { content: '' }] })
+            }
+          >
+            Thêm quyết định
+          </button>
+        </fieldset>
+        <fieldset>
+          <legend>Việc cần thực hiện</legend>
+          {draft.actionItems.map((action, index) => (
+            <div className="minutes-action-row" key={action.id ?? `action-new-${index}`}>
+              <input
+                aria-label={`Việc cần thực hiện ${index + 1}`}
+                value={action.content}
+                onChange={(event) =>
+                  changeDraft({
+                    ...draft,
+                    actionItems: draft.actionItems.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, content: event.target.value } : item,
+                    ),
+                  })
+                }
+                maxLength={1000}
+                required
+              />
+              <select
+                aria-label={`Người phụ trách ${index + 1}`}
+                value={action.assigneeId ?? ''}
+                onChange={(event) =>
+                  changeDraft({
+                    ...draft,
+                    actionItems: draft.actionItems.map((item, itemIndex) =>
+                      itemIndex === index
+                        ? {
+                            ...(item.id ? { id: item.id } : {}),
+                            content: item.content,
+                            ...(event.target.value ? { assigneeId: event.target.value } : {}),
+                            ...(item.dueAt ? { dueAt: item.dueAt } : {}),
+                          }
+                        : item,
+                    ),
+                  })
+                }
+              >
+                <option value="">Chưa giao</option>
+                {group.members.map(({ membership, user }) => (
+                  <option key={membership.userId} value={membership.userId}>
+                    {user?.displayName || user?.email || membership.userId}
+                  </option>
+                ))}
+              </select>
+              <input
+                aria-label={`Hạn hoàn thành ${index + 1}`}
+                type="datetime-local"
+                value={action.dueAt ? toLocalInput(action.dueAt) : ''}
+                onChange={(event) =>
+                  changeDraft({
+                    ...draft,
+                    actionItems: draft.actionItems.map((item, itemIndex) =>
+                      itemIndex === index
+                        ? {
+                            ...(item.id ? { id: item.id } : {}),
+                            content: item.content,
+                            ...(item.assigneeId ? { assigneeId: item.assigneeId } : {}),
+                            ...(event.target.value
+                              ? { dueAt: new Date(event.target.value).toISOString() }
+                              : {}),
+                          }
+                        : item,
+                    ),
+                  })
+                }
+              />
+              <button
+                type="button"
+                disabled={mutation.isPending}
+                onClick={() =>
+                  changeDraft({
+                    ...draft,
+                    actionItems: draft.actionItems.filter((_, itemIndex) => itemIndex !== index),
+                  })
+                }
+              >
+                Xóa
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            disabled={mutation.isPending || draft.actionItems.length >= 100}
+            onClick={() =>
+              changeDraft({ ...draft, actionItems: [...draft.actionItems, { content: '' }] })
+            }
+          >
+            Thêm việc cần thực hiện
+          </button>
+        </fieldset>
+        {message && (
+          <p className={mutation.isError ? 'error' : 'minutes-success'} role="status">
+            {message}
+          </p>
+        )}
+        {hasConflict && initial && initial.version !== expectedVersion && (
+          <button
+            type="button"
+            onClick={() => {
+              setExpectedVersion(initial.version);
+              setHasConflict(false);
+              setMessage(`Đang đối chiếu với phiên bản ${initial.version}; bản nháp vẫn được giữ.`);
+            }}
+          >
+            Dùng phiên bản mới làm mốc
+          </button>
+        )}
+        <button type="submit" disabled={mutation.isPending}>
+          {mutation.isPending ? 'Đang lưu…' : 'Lưu biên bản'}
         </button>
-      </fieldset>
-      <fieldset>
-        <legend>Việc cần thực hiện</legend>
-        {draft.actionItems.map((action, index) => (
-          <div className="minutes-action-row" key={action.id ?? `action-new-${index}`}>
-            <input
-              aria-label={`Việc cần thực hiện ${index + 1}`}
-              value={action.content}
-              onChange={(event) =>
-                changeDraft({
-                  ...draft,
-                  actionItems: draft.actionItems.map((item, itemIndex) =>
-                    itemIndex === index ? { ...item, content: event.target.value } : item,
-                  ),
-                })
-              }
-              maxLength={1000}
-              required
-            />
-            <select
-              aria-label={`Người phụ trách ${index + 1}`}
-              value={action.assigneeId ?? ''}
-              onChange={(event) =>
-                changeDraft({
-                  ...draft,
-                  actionItems: draft.actionItems.map((item, itemIndex) =>
-                    itemIndex === index
-                      ? {
-                          ...(item.id ? { id: item.id } : {}),
-                          content: item.content,
-                          ...(event.target.value ? { assigneeId: event.target.value } : {}),
-                          ...(item.dueAt ? { dueAt: item.dueAt } : {}),
-                        }
-                      : item,
-                  ),
-                })
-              }
-            >
-              <option value="">Chưa giao</option>
-              {group.members.map(({ membership, user }) => (
-                <option key={membership.userId} value={membership.userId}>
-                  {user?.displayName || user?.email || membership.userId}
-                </option>
-              ))}
-            </select>
-            <input
-              aria-label={`Hạn hoàn thành ${index + 1}`}
-              type="datetime-local"
-              value={action.dueAt ? toLocalInput(action.dueAt) : ''}
-              onChange={(event) =>
-                changeDraft({
-                  ...draft,
-                  actionItems: draft.actionItems.map((item, itemIndex) =>
-                    itemIndex === index
-                      ? {
-                          ...(item.id ? { id: item.id } : {}),
-                          content: item.content,
-                          ...(item.assigneeId ? { assigneeId: item.assigneeId } : {}),
-                          ...(event.target.value
-                            ? { dueAt: new Date(event.target.value).toISOString() }
-                            : {}),
-                        }
-                      : item,
-                  ),
-                })
-              }
-            />
-            <button
-              type="button"
-              disabled={mutation.isPending}
-              onClick={() =>
-                changeDraft({
-                  ...draft,
-                  actionItems: draft.actionItems.filter((_, itemIndex) => itemIndex !== index),
-                })
-              }
-            >
-              Xóa
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          disabled={mutation.isPending || draft.actionItems.length >= 100}
-          onClick={() =>
-            changeDraft({ ...draft, actionItems: [...draft.actionItems, { content: '' }] })
-          }
-        >
-          Thêm việc cần thực hiện
-        </button>
-      </fieldset>
-      {message && (
-        <p className={mutation.isError ? 'error' : 'minutes-success'} role="status">
-          {message}
-        </p>
-      )}
-      {hasConflict && initial && initial.version !== expectedVersion && (
-        <button
-          type="button"
-          onClick={() => {
-            setExpectedVersion(initial.version);
-            setHasConflict(false);
-            setMessage(`Đang đối chiếu với phiên bản ${initial.version}; bản nháp vẫn được giữ.`);
-          }}
-        >
-          Dùng phiên bản mới làm mốc
-        </button>
-      )}
-      <button type="submit" disabled={mutation.isPending}>
-        {mutation.isPending ? 'Đang lưu…' : 'Lưu biên bản'}
-      </button>
       </form>
       {initial && (
         <ActionItemTaskConversionPanel
