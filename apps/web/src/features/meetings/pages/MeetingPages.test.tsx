@@ -16,6 +16,7 @@ const services = vi.hoisted(() => ({
   cancelMeeting: vi.fn(),
   getMeetingMinutes: vi.fn(),
   updateMeetingMinutes: vi.fn(),
+  retryGoogleMeetingSync: vi.fn(),
 }));
 
 vi.mock('../../groups/service', () => ({
@@ -30,6 +31,7 @@ vi.mock('../service', () => ({
   cancelMeeting: services.cancelMeeting,
   getMeetingMinutes: services.getMeetingMinutes,
   updateMeetingMinutes: services.updateMeetingMinutes,
+  retryGoogleMeetingSync: services.retryGoogleMeetingSync,
 }));
 
 const authMock = vi.hoisted(() => ({ userId: 'user-1' }));
@@ -82,13 +84,15 @@ const minutes = {
   summary: 'Tóm tắt đã lưu',
   discussion: 'Nội dung đã lưu',
   decisions: [{ id: 'decision-1', content: 'Quyết định A' }],
-  actionItems: [{
-    id: 'action-1',
-    content: 'Việc A',
-    assigneeId: 'user-1',
-    dueAt: '2026-08-10T03:30:00.000Z',
-    taskId: 'task-1',
-  }],
+  actionItems: [
+    {
+      id: 'action-1',
+      content: 'Việc A',
+      assigneeId: 'user-1',
+      dueAt: '2026-08-10T03:30:00.000Z',
+      taskId: 'task-1',
+    },
+  ],
   version: 2,
   createdBy: 'admin-1',
   createdAt: '2026-08-04T03:00:00.000Z',
@@ -396,12 +400,14 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
 
     await waitFor(() => expect(services.updateMeetingMinutes).toHaveBeenCalledTimes(1));
     const sent = services.updateMeetingMinutes.mock.calls[0]?.[1];
-    expect(sent.actionItems).toEqual([{
-      id: 'action-1',
-      content: 'Việc A cập nhật',
-      assigneeId: 'user-1',
-      dueAt: new Date('2026-08-11T09:15').toISOString(),
-    }]);
+    expect(sent.actionItems).toEqual([
+      {
+        id: 'action-1',
+        content: 'Việc A cập nhật',
+        assigneeId: 'user-1',
+        dueAt: new Date('2026-08-11T09:15').toISOString(),
+      },
+    ]);
     expect(sent.actionItems[0]).not.toHaveProperty('taskId');
   });
 
@@ -814,6 +820,36 @@ it('detail cancelled không tạo placeholder metadata khi contract không có d
   renderDetail();
   expect(await screen.findByText('Đã hủy')).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Thông tin hủy' })).not.toBeInTheDocument();
+});
+
+it.each([
+  ['PENDING', 'Google Meet đang được đồng bộ.'],
+  ['FAILED', 'Đồng bộ Google Calendar/Meet thất bại.'],
+  ['ACTION_REQUIRED', 'Cần kết nối lại tài khoản Google để đồng bộ cuộc họp.'],
+])('hiển thị Google sync status %s độc lập với Meeting lifecycle', async (status, message) => {
+  services.getMeeting.mockResolvedValue({
+    ...meetingFixture(),
+    googleSync: { provider: 'GOOGLE', status },
+  });
+  renderDetail();
+  expect(await screen.findByText(message)).toBeInTheDocument();
+  expect(screen.getByText('Đã lên lịch')).toBeInTheDocument();
+});
+
+it('chỉ hiển thị trusted Meet URL khi sync đã thành công', async () => {
+  services.getMeeting.mockResolvedValue({
+    ...meetingFixture(),
+    googleSync: {
+      provider: 'GOOGLE',
+      status: 'SYNCED',
+      meetUrl: 'https://meet.google.com/abc-defg-hij',
+    },
+  });
+  renderDetail();
+  expect(await screen.findByRole('link', { name: 'Tham gia Google Meet' })).toHaveAttribute(
+    'href',
+    'https://meet.google.com/abc-defg-hij',
+  );
 });
 
 it('validate title whitespace và time range tại đúng field, không gọi mutation', async () => {

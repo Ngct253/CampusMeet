@@ -4,7 +4,13 @@ import type { UpdateMeetingMinutesRequest } from '@campusmeet/shared';
 const request = vi.hoisted(() => vi.fn());
 vi.mock('../../lib/api-client', () => ({ apiClient: { request } }));
 
-import { getAllMeetings, getMeetingMinutes, getMeetings, updateMeetingMinutes } from './service';
+import {
+  getAllMeetings,
+  getMeetingMinutes,
+  getMeetings,
+  retryGoogleMeetingSync,
+  updateMeetingMinutes,
+} from './service';
 
 describe('meeting minutes service', () => {
   beforeEach(() => request.mockReset());
@@ -47,5 +53,21 @@ describe('meeting minutes service', () => {
     request.mockResolvedValueOnce({ success: true, data: { items: [] } });
     await getMeetings('group/one', { limit: 20, cursor: 'opaque' });
     expect(request).toHaveBeenLastCalledWith('/groups/group/one/meetings?limit=20&cursor=opaque');
+  });
+});
+
+it('creates a manual Google retry intent without client-controlled sync fields', async () => {
+  request.mockResolvedValue({
+    success: true,
+    data: { provider: 'GOOGLE', status: 'PENDING' },
+    requestId: 'request-1',
+  });
+  await expect(retryGoogleMeetingSync('meeting/one')).resolves.toEqual({
+    provider: 'GOOGLE',
+    status: 'PENDING',
+  });
+  expect(request).toHaveBeenCalledWith('/meetings/meeting%2Fone/google-sync/retry', {
+    method: 'POST',
+    body: '{}',
   });
 });

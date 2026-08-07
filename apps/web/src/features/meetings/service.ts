@@ -5,6 +5,7 @@ import type {
   Meeting,
   MeetingMinutes,
   MeetingTimelineResponse,
+  GoogleMeetingSyncSummary,
   UpdateMeetingMinutesRequest,
   UpdateMeetingRequest,
 } from '@campusmeet/shared';
@@ -101,5 +102,14 @@ export async function cancelMeeting(
       method: 'POST',
       body: JSON.stringify(input),
     })
+  ).data;
+}
+
+export async function retryGoogleMeetingSync(meetingId: string): Promise<GoogleMeetingSyncSummary> {
+  return (
+    await apiClient.request<ApiSuccessResponse<GoogleMeetingSyncSummary>>(
+      `/meetings/${encodeURIComponent(meetingId)}/google-sync/retry`,
+      { method: 'POST', body: '{}' },
+    )
   ).data;
 }
