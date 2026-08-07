@@ -1,6 +1,8 @@
 import type {
   ApiSuccessResponse,
   CancelMeetingRequest,
+  ConvertActionItemToTaskRequest,
+  ConvertActionItemToTaskResponse,
   CreateMeetingRequest,
   Meeting,
   MeetingMinutes,
@@ -63,6 +65,19 @@ export async function updateMeetingMinutes(
     await apiClient.request<ApiSuccessResponse<MeetingMinutes>>(
       `/meetings/${encodeURIComponent(meetingId)}/minutes`,
       { method: 'PUT', body: JSON.stringify(input) },
+    )
+  ).data;
+}
+
+export async function convertActionItemToTask(
+  meetingId: string,
+  actionItemId: string,
+  input: ConvertActionItemToTaskRequest,
+): Promise<ConvertActionItemToTaskResponse> {
+  return (
+    await apiClient.request<ApiSuccessResponse<ConvertActionItemToTaskResponse>>(
+      `/meetings/${encodeURIComponent(meetingId)}/minutes/action-items/${encodeURIComponent(actionItemId)}/task`,
+      { method: 'POST', body: JSON.stringify(input) },
     )
   ).data;
 }

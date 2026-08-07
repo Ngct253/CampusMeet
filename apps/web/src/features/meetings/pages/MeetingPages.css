@@ -383,6 +383,84 @@
   margin: 0;
 }
 
+.action-item-task-panel {
+  border-top: 1px solid #d8dfeb;
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+}
+
+.action-item-task-panel h3,
+.action-item-task-panel p {
+  margin: 0;
+}
+
+.action-item-task-list {
+  display: grid;
+  gap: 0.75rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.action-item-task-entry {
+  border: 1px solid #d8dfeb;
+  border-radius: 0.75rem;
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+}
+
+.action-item-task-heading,
+.action-item-task-actions {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.action-item-task-heading > span:first-child {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.action-item-task-heading small {
+  color: var(--muted, #64748b);
+}
+
+.action-item-task-converted {
+  color: #15803d;
+  font-weight: 700;
+}
+
+.action-item-task-form {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.action-item-task-form label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 700;
+}
+
+.action-item-task-form input,
+.action-item-task-form select {
+  border: 1px solid #d8dfeb;
+  border-radius: 0.75rem;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.75rem;
+  width: 100%;
+}
+
+.action-item-task-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+}
+
 @media (max-width: 720px) {
   .minutes-row,
   .minutes-action-row {
@@ -393,6 +471,16 @@
   .minutes-action-row select,
   .minutes-action-row input[type='datetime-local'] {
     max-width: none;
+  }
+
+  .action-item-task-heading,
+  .action-item-task-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .action-item-task-form {
+    grid-template-columns: 1fr;
   }
 }
 .meeting-overview-heading {
