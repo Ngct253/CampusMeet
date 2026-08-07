@@ -10,13 +10,15 @@ Code and infrastructure are committed without credentials. Complete these accoun
 
 ## AWS deployment order
 
-The M4 stack owns the private user-content bucket and Step Functions state machine. The M5 application stack owns the AI Worker. The worker has a deterministic name, so deploy in this order:
+The standalone M4 stack owns the private user-content bucket, Step Functions state machine, Reminder Lambda, Scheduler execution role and SES configuration set. The application stack owns the API and the M5 AI Worker. The worker has a deterministic name, so deploy in this order:
 
 1. Determine the worker ARN: `arn:aws:lambda:<region>:<account-id>:function:campusmeet-<environment>-ai-worker`.
-2. Deploy `infra/user-content-orchestration.yaml` using that ARN. CloudFormation can create the state machine before the Lambda exists.
-3. Copy the `UserContentBucketName` and `AIStateMachineArn` outputs.
+2. Deploy `infra/user-content-orchestration.yaml` using that ARN, the data-table prefix and the verified SES sender. CloudFormation can create the state machine before the AI Worker exists.
+3. Copy the `UserContentBucketName`, `AIStateMachineArn`, `ReminderFunctionArn`, `SchedulerExecutionRoleArn` and `SesConfigurationSetName` outputs.
 4. Put those outputs in the parameters used to deploy `infra/template.yaml`.
-5. Deploy `infra/template.yaml`, which creates the API, AI Worker, Reminder Lambda, Scheduler role and SES configuration set.
+5. Deploy `infra/template.yaml`, which creates the shared API and the M5 AI resources while consuming the M4 outputs.
+
+Do not deploy the standalone M4 stack over manually-created resources with the same physical names. Import/adopt those resources into CloudFormation first, or deploy the stack with non-conflicting names and migrate deliberately.
 
 The SES sender supplied as `SesFromEmail` must already be verified. Accounts still in the SES sandbox can send only to verified recipients.
 
@@ -43,4 +45,4 @@ Deployment reference: https://developers.google.com/workspace/meet/add-ons/guide
 - Audio upload is accepted by the UI contract, but completion is rejected until a `BATCH_TRANSCRIPTION` worker using Amazon Transcribe is implemented.
 - The Meet side panel and secure internal meeting lookup are implemented.
 - Google OAuth connect/callback, one-time state validation and token exchange are implemented. User tokens are stored in the encrypted identity table; OAuth client credentials remain in Secrets Manager.
-- Calendar event synchronization still needs to use the stored refresh token and map Google conference creation states.
+- Calendar event synchronization uses the stored refresh token, creates Google conference data and stores the Google event/meeting references.

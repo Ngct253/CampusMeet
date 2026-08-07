@@ -1,14 +1,40 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: CampusMeet user-content storage and AI job orchestration owned by M4.
+Transform: AWS::Serverless-2016-10-31
+Description: CampusMeet user content, orchestration, reminders, and email infrastructure owned by M4.
 
 Parameters:
   Environment:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+  DataTablePrefix:
+    Type: String
+    Default: campusmeet-dev
+    AllowedPattern: '^[a-z0-9-]+$'
+    Description: Prefix of the separately deployed five-table data foundation.
   AIWorkerFunctionArn:
     Type: String
     AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:.+$'
+    Description: ARN of the M5-owned AI worker invoked by the M4 state machine.
+  SesFromEmail:
+    Type: String
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    Description: SES-verified sender address used by the reminder Lambda.
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    Timeout: 10
+    MemorySize: 256
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+    Tags: &SamTags
+      Project: CampusMeet
+      Environment: !Ref Environment
+      ManagedBy: IaC
+      Module: M4
 
 Resources:
   UserContentBucket:
@@ -43,9 +69,10 @@ Resources:
             ExpirationInDays: 7
             TagFilters:
               - { Key: retention, Value: raw-audio }
-      Tags:
+      Tags: &ResourceTags
         - { Key: Project, Value: CampusMeet }
         - { Key: Environment, Value: !Ref Environment }
+        - { Key: ManagedBy, Value: IaC }
         - { Key: Module, Value: M4 }
 
   AIOrchestrationRole:
@@ -65,6 +92,7 @@ Resources:
               - Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource: !Ref AIWorkerFunctionArn
+      Tags: *ResourceTags
 
   AIJobStateMachine:
     Type: AWS::StepFunctions::StateMachine
@@ -95,13 +123,99 @@ Resources:
             }
           }
         }
-      Tags:
-        - { Key: Project, Value: CampusMeet }
-        - { Key: Environment, Value: !Ref Environment }
-        - { Key: Module, Value: M4 }
+      Tags: *ResourceTags
+
+  SesConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties: { Name: !Sub 'campusmeet-${Environment}' }
+
+  ReminderLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-reminder'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: ReminderDelivery
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadMeetingAndWriteNotification
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:ConditionCheckItem
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data/index/*'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity'
+                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity/index/*'
+              - Sid: SendReminderEmail
+                Effect: Allow
+                Action: ses:SendEmail
+                Resource: '*'
+      Tags: *ResourceTags
+
+  ReminderFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints: [services/api/src/index.ts]
+        Target: es2022
+        Minify: false
+    Properties:
+      FunctionName: !Sub 'campusmeet-${Environment}-reminder'
+      CodeUri: ..
+      Handler: services/api/src/index.reminderHandler
+      Role: !GetAtt ReminderLambdaRole.Arn
+      Environment:
+        Variables:
+          MEETING_DATA_TABLE: !Sub '${DataTablePrefix}-meeting-data'
+          IDENTITY_TABLE: !Sub '${DataTablePrefix}-identity'
+          SES_CONFIGURATION_SET: !Ref SesConfigurationSet
+          SES_FROM_EMAIL: !Ref SesFromEmail
+      Tags: *SamTags
+
+  SchedulerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'campusmeet-${Environment}-scheduler'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeReminderOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ReminderFunction.Arn
+      Tags: *ResourceTags
+
+  ReminderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ReminderFunction}'
+      RetentionInDays: 14
+      Tags: *ResourceTags
 
 Outputs:
-  UserContentBucketName:
-    Value: !Ref UserContentBucket
-  AIStateMachineArn:
-    Value: !Ref AIJobStateMachine
+  UserContentBucketName: { Value: !Ref UserContentBucket }
+  AIStateMachineArn: { Value: !Ref AIJobStateMachine }
+  ReminderFunctionArn: { Value: !GetAtt ReminderFunction.Arn }
+  SchedulerExecutionRoleArn: { Value: !GetAtt SchedulerExecutionRole.Arn }
+  SesConfigurationSetName: { Value: !Ref SesConfigurationSet }

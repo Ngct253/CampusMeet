@@ -103,7 +103,7 @@ Bucket user-content phải có lifecycle/retention phù hợp với loại dữ 
 
 Mỗi entity logic vẫn tồn tại. Việc gom bảng dùng composite `PK/SK`, sparse GSI và item collection; không nhồi toàn bộ project thành một item hoặc một partition.
 
-`infra/data-foundation.yaml` là data stack độc lập. `infra/template.yaml` là application stack và chỉ tham chiếu tên 5 bảng qua `DataTablePrefix`; nó không tạo lại DynamoDB tables.
+`infra/data-foundation.yaml` là data stack độc lập. `infra/user-content-orchestration.yaml` là stack do M4 sở hữu cho S3 user-content, Step Functions, Reminder Lambda, Scheduler role và SES configuration set. `infra/template.yaml` là application stack; nó tham chiếu năm bảng qua `DataTablePrefix` và nhận outputs của stack M4 qua parameters, không tạo lại các resource đó.
 
 ## Quyết định AI và Google đã chốt
 
