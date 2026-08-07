@@ -134,7 +134,6 @@ for (const marker of [
   'Principal: { Service: bedrock.amazonaws.com }',
   'CampusMeetKnowledgeBase:',
   'Type: AWS::Bedrock::KnowledgeBase',
-  'EmbeddingDataType: FLOAT32',
   'Type: S3_VECTORS',
   'CampusMeetKnowledgeDataSource:',
   'Type: AWS::Bedrock::DataSource',
@@ -163,6 +162,12 @@ for (const marker of [
 ]) {
   assert.equal(appTemplate.includes(marker), true, `Application template is missing ${marker}.`);
 }
+
+assert.equal(
+  appTemplate.includes('EmbeddingModelConfiguration:'),
+  false,
+  'Cohere Embed Multilingual v3 has fixed dimensions; the Knowledge Base must not configure them.',
+);
 
 for (const removedExternalParameter of ['BedrockKnowledgeBaseId:', 'BedrockDataSourceId:']) {
   assert.equal(
