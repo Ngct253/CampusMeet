@@ -127,6 +127,7 @@ for (const marker of [
   'GoogleSyncWorkerFunction:',
   'Handler: services/api/src/index.googleSyncWorkerHandler',
   'GoogleSyncSchedulerRole:',
+  'GoogleSyncSchedulerInvokePolicy:',
   'GOOGLE_SYNC_WORKER_ARN:',
   'GOOGLE_SYNC_SCHEDULER_ROLE_ARN:',
   'Stream: !Ref MeetingDataStreamArn',
@@ -180,6 +181,32 @@ for (const marker of [
   assert.equal(appTemplate.includes(marker), true, `Application template is missing ${marker}.`);
 }
 
+const googleSyncSchedulerRole = appTemplate.slice(
+  appTemplate.indexOf('  GoogleSyncSchedulerRole:'),
+  appTemplate.indexOf('  GoogleSyncWorkerRole:'),
+);
+assert.equal(
+  googleSyncSchedulerRole.includes('GoogleSyncWorkerFunction'),
+  false,
+  'Google sync scheduler role must not depend on the worker function; keep invoke permission in the separate policy.',
+);
+
+const googleSyncSchedulerInvokePolicy = appTemplate.slice(
+  appTemplate.indexOf('  GoogleSyncSchedulerInvokePolicy:'),
+  appTemplate.indexOf('  GoogleSyncWorkerLogGroup:'),
+);
+for (const marker of [
+  'Type: AWS::IAM::Policy',
+  'Roles: [!Ref GoogleSyncSchedulerRole]',
+  'Action: lambda:InvokeFunction',
+  'Resource: !GetAtt GoogleSyncWorkerFunction.Arn',
+]) {
+  assert.equal(
+    googleSyncSchedulerInvokePolicy.includes(marker),
+    true,
+    `Google sync scheduler invoke policy is missing ${marker}.`,
+  );
+}
 assert.equal(
   appTemplate.includes('EmbeddingModelConfiguration:'),
   false,
