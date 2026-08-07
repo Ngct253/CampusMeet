@@ -185,8 +185,9 @@ export class DynamoDbIdentityRepository {
   }
 
   async createNotification(notification: Notification): Promise<void> {
-    await documentClient.send(
-      new PutCommand({
+    try {
+      await documentClient.send(
+        new PutCommand({
         TableName: tableName('IDENTITY_TABLE'),
         Item: {
           PK: `USER#${notification.userId}`,
@@ -203,8 +204,12 @@ export class DynamoDbIdentityRepository {
             : {}),
         },
         ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
-      }),
-    );
+        }),
+      );
+    } catch (error) {
+      if (error instanceof Error && error.name === 'ConditionalCheckFailedException') return;
+      throw error;
+    }
   }
 
   async listNotifications(userId: string): Promise<Notification[]> {

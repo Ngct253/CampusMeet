@@ -1,0 +1,17 @@
+{
+  "addOns": {
+    "common": {
+      "name": "CampusMeet",
+      "logoUrl": "https://d188dpo4eicp41.cloudfront.net/campusmeet-logo.svg"
+    },
+    "meet": {
+      "web": {
+        "sidePanelUrl": "https://d188dpo4eicp41.cloudfront.net/meet-addon/side-panel",
+        "supportsScreenSharing": false,
+        "addOnOrigins": ["https://d188dpo4eicp41.cloudfront.net"],
+        "logoUrl": "https://d188dpo4eicp41.cloudfront.net/campusmeet-logo.svg",
+        "darkModeLogoUrl": "https://d188dpo4eicp41.cloudfront.net/campusmeet-logo-dark.svg"
+      }
+    }
+  }
+}

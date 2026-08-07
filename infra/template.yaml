@@ -18,13 +18,41 @@ Parameters:
     Description: TODO(M5) Domain to configure after DNS ownership is confirmed.
   GoogleSecretReference:
     Type: String
-    Default: /campusmeet/dev/google-oauth
+    Default: campusmeet/dev/google-oauth
     NoEcho: true
     Description: Secrets Manager or Parameter Store reference only; never put the secret value here.
+  GoogleRedirectUri:
+    Type: String
+    AllowedPattern: '^https://.+/integrations/google/callback$'
+    Description: Exact callback URI registered on the Google OAuth web client.
+  FrontendOrigin:
+    Type: String
+    AllowedPattern: '^https://[^/]+$'
+    Description: HTTPS frontend origin used after Google OAuth completes.
+  SesFromEmail:
+    Type: String
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    Description: SES-verified sender address for reminder emails.
   UserContentBucketName:
     Type: String
     AllowedPattern: '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
     Description: Name of the M4-owned private user-content bucket; this stack does not create it.
+  AIStateMachineArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:states:[^:]+:[0-9]{12}:stateMachine:.+$'
+    Description: ARN of the M4-owned AI ingestion state machine.
+  ReminderFunctionArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:lambda:[^:]+:[0-9]{12}:function:.+$'
+    Description: ARN of the M4-owned reminder Lambda.
+  SchedulerExecutionRoleArn:
+    Type: String
+    AllowedPattern: '^arn:[^:]+:iam::[0-9]{12}:role/.+$'
+    Description: ARN of the M4-owned role used by EventBridge Scheduler.
+  SesConfigurationSetName:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9_-]{1,64}$'
+    Description: Name of the M4-owned SES configuration set.
   BedrockEmbeddingModelId:
     Type: String
     Default: cohere.embed-multilingual-v3
@@ -204,11 +232,25 @@ Resources:
               - Sid: PassReminderRole
                 Effect: Allow
                 Action: iam:PassRole
-                Resource: !GetAtt SchedulerExecutionRole.Arn
+                Resource: !Ref SchedulerExecutionRoleArn
               - Sid: ReadAuthenticatedUserProfile
                 Effect: Allow
                 Action: cognito-idp:AdminGetUser
                 Resource: !GetAtt UserPool.Arn
+              - Sid: ReadGoogleOAuthClientSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GoogleSecretReference}*'
+              - Sid: ManageUserContentObjects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/uploads/*'
+              - Sid: StartM4AIOrchestration
+                Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref AIStateMachineArn
       Tags: *ResourceTags
 
   ApiFunction:
@@ -232,12 +274,27 @@ Resources:
           AI_WORK_TABLE: !Sub '${DataTablePrefix}-ai-work'
           USER_POOL_ID: !Ref UserPool
           GOOGLE_SECRET_REFERENCE: !Ref GoogleSecretReference
+          GOOGLE_REDIRECT_URI: !Ref GoogleRedirectUri
+          FRONTEND_ORIGIN: !Ref FrontendOrigin
+          USER_CONTENT_BUCKET: !Ref UserContentBucketName
+          AI_STATE_MACHINE_ARN: !Ref AIStateMachineArn
+          REMINDER_FUNCTION_ARN: !Ref ReminderFunctionArn
+          SCHEDULER_EXECUTION_ROLE_ARN: !Ref SchedulerExecutionRoleArn
+          SES_FROM_EMAIL: !Ref SesFromEmail
+          SES_CONFIGURATION_SET: !Ref SesConfigurationSetName
       Events:
         Health:
           Type: HttpApi
           Properties:
             ApiId: !Ref HttpApi
             Path: /health
+            Method: GET
+            Auth: { Authorizer: NONE }
+        GoogleOAuthCallback:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /integrations/google/callback
             Method: GET
             Auth: { Authorizer: NONE }
         Proxy:
@@ -465,6 +522,7 @@ Resources:
         Minify: false
         Sourcemap: true
     Properties:
+      FunctionName: !Sub 'campusmeet-${Environment}-ai-worker'
       CodeUri: ..
       Handler: services/ai-worker/src/index.handler
       Role: !GetAtt AIWorkerRole.Arn
@@ -486,81 +544,6 @@ Resources:
         ManagedBy: IaC
         Component: AI
         Module: M5
-
-  ReminderLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub 'campusmeet-${Environment}-reminder'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: { Service: lambda.amazonaws.com }
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
-      Policies:
-        - PolicyName: ReminderDelivery
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: ReadMeetingAndWriteNotification
-                Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                  - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:ConditionCheckItem
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data'
-                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-meeting-data/index/*'
-                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity'
-                  - !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DataTablePrefix}-identity/index/*'
-              - Sid: SendReminderEmail
-                Effect: Allow
-                Action: ses:SendEmail
-                Resource: '*' # TODO(M5): scope after SES identities are known.
-      Tags: *ResourceTags
-
-  ReminderFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: esbuild
-      BuildProperties:
-        EntryPoints: [services/api/src/index.ts]
-        Target: es2022
-        Minify: false
-    Properties:
-      CodeUri: ..
-      Handler: services/api/src/index.reminderHandler
-      Role: !GetAtt ReminderLambdaRole.Arn
-      Environment:
-        Variables:
-          MEETING_DATA_TABLE: !Sub '${DataTablePrefix}-meeting-data'
-          IDENTITY_TABLE: !Sub '${DataTablePrefix}-identity'
-          SES_CONFIGURATION_SET: !Ref SesConfigurationSet
-      Tags: *SamTags
-
-  SchedulerExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub 'campusmeet-${Environment}-scheduler'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: { Service: scheduler.amazonaws.com }
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: InvokeReminderOnly
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource: !GetAtt ReminderFunction.Arn
-      Tags: *ResourceTags
 
   DeploymentRole:
     Type: AWS::IAM::Role
@@ -609,21 +592,10 @@ Resources:
       ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
       PreventUserExistenceErrors: ENABLED
 
-  SesConfigurationSet:
-    Type: AWS::SES::ConfigurationSet
-    Properties: { Name: !Sub 'campusmeet-${Environment}' }
-
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/lambda/${ApiFunction}'
-      RetentionInDays: 14
-      Tags: *ResourceTags
-
-  ReminderLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/${ReminderFunction}'
       RetentionInDays: 14
       Tags: *ResourceTags
 
