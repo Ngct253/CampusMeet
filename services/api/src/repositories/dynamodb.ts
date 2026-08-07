@@ -1,4 +1,4 @@
-﻿import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -7,19 +7,13 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
-  GroupRole,
   GoogleSyncStatus,
   IntegrationStatus,
   MeetingStatus,
   type Group,
   type Meeting,
 } from '@campusmeet/shared';
-import type {
-  GroupRepository,
-  MembershipAuthorizer,
-  MeetingPage,
-  MeetingRepository,
-} from '../domain/ports';
+import type { GroupRepository, MeetingPage, MeetingRepository } from '../domain/ports';
 import { MeetingError } from '../domain/meeting-errors';
 
 type Item = Record<string, unknown>;
@@ -37,6 +31,12 @@ const metaItem = (meeting: Meeting): Item => ({
   GSI1SK: `MEETING#${meeting.startsAt}#${meeting.id}`,
   GSI2PK: `USER#${meeting.organizerId}`,
   GSI2SK: `MEETING#${meeting.startsAt}#${meeting.id}`,
+  ...(meeting.googleMeetingId
+    ? {
+        GSI3PK: `EXTERNAL#GOOGLE_MEETING#${meeting.googleMeetingId}`,
+        GSI3SK: `MEETING#${meeting.id}`,
+      }
+    : {}),
 });
 const fromMeta = (item: Item): Meeting => ({
   id: String(item.id),
@@ -53,6 +53,8 @@ const fromMeta = (item: Item): Meeting => ({
     (item.googleSyncStatus as GoogleSyncStatus | undefined) ?? GoogleSyncStatus.NOT_REQUESTED,
   integrationStatus:
     (item.integrationStatus as IntegrationStatus | undefined) ?? IntegrationStatus.NOT_CONNECTED,
+  ...(item.googleEventId ? { googleEventId: String(item.googleEventId) } : {}),
+  ...(item.googleMeetingId ? { googleMeetingId: String(item.googleMeetingId) } : {}),
   ...(item.meetUrl ? { meetUrl: String(item.meetUrl) } : {}),
   createdAt: String(item.createdAt),
   createdBy: String(item.createdBy),
@@ -63,16 +65,44 @@ const fromMeta = (item: Item): Meeting => ({
   ...(item.cancelledBy ? { cancelledBy: String(item.cancelledBy) } : {}),
   ...(item.cancellationReason ? { cancellationReason: String(item.cancellationReason) } : {}),
 });
-const encodeCursor = (key?: Item) =>
-  key ? Buffer.from(JSON.stringify(key), 'utf8').toString('base64url') : undefined;
-const decodeCursor = (cursor?: string): Item | undefined => {
+type MeetingCursor = { v: 1; groupId: string; startsAt: string; meetingId: string };
+const encodeCursor = (groupId: string, key?: Item) => {
+  if (!key) return undefined;
+  const match = /^MEETING#(.+)#([^#]+)$/.exec(String(key.GSI1SK ?? ''));
+  if (!match || key.GSI1PK !== `GROUP#${groupId}` || key.PK !== `MEETING#${match[2]}`) {
+    throw new MeetingError('VALIDATION_ERROR', 'KhÃ´ng thá»ƒ táº¡o cursor cuá»™c há»p.');
+  }
+  const value: MeetingCursor = { v: 1, groupId, startsAt: match[1]!, meetingId: match[2]! };
+  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+};
+const decodeCursor = (groupId: string, cursor?: string): Item | undefined => {
   if (!cursor) return undefined;
   try {
-    const value: unknown = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
-    return value as Item;
+    if (!/^[A-Za-z0-9_-]+$/.test(cursor)) throw new Error();
+    const value = JSON.parse(
+      Buffer.from(cursor, 'base64url').toString('utf8'),
+    ) as Partial<MeetingCursor>;
+    if (
+      value.v !== 1 ||
+      value.groupId !== groupId ||
+      typeof value.startsAt !== 'string' ||
+      !Number.isFinite(Date.parse(value.startsAt)) ||
+      typeof value.meetingId !== 'string' ||
+      !value.meetingId ||
+      value.meetingId.includes('#')
+    )
+      throw new Error();
+    return {
+      PK: `MEETING#${value.meetingId}`,
+      SK: 'META',
+      GSI1PK: `GROUP#${groupId}`,
+      GSI1SK: `MEETING#${value.startsAt}#${value.meetingId}`,
+    };
   } catch {
-    throw new MeetingError('VALIDATION_ERROR', 'Cursor không hợp lệ.');
+    throw new MeetingError(
+      'VALIDATION_ERROR',
+      'Cursor khÃ´ng há»£p lá»‡ hoáº·c khÃ´ng thuá»™c nhÃ³m.',
+    );
   }
 };
 const mapAwsError = (error: unknown): never => {
@@ -85,8 +115,8 @@ const mapAwsError = (error: unknown): never => {
 export class DynamoDbGroupRepository implements GroupRepository {
   constructor(
     private readonly db = client,
-    private readonly table =
-      process.env.COLLABORATION_TABLE ?? '__UNCONFIGURED_COLLABORATION_TABLE__',
+    private readonly table = process.env.COLLABORATION_TABLE ??
+      '__UNCONFIGURED_COLLABORATION_TABLE__',
   ) {}
   async getById(id: string): Promise<Group | null> {
     const result = await this.db.send(
@@ -95,34 +125,11 @@ export class DynamoDbGroupRepository implements GroupRepository {
     return result.Item ? (result.Item as unknown as Group) : null;
   }
 }
-export class DynamoDbMembershipAuthorizer implements MembershipAuthorizer {
-  constructor(
-    private readonly db = client,
-    private readonly table =
-      process.env.COLLABORATION_TABLE ?? '__UNCONFIGURED_COLLABORATION_TABLE__',
-  ) {}
-  async getMembership(groupId: string, userId: string) {
-    const result = await this.db.send(
-      new GetCommand({
-        TableName: this.table,
-        Key: { PK: `GROUP#${groupId}`, SK: `MEMBER#${userId}` },
-        ConsistentRead: true,
-      }),
-    );
-    if (!result.Item) return null;
-    return {
-      groupId,
-      userId,
-      role: result.Item.role as GroupRole,
-      active: result.Item.active === true || result.Item.status === 'ACTIVE',
-    };
-  }
-}
 export class DynamoDbMeetingRepository implements MeetingRepository {
   constructor(
     private readonly db = client,
-    private readonly table =
-      process.env.MEETING_DATA_TABLE ?? '__UNCONFIGURED_MEETING_DATA_TABLE__',
+    private readonly table = process.env.MEETING_DATA_TABLE ??
+      '__UNCONFIGURED_MEETING_DATA_TABLE__',
   ) {}
   async create(meeting: Meeting): Promise<Meeting> {
     const items = this.puts(meeting);
@@ -161,6 +168,21 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
       .sort((a, b) => a.order - b.order);
     return meeting;
   }
+
+  async getByGoogleMeetingId(googleMeetingId: string): Promise<Meeting | null> {
+    const response = await this.db.send(
+      new QueryCommand({
+        TableName: this.table,
+        IndexName: 'GSI3',
+        KeyConditionExpression: 'GSI3PK = :external',
+        ExpressionAttributeValues: {
+          ':external': `EXTERNAL#GOOGLE_MEETING#${googleMeetingId}`,
+        },
+        Limit: 1,
+      }),
+    );
+    return response.Items?.[0] ? fromMeta(response.Items[0]) : null;
+  }
   async resolveGroupId(id: string) {
     const result = await this.db.send(
       new GetCommand({
@@ -172,7 +194,7 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
     );
     return result.Item?.groupId ? String(result.Item.groupId) : null;
   }
-  async listByGroup(groupId: string, limit = 100, cursor?: string): Promise<MeetingPage> {
+  async listByGroup(groupId: string, limit = 20, cursor?: string): Promise<MeetingPage> {
     const result = await this.db.send(
       new QueryCommand({
         TableName: this.table,
@@ -180,13 +202,15 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
         KeyConditionExpression: 'GSI1PK = :pk AND begins_with(GSI1SK, :prefix)',
         ExpressionAttributeValues: { ':pk': `GROUP#${groupId}`, ':prefix': 'MEETING#' },
         Limit: limit,
-        ExclusiveStartKey: decodeCursor(cursor),
+        ExclusiveStartKey: decodeCursor(groupId, cursor),
         ScanIndexForward: true,
       }),
     );
     return {
       items: (result.Items ?? []).map(fromMeta),
-      ...(result.LastEvaluatedKey ? { nextCursor: encodeCursor(result.LastEvaluatedKey) } : {}),
+      ...(result.LastEvaluatedKey
+        ? { nextCursor: encodeCursor(groupId, result.LastEvaluatedKey) }
+        : {}),
     };
   }
   async update(meeting: Meeting, expectedVersion: number) {

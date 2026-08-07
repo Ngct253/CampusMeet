@@ -3,10 +3,12 @@ import { readFile } from 'node:fs/promises';
 
 const dataTemplatePath = new URL('../infra/data-foundation.yaml', import.meta.url);
 const appTemplatePath = new URL('../infra/template.yaml', import.meta.url);
+const m4TemplatePath = new URL('../infra/user-content-orchestration.yaml', import.meta.url);
 const dataModelPath = new URL('../docs/dynamodb-data-model.md', import.meta.url);
 
 const dataTemplate = JSON.parse(await readFile(dataTemplatePath, 'utf8'));
 const appTemplate = await readFile(appTemplatePath, 'utf8');
+const m4Template = await readFile(m4TemplatePath, 'utf8');
 const dataModel = await readFile(dataModelPath, 'utf8');
 
 const expected = new Map([
@@ -91,7 +93,7 @@ for (const variable of [
   );
 }
 
-for (const invalidAction of ['dynamodb:TransactGetItems', 'dynamodb:TransactWriteItems']) {
+for (const invalidAction of ['dynamodb:TransactGetItems']) {
   assert.equal(
     appTemplate.includes(invalidAction),
     false,
@@ -190,6 +192,47 @@ assert.equal(
   false,
   'M5 must not create the M4-owned Step Functions state machine.',
 );
+
+for (const marker of [
+  'UserContentBucket:',
+  'Type: AWS::StepFunctions::StateMachine',
+  'ReminderFunction:',
+  'Handler: services/api/src/index.reminderHandler',
+  'SchedulerExecutionRole:',
+  'SesConfigurationSet:',
+  'UserContentBucketName:',
+  'AIStateMachineArn:',
+  'ReminderFunctionArn:',
+  'SchedulerExecutionRoleArn:',
+  'SesConfigurationSetName:',
+  'ExistingUserContentBucketName:',
+  'CreateUserContentBucket:',
+]) {
+  assert.equal(m4Template.includes(marker), true, `M4 template is missing ${marker}.`);
+}
+
+assert.equal(
+  m4Template.includes('"Arguments":'),
+  false,
+  'The JSONPath Step Functions definition must use Parameters instead of JSONata Arguments.',
+);
+assert.equal(
+  m4Template.includes('"Parameters":'),
+  true,
+  'The Lambda optimized integration must define JSONPath Parameters.',
+);
+
+for (const marker of [
+  '  ReminderFunction:',
+  '  SchedulerExecutionRole:',
+  '  SesConfigurationSet:',
+]) {
+  assert.equal(
+    appTemplate.includes(marker),
+    false,
+    `Application template must consume, not create, the M4 resource ${marker.trim()}.`,
+  );
+}
 
 assert.equal(
   appTemplate.includes('USER_POOL_ID: !Ref UserPool'),

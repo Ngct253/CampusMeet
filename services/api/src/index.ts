@@ -17,7 +17,12 @@ import {
   myInvitationsHandler,
 } from './handlers/invitations';
 import { healthHandler } from './handlers/health';
-import { integrationsHandler } from './handlers/integrations';
+import {
+  attachmentDownloadUrlHandler,
+  completeAttachmentUploadHandler,
+  meetingAttachmentsHandler,
+} from './handlers/attachments';
+import { googleOAuthCallbackHandler, integrationsHandler } from './handlers/integrations';
 import {
   groupSearchHandler,
   meetingChatHandler,
@@ -33,8 +38,10 @@ import {
 } from './handlers/meetings';
 import { meHandler } from './handlers/me';
 import { minutesHandler } from './handlers/minutes';
+import { actionItemTaskHandler } from './handlers/action-item-tasks';
 import { notificationsHandler, readNotificationHandler } from './handlers/notifications';
-import { tasksHandler } from './handlers/tasks';
+import { meetContextHandler } from './handlers/meet-context';
+import { tasksHandler, taskStatusHandler } from './handlers/tasks';
 import { getRequestId } from './utils/request';
 import { notImplemented } from './utils/response';
 import { createRouter } from './utils/router';
@@ -57,6 +64,22 @@ const findRoute = createRouter([
   { method: 'GET', path: '/meetings', handler: myMeetingsHandler },
   { method: 'ANY', path: '/meetings/:meetingId', handler: meetingDetailHandler },
   { method: 'POST', path: '/meetings/:meetingId/cancel', handler: cancelMeetingHandler },
+  { method: 'GET', path: '/meetings/:meetingId/attachments', handler: meetingAttachmentsHandler },
+  {
+    method: 'POST',
+    path: '/meetings/:meetingId/attachments/upload-url',
+    handler: meetingAttachmentsHandler,
+  },
+  {
+    method: 'POST',
+    path: '/meetings/:meetingId/attachments/:attachmentId/complete',
+    handler: completeAttachmentUploadHandler,
+  },
+  {
+    method: 'POST',
+    path: '/attachments/:attachmentId/download-url',
+    handler: attachmentDownloadUrlHandler,
+  },
   { method: 'GET', path: '/invitations', handler: myInvitationsHandler },
   {
     method: 'POST',
@@ -71,12 +94,22 @@ const findRoute = createRouter([
   { method: 'GET', path: '/invitations/:token', handler: invitationDetailsHandler },
   { method: 'POST', path: '/invitations/:token/accept', handler: acceptInvitationHandler },
   { method: 'POST', path: '/invitations/:token/decline', handler: declineInvitationHandler },
-  { method: 'ANY', path: '/minutes', handler: minutesHandler },
-  { method: 'ANY', path: '/tasks', handler: tasksHandler },
-  { method: 'ANY', path: '/dashboard', handler: dashboardHandler },
+  { method: 'GET', path: '/meetings/:meetingId/minutes', handler: minutesHandler },
+  { method: 'PUT', path: '/meetings/:meetingId/minutes', handler: minutesHandler },
+  {
+    method: 'POST',
+    path: '/meetings/:meetingId/minutes/action-items/:actionItemId/task',
+    handler: actionItemTaskHandler,
+  },
+  { method: 'GET', path: '/tasks', handler: tasksHandler },
+  { method: 'POST', path: '/tasks', handler: tasksHandler },
+  { method: 'PATCH', path: '/tasks/:taskId/status', handler: taskStatusHandler },
+  { method: 'GET', path: '/dashboard', handler: dashboardHandler },
   { method: 'ANY', path: '/notifications', handler: notificationsHandler },
   { method: 'POST', path: '/notifications/:notificationId/read', handler: readNotificationHandler },
-  { method: 'ANY', path: '/integrations', handler: integrationsHandler },
+  { method: 'POST', path: '/integrations/google/connect', handler: integrationsHandler },
+  { method: 'GET', path: '/integrations/google/callback', handler: googleOAuthCallbackHandler },
+  { method: 'GET', path: '/integrations/google/meet-context', handler: meetContextHandler },
   { method: 'POST', path: '/meetings/:meetingId/ai/chat', handler: meetingChatHandler },
   { method: 'POST', path: '/groups/:groupId/ai/search', handler: groupSearchHandler },
   { method: 'POST', path: '/meetings/:meetingId/ai/minutes-draft', handler: minutesDraftHandler },

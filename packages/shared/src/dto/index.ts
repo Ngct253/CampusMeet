@@ -1,14 +1,12 @@
 import type {
   AgendaItem,
   InvitationDetails,
+  ISODateTime,
   MeetingMinutes,
-  Notification,
-  Task,
-  User,
-  Group,
   Meeting,
+  Task,
 } from '../types';
-import type { Priority, TaskStatus } from '../enums';
+import { Priority, TaskStatus } from '../enums';
 import { z } from 'zod';
 
 export const groupInputSchema = z.object({
@@ -67,12 +65,58 @@ export const meetingInputSchema = meetingFieldsSchema.superRefine((value, contex
     });
   }
 });
-export const updateMeetingInputSchema = meetingFieldsSchema.partial();
+export const updateMeetingInputSchema = meetingFieldsSchema.partial().extend({
+  version: z.number().int().positive(),
+});
 export const cancelMeetingInputSchema = z.object({
   reason: z.string().trim().max(500).optional(),
   version: z.number().int().positive().optional(),
 });
 
+export const taskInputSchema = z
+  .object({
+    groupId: z.string().trim().min(1),
+    title: z.string().trim().min(1).max(200),
+    assigneeId: z.string().trim().min(1),
+    priority: z.nativeEnum(Priority),
+    dueAt: z.string().datetime({ offset: true }).optional(),
+    sourceMeetingId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+export const updateTaskStatusInputSchema = z
+  .object({
+    status: z.nativeEnum(TaskStatus),
+    expectedVersion: z.number().int().nonnegative(),
+  })
+  .strict();
+const minutesDecisionInputSchema = z
+  .object({ content: z.string().trim().min(1).max(1000) })
+  .strict();
+const minutesActionItemInputSchema = z
+  .object({
+    id: z.string().trim().min(1).optional(),
+    content: z.string().trim().min(1).max(1000),
+    assigneeId: z.string().trim().min(1).optional(),
+    dueAt: z.string().datetime({ offset: true }).optional(),
+  })
+  .strict();
+export const meetingMinutesInputSchema = z
+  .object({
+    summary: z.string().trim().min(1).max(2000),
+    discussion: z.string().trim().max(10000),
+    decisions: z.array(minutesDecisionInputSchema).max(50),
+    actionItems: z.array(minutesActionItemInputSchema).max(100),
+    expectedVersion: z.number().int().min(0).max(999999),
+  })
+  .strict();
+export const convertActionItemToTaskInputSchema = z
+  .object({
+    expectedMinutesVersion: z.number().int().min(1).max(999999),
+    priority: z.nativeEnum(Priority),
+    assigneeId: z.string().trim().min(1).optional(),
+    title: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
 export interface CreateGroupRequest {
   name: string;
   description?: string;
@@ -97,7 +141,7 @@ export interface CreateMeetingRequest {
   startsAt: string;
   endsAt: string;
 }
-export type UpdateMeetingRequest = Partial<CreateMeetingRequest> & { version?: number };
+export type UpdateMeetingRequest = Partial<CreateMeetingRequest> & { version: number };
 export interface CancelMeetingRequest {
   reason?: string;
   version?: number;
@@ -115,28 +159,31 @@ export interface CursorPage<T> {
   nextCursor?: string;
 }
 export type MeetingTimelineResponse = CursorPage<Meeting>;
+/** @deprecated Use UpdateMeetingMinutesRequest for the versioned meeting-scoped Minutes API. */
 export interface CreateMinutesRequest {
   meetingId: string;
   summary: string;
   decisions: string[];
   actionItems: Array<{ content: string; assigneeId?: string }>;
 }
-export interface CreateTaskRequest {
-  groupId: string;
-  title: string;
-  assigneeId: string;
-  priority: Priority;
-  dueAt?: string;
+export type UpdateMeetingMinutesRequest = z.infer<typeof meetingMinutesInputSchema>;
+export type ConvertActionItemToTaskRequest = z.infer<typeof convertActionItemToTaskInputSchema>;
+export interface ConvertActionItemToTaskResponse {
+  task: Task;
+  minutes: MeetingMinutes;
 }
-export interface UpdateTaskStatusRequest {
-  status: TaskStatus;
+export type CreateTaskRequest = z.infer<typeof taskInputSchema>;
+export type UpdateTaskStatusRequest = z.infer<typeof updateTaskStatusInputSchema>;
+export interface DashboardTaskSummary {
+  total: number;
+  todo: number;
+  doing: number;
+  done: number;
+  overdue: number;
 }
 export interface DashboardResponse {
-  user: User;
-  groups: Group[];
-  upcomingMeetings: Meeting[];
-  tasks: Task[];
-  notifications: Notification[];
+  generatedAt: ISODateTime;
+  tasks: DashboardTaskSummary;
 }
 export interface ApiSuccessResponse<T> {
   success: true;
@@ -150,6 +197,7 @@ export interface ApiErrorResponse {
   requestId: string;
   isMock?: boolean;
 }
+/** @deprecated The versioned Minutes API returns ApiSuccessResponse<MeetingMinutes>. */
 export interface MinutesResponse {
   minutes: MeetingMinutes;
 }

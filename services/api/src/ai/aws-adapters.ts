@@ -2,21 +2,18 @@ import { createHash, randomUUID } from 'node:crypto';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
-  BatchGetCommand,
   DynamoDBDocumentClient,
   GetCommand,
   TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { GroupRole, type AIJob } from '@campusmeet/shared';
-import { requireGroupMembership } from '../middleware/authorization';
+import { MeetingService } from '../application/meeting-service';
+import type { MeetingAccessBoundary } from '../domain/ports';
+import { requireGroupMembership, SharedMembershipAuthorizer } from '../middleware/authorization';
+import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
 import { ForbiddenError, ResourceNotFoundError, ServiceConfigurationError } from '../utils/errors';
 import type { AIJobOrchestrator, MeetingScopeReader, MembershipAuthorizer } from './ports';
-
-interface MeetingRecord {
-  groupId?: string;
-  organizerId?: string;
-}
 
 const requireValue = (value: string | undefined, name: string): string => {
   if (!value) throw new ServiceConfigurationError(`Thiếu cấu hình ${name}.`);
@@ -25,8 +22,7 @@ const requireValue = (value: string | undefined, name: string): string => {
 
 export class DynamoAiAccessAdapter implements MembershipAuthorizer, MeetingScopeReader {
   constructor(
-    private readonly database: DynamoDBDocumentClient,
-    private readonly meetingTable: string,
+    private readonly meetings: MeetingAccessBoundary,
     private readonly authorizeGroup: typeof requireGroupMembership = requireGroupMembership,
   ) {}
 
@@ -55,37 +51,17 @@ export class DynamoAiAccessAdapter implements MembershipAuthorizer, MeetingScope
   async requireMeetingsInGroup(meetingIds: string[], groupId: string): Promise<void> {
     if (!meetingIds.length) throw new ForbiddenError('Danh sách cuộc họp không hợp lệ.');
     const uniqueIds = [...new Set(meetingIds)];
-    const result = await this.database.send(
-      new BatchGetCommand({
-        RequestItems: {
-          [this.meetingTable]: {
-            Keys: uniqueIds.map((meetingId) => ({ PK: `MEETING#${meetingId}`, SK: 'META' })),
-            ConsistentRead: true,
-            ProjectionExpression: 'PK, groupId',
-          },
-        },
-      }),
+    const meetings = await Promise.all(
+      uniqueIds.map((meetingId) => this.meetings.getMeeting(meetingId)),
     );
-    const meetings = (result.Responses?.[this.meetingTable] ?? []) as MeetingRecord[];
-    if (
-      meetings.length !== uniqueIds.length ||
-      meetings.some((meeting) => meeting.groupId !== groupId)
-    ) {
+    if (meetings.some((meeting) => !meeting || meeting.groupId !== groupId)) {
       throw new ForbiddenError('Mọi cuộc họp được chọn phải thuộc cùng nhóm.');
     }
   }
 
   private async getMeeting(meetingId: string): Promise<{ groupId: string; organizerId?: string }> {
-    const result = await this.database.send(
-      new GetCommand({
-        TableName: this.meetingTable,
-        Key: { PK: `MEETING#${meetingId}`, SK: 'META' },
-        ConsistentRead: true,
-        ProjectionExpression: 'groupId, organizerId',
-      }),
-    );
-    const meeting = result.Item as MeetingRecord | undefined;
-    if (!meeting?.groupId) throw new ResourceNotFoundError('Không tìm thấy cuộc họp.');
+    const meeting = await this.meetings.getMeeting(meetingId);
+    if (!meeting) throw new ResourceNotFoundError('Không tìm thấy cuộc họp.');
     return { groupId: meeting.groupId, organizerId: meeting.organizerId };
   }
 }
@@ -223,7 +199,11 @@ export const createProductionAIRequestServiceAdapters = () => {
   const aiWorkTable = requireValue(process.env.AI_WORK_TABLE, 'AI_WORK_TABLE');
   const stateMachineArn = requireValue(process.env.AI_STATE_MACHINE_ARN, 'AI_STATE_MACHINE_ARN');
   const database = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-  const access = new DynamoAiAccessAdapter(database, meetingTable);
+  const meetingBoundary = new MeetingService(
+    new DynamoDbMeetingRepository(database, meetingTable),
+    new SharedMembershipAuthorizer(),
+  );
+  const access = new DynamoAiAccessAdapter(meetingBoundary);
   const jobs = new StepFunctionsAIJobOrchestrator(
     database,
     new SFNClient({}),
@@ -231,4 +211,16 @@ export const createProductionAIRequestServiceAdapters = () => {
     stateMachineArn,
   );
   return { access, meetings: access, jobs };
+};
+
+export const createProductionAIJobOrchestrator = (): AIJobOrchestrator => {
+  const aiWorkTable = requireValue(process.env.AI_WORK_TABLE, 'AI_WORK_TABLE');
+  const stateMachineArn = requireValue(process.env.AI_STATE_MACHINE_ARN, 'AI_STATE_MACHINE_ARN');
+  const database = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  return new StepFunctionsAIJobOrchestrator(
+    database,
+    new SFNClient({}),
+    aiWorkTable,
+    stateMachineArn,
+  );
 };

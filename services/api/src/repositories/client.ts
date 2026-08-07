@@ -4,8 +4,20 @@ import { ServiceConfigurationError } from '../utils/errors';
 
 export const documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
-export const tableName = (name: 'COLLABORATION_TABLE' | 'IDENTITY_TABLE' | 'MEETING_TABLE') => {
-  const value = process.env[name];
+type TableEnvironmentName =
+  | 'COLLABORATION_TABLE'
+  | 'IDENTITY_TABLE'
+  | 'MEETING_TABLE'
+  | 'MEETING_DATA_TABLE'
+  | 'TASK_DATA_TABLE';
+
+export const tableName = (name: TableEnvironmentName) => {
+  const value =
+    name === 'MEETING_TABLE'
+      ? (process.env.MEETING_DATA_TABLE ?? process.env.MEETING_TABLE)
+      : name === 'MEETING_DATA_TABLE'
+        ? (process.env.MEETING_DATA_TABLE ?? process.env.MEETING_TABLE)
+        : process.env[name];
   if (!value) throw new ServiceConfigurationError(`Thiếu cấu hình ${name}.`);
   return value;
 };

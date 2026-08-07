@@ -86,6 +86,8 @@ export interface Meeting {
   googleSyncStatus: GoogleSyncStatus;
   /** @deprecated Google synchronization state is exposed through googleSyncStatus. */
   integrationStatus: IntegrationStatus;
+  googleEventId?: string;
+  googleMeetingId?: string;
   meetUrl?: string;
   createdAt: ISODateTime;
   createdBy: string;
@@ -116,9 +118,14 @@ export interface ActionItem {
 export interface MeetingMinutes {
   id: string;
   meetingId: string;
+  groupId: string;
   summary: string;
+  discussion: string;
   decisions: Decision[];
   actionItems: ActionItem[];
+  version: number;
+  createdBy: string;
+  createdAt: ISODateTime;
 }
 export interface Task {
   id: string;
@@ -129,6 +136,12 @@ export interface Task {
   priority: Priority;
   dueAt?: ISODateTime;
   sourceMeetingId?: string;
+  sourceActionItemId?: string;
+  createdBy?: string;
+  createdAt?: ISODateTime;
+  updatedAt?: ISODateTime;
+  completedAt?: ISODateTime;
+  version?: number;
 }
 export interface Notification {
   id: string;

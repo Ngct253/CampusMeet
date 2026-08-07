@@ -1,5 +1,18 @@
 import { fetchAuthSession } from 'aws-amplify/auth';
+import type { ApiErrorResponse } from '@campusmeet/shared';
 import { environment } from '../config/environment';
+
+export class ApiClientError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code: string,
+    public readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = 'ApiClientError';
+  }
+}
 
 export const apiClient = {
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -23,10 +36,20 @@ export const apiClient = {
     }
     const payload: unknown = await response.json();
     if (!response.ok) {
-      const message = typeof payload === 'object' && payload && 'error' in payload
-        ? (payload as { error?: { message?: string } }).error?.message
-        : undefined;
-      throw new Error(message || `API CampusMeet trả lỗi ${response.status}.`);
+      const apiError =
+        typeof payload === 'object' &&
+        payload !== null &&
+        'success' in payload &&
+        payload.success === false &&
+        'error' in payload
+          ? (payload as ApiErrorResponse).error
+          : undefined;
+      throw new ApiClientError(
+        apiError?.message || `API CampusMeet trả lỗi ${response.status}.`,
+        response.status,
+        apiError?.code || 'HTTP_ERROR',
+        apiError?.details,
+      );
     }
     return payload as T;
   },

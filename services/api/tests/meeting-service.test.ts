@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GroupRole, MeetingStatus, type CreateMeetingRequest } from '@campusmeet/shared';
 import { MeetingService } from '../src/application/meeting-service';
 import {
@@ -35,9 +35,9 @@ describe('MeetingService', () => {
   it('tạo, đọc và list meeting cho active member', async () => {
     const { service } = setup();
     const created = await service.create('g1', 'admin', input());
-    expect(created.createdBy).toBe('admin');
+    expect(created).toMatchObject({ createdBy: 'admin', organizerId: 'admin' });
     expect((await service.detail(created.id, 'member')).agenda[0]?.title).toBe('Goals');
-    expect(await service.list('g1', 'member')).toHaveLength(1);
+    expect((await service.list('g1', 'member')).items).toHaveLength(1);
   });
   it('từ chối end time không sau start time', async () => {
     const { service } = setup();
@@ -87,12 +87,17 @@ describe('MeetingService', () => {
       id: first.id,
       groupId: 'g1',
       createdBy: 'admin',
+      organizerId: 'admin',
       title: 'Updated',
       version: 2,
     });
     await expect(
       service.update(first.id, { title: 'stale', version: 1 }, 'admin'),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await service.detail(first.id, 'admin')).toMatchObject({
+      title: 'Updated',
+      version: 2,
+    });
   });
   it('từ chối lifecycle invalid', async () => {
     const { service, repository } = setup();
@@ -109,5 +114,109 @@ describe('MeetingService', () => {
     const twice = await service.cancel(first.id, 'admin', 'other');
     expect(twice.version).toBe(once.version);
     expect((await repository.getById(first.id))?.status).toBe(MeetingStatus.CANCELLED);
+  });
+
+  it('stores Google event details after creating a meeting', async () => {
+    const { repository, memberships } = setup();
+    const service = new MeetingService(
+      repository,
+      memberships,
+      () => new Date('2029-01-01T00:00:00Z'),
+      () => 'meeting-google',
+      {
+        createEvent: async () => ({
+          eventId: 'event-1',
+          googleMeetingId: 'abc-defg-hij',
+          meetUrl: 'https://meet.google.com/abc-defg-hij',
+        }),
+      },
+    );
+    await expect(service.create('g1', 'admin', input())).resolves.toMatchObject({
+      googleSyncStatus: 'READY',
+      integrationStatus: 'READY',
+      googleEventId: 'event-1',
+      googleMeetingId: 'abc-defg-hij',
+      version: 2,
+    });
+  });
+
+  it('keeps meetings when Google Calendar is temporarily unavailable', async () => {
+    const { repository, memberships } = setup();
+    const service = new MeetingService(
+      repository,
+      memberships,
+      () => new Date('2029-01-01T00:00:00Z'),
+      () => 'meeting-google-failed',
+      {
+        createEvent: async () => {
+          throw new Error('Google unavailable');
+        },
+      },
+    );
+    const created = await service.create('g1', 'admin', input());
+    expect(created).toMatchObject({
+      googleSyncStatus: 'FAILED_RETRYABLE',
+      integrationStatus: 'FAILED',
+      version: 2,
+    });
+    expect(await repository.getById(created.id)).not.toBeNull();
+  });
+
+  it('creates, reschedules, and cancels the one-time meeting reminder', async () => {
+    const { repository, memberships } = setup();
+    const reminders = {
+      schedule: vi.fn(async () => ({ scheduleId: 'schedule-1' })),
+      cancel: vi.fn(async () => undefined),
+    };
+    const service = new MeetingService(
+      repository,
+      memberships,
+      () => new Date('2029-01-01T00:00:00Z'),
+      () => 'meeting-reminder',
+      undefined,
+      reminders,
+    );
+
+    const created = await service.create('g1', 'admin', input());
+    expect(reminders.schedule).toHaveBeenLastCalledWith(created);
+
+    const updated = await service.update(
+      created.id,
+      { startsAt: '2030-01-01T12:00:00.000Z', endsAt: '2030-01-01T13:00:00.000Z', version: 1 },
+      'admin',
+    );
+    expect(reminders.schedule).toHaveBeenLastCalledWith(updated);
+    expect(reminders.schedule).toHaveBeenCalledTimes(2);
+
+    await service.cancel(updated.id, 'admin', undefined, updated.version);
+    expect(reminders.cancel).toHaveBeenCalledWith(updated.id);
+  });
+
+  it('keeps the persisted meeting when reminder scheduling fails', async () => {
+    const { repository, memberships } = setup();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const service = new MeetingService(
+      repository,
+      memberships,
+      () => new Date('2029-01-01T00:00:00Z'),
+      () => 'meeting-reminder-failed',
+      undefined,
+      {
+        schedule: async () => {
+          throw new Error('Scheduler unavailable');
+        },
+        cancel: async () => undefined,
+      },
+    );
+
+    await expect(service.create('g1', 'admin', input())).resolves.toMatchObject({
+      id: 'meeting-reminder-failed',
+    });
+    expect(await repository.getById('meeting-reminder-failed')).not.toBeNull();
+    expect(consoleError).toHaveBeenCalledWith(
+      'Meeting reminder scheduling failed',
+      expect.objectContaining({ meetingId: 'meeting-reminder-failed' }),
+    );
+    consoleError.mockRestore();
   });
 });

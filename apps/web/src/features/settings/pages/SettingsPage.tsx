@@ -1,13 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../../auth/AuthProvider';
 import { FeaturePage } from '../../../components/FeaturePage';
-import { getProfile, updateProfile } from '../service';
+import { connectGoogleCalendar, getProfile, updateProfile } from '../service';
 import './SettingsPage.css';
 
 export function SettingsPage() {
   const auth = useAuth();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const query = useQuery({ queryKey: ['profile'], queryFn: getProfile });
   const [displayName, setDisplayName] = useState('');
   const [emailNotificationsEnabled, setEmailNotificationsEnabled] = useState(true);
@@ -21,6 +23,10 @@ export function SettingsPage() {
         emailNotificationsEnabled,
       }),
     onSuccess: (profile) => queryClient.setQueryData(['profile'], profile),
+  });
+  const googleMutation = useMutation({
+    mutationFn: connectGoogleCalendar,
+    onSuccess: ({ authorizationUrl }) => window.location.assign(authorizationUrl),
   });
 
   useEffect(() => {
@@ -94,6 +100,28 @@ export function SettingsPage() {
           </form>
         </section>
       )}
+      <section className="app-panel settings-panel settings-integration-panel">
+        <div>
+          <span className="section-kicker">Tích hợp</span>
+          <h2>Google Calendar và Google Meet</h2>
+          <p>
+            Cho phép CampusMeet tạo sự kiện Calendar và liên kết phòng họp Google Meet thay mặt bạn.
+          </p>
+        </div>
+        {searchParams.get('google') === 'connected' && (
+          <p className="success" role="status">Đã kết nối tài khoản Google.</p>
+        )}
+        {googleMutation.isError && (
+          <p className="error" role="alert">{googleMutation.error.message}</p>
+        )}
+        <button
+          type="button"
+          disabled={googleMutation.isPending}
+          onClick={() => googleMutation.mutate()}
+        >
+          {googleMutation.isPending ? 'Đang chuyển tới Google…' : 'Kết nối Google Calendar'}
+        </button>
+      </section>
     </FeaturePage>
   );
 }

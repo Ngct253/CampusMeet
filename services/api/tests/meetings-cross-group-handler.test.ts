@@ -15,9 +15,8 @@ let createMeetingDetailHandler: typeof import('../src/handlers/meetings').create
 let createCancelMeetingHandler: typeof import('../src/handlers/meetings').createCancelMeetingHandler;
 
 beforeAll(async () => {
-  ({ createMeetingDetailHandler, createCancelMeetingHandler } = await import(
-    '../src/handlers/meetings'
-  ));
+  ({ createMeetingDetailHandler, createCancelMeetingHandler } =
+    await import('../src/handlers/meetings'));
 });
 
 const event = (method: string, userId: string, body?: unknown) => {
@@ -45,30 +44,64 @@ describe('meeting handler cross-group authorization', () => {
       () => new Date('2029-01-01T00:00:00.000Z'),
       () => 'm1',
     );
-    await service.create(
-      'group-a',
-      'admin-a',
-      {
-        title: 'Group A planning',
-        attendeeIds: ['member-a'],
-        startsAt: '2030-01-01T10:00:00.000Z',
-        endsAt: '2030-01-01T11:00:00.000Z',
-      },
-    );
+    await service.create('group-a', 'admin-a', {
+      title: 'Group A planning',
+      attendeeIds: ['member-a'],
+      startsAt: '2030-01-01T10:00:00.000Z',
+      endsAt: '2030-01-01T11:00:00.000Z',
+    });
     const requests = [
       [createMeetingDetailHandler(service), event('GET', 'admin-b')],
-      [createMeetingDetailHandler(service), event('PATCH', 'admin-b', { title: 'Forbidden' })],
+      [
+        createMeetingDetailHandler(service),
+        event('PATCH', 'admin-b', { title: 'Forbidden', version: 1 }),
+      ],
       [createCancelMeetingHandler(service), event('POST', 'admin-b', {})],
     ] as const;
     for (const [handler, request] of requests) {
       const response = await handler(request, {} as never, () => undefined);
-      if (!response || typeof response === 'string') throw new Error('Expected structured response');
-      expect(response.statusCode).toBe(403);
+      if (!response || typeof response === 'string')
+        throw new Error('Expected structured response');
+      expect(response.statusCode, request.requestContext.http.method).toBe(403);
       expect(JSON.parse(response.body ?? '{}')).toMatchObject({
         success: false,
         error: { code: 'FORBIDDEN' },
         requestId: 'test-request-id',
       });
     }
+  });
+
+  it('trả 409 cho PATCH stale version và không ghi đè dữ liệu mới', async () => {
+    const memberships = new InMemoryMembershipAuthorizer();
+    memberships.add('group-a', 'admin-a', GroupRole.GROUP_ADMIN);
+    const service = new MeetingService(
+      new InMemoryMeetingRepository(),
+      memberships,
+      () => new Date('2029-01-01T00:00:00.000Z'),
+      () => 'm1',
+    );
+    await service.create('group-a', 'admin-a', {
+      title: 'Version 1',
+      attendeeIds: [],
+      startsAt: '2030-01-01T10:00:00.000Z',
+      endsAt: '2030-01-01T11:00:00.000Z',
+    });
+    await service.update('m1', { title: 'Client A', version: 1 }, 'admin-a');
+
+    const response = await createMeetingDetailHandler(service)(
+      event('PATCH', 'admin-a', { title: 'Client B stale', version: 1 }),
+      {} as never,
+      () => undefined,
+    );
+    if (!response || typeof response === 'string') throw new Error('Expected structured response');
+    expect(response.statusCode).toBe(409);
+    expect(JSON.parse(response.body ?? '{}')).toMatchObject({
+      success: false,
+      error: { code: 'CONFLICT' },
+    });
+    expect(await service.detail('m1', 'admin-a')).toMatchObject({
+      title: 'Client A',
+      version: 2,
+    });
   });
 });

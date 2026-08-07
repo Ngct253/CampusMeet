@@ -14,7 +14,7 @@ import {
   useGroupSearchMutation,
   useProgressAnalysisMutation,
 } from '../../ai';
-import { getMeetings } from '../../meetings/service';
+import { getAllMeetings } from '../../meetings/service';
 import {
   createGroup,
   getGroup,
@@ -211,7 +211,7 @@ export function GroupDetailPage() {
 
   const meetingsQuery = useQuery({
     queryKey: ['groups', groupId, 'meetings'],
-    queryFn: () => getMeetings(groupId),
+    queryFn: () => getAllMeetings(groupId),
     enabled: Boolean(groupId),
   });
   const [searchJobId, setSearchJobId] = useState<string | undefined>(undefined);

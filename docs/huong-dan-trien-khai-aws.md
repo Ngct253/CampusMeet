@@ -18,13 +18,14 @@ Source of truth data model: [Mô hình dữ liệu DynamoDB](dynamodb-data-model
 
 CampusMeet tách stack để giảm blast radius:
 
-| Template                      | Vai trò                                                                                               |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `infra/auth-integration.yaml` | Cognito + API/Lambda cho toàn bộ vertical slice M1                                                    |
-| `infra/data-foundation.yaml`  | 5 bảng DynamoDB dùng chung                                                                            |
-| `infra/template.yaml`         | Application stack: frontend/API/reminder/Cognito và hạ tầng AI; tham chiếu bảng qua `DataTablePrefix` |
+| Template                                | Vai trò                                                                                             |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `infra/auth-integration.yaml`           | Cognito + API/Lambda cho toàn bộ vertical slice M1                                                  |
+| `infra/data-foundation.yaml`            | 5 bảng DynamoDB dùng chung                                                                          |
+| `infra/user-content-orchestration.yaml` | M4 stack: S3 user-content, Step Functions, Reminder Lambda, Scheduler role và SES configuration set |
+| `infra/template.yaml`                   | Application stack: frontend/API/Cognito và hạ tầng AI; tham chiếu bảng và outputs của M4            |
 
-`infra/template.yaml` không tạo lại bảng. Data stack phải tồn tại trước application stack.
+`infra/template.yaml` không tạo lại bảng hoặc resource do M4 sở hữu. Data stack và M4 stack phải tồn tại trước application stack.
 
 Thứ tự bắt buộc:
 
@@ -270,21 +271,25 @@ Tài nguyên không tự chuyển giữa hai account. Deployment owner thực hi
 5. Cognito user và dữ liệu DynamoDB của account cũ không tự xuất hiện ở account mới. Với môi trường dev chưa cần giữ dữ liệu, người dùng đăng ký lại; nếu cần giữ dữ liệu phải chốt phương án export/import trước khi xóa.
 6. Chỉ dọn tài nguyên account cũ sau khi đăng ký, nhóm và lời mời hoạt động trên account mới. Bảng có `DeletionPolicy: Retain` vẫn có thể phát sinh chi phí sau khi xóa stack và phải được kiểm tra riêng.
 
-### 9.3. Cập nhật lõi cuộc họp chưa triển khai AWS
+### 9.3. Cập nhật lõi cuộc họp M2 ngày 06/08/2026
 
-Source hiện tại đã bổ sung API tạo, xem, sửa và hủy cuộc họp. Thay đổi AWS nằm trong `infra/auth-integration.yaml`:
+Stack `campusmeet-dev-auth` tại account `462355914392` (`ap-southeast-1`) đã được cập nhật thành công ngày 06/08/2026:
 
-- Lambda có thêm biến `MEETING_TABLE=campusmeet-dev-meeting-data`;
-- execution role có quyền `GetItem`, `Query`, `PutItem` và `UpdateItem` trên bảng `meeting-data` cùng các index của bảng;
-- không tạo bảng, index, Lambda, API Gateway hay Cognito mới.
+- Stack status: `UPDATE_COMPLETE`.
+- Lambda `campusmeet-dev-auth-api` ở trạng thái `Active`, `LastUpdateStatus=Successful`.
+- Lambda có thêm biến `MEETING_DATA_TABLE=campusmeet-dev-meeting-data`.
+- Execution role có quyền `GetItem`, `Query`, `PutItem` và `UpdateItem` trên bảng `meeting-data` và các index của bảng.
+- Cập nhật hoàn toàn in-place đối với `AuthIntegrationFunction` và `HttpApi`; không Add, Remove hay Replace resource.
+- Không sửa data tables, Cognito User Pool/Client, IAM Role hay S3 bucket của M4.
+- Endpoint `GET /health` trả `200 OK`.
 
-Thay đổi này **chưa được deploy lên account hiện tại**. Khi chuyển account, deployment owner deploy 5 bảng trước rồi deploy auth/API stack từ source mới nhất; không sửa policy thủ công trên Console. Sau deploy, kiểm tra tối thiểu một luồng Group Admin tạo/sửa/hủy cuộc họp và một Member chỉ xem được lịch trước khi dọn account cũ.
+#### Trạng thái smoke test M2
 
-Frontend không tạo thêm tài nguyên AWS. Giao diện cuộc họp dùng `VITE_API_BASE_URL` hiện có; trước khi stack mới được deploy, lỗi `404/501` được hiển thị là máy chủ chưa có chức năng cuộc họp. Sau deploy, tải lại web và kiểm tra:
-
-1. Group Admin tạo cuộc họp bằng giờ 24 tiếng, chọn người tham dự, sau đó sửa và hủy.
-2. Thành viên thấy lịch và chi tiết nhưng không thấy biểu mẫu tạo/sửa/hủy.
-3. Nhóm đông hiển thị danh sách người tham dự trong khung cuộn, không làm tràn trang.
+- Hạ tầng và health check: Pass.
+- Kiểm tra CRUD, idempotency và authorization: Pending.
+- Lý do chưa hoàn thành: Dữ liệu môi trường dev chưa có group test chứa đồng thời một `GROUP_ADMIN` và một active `MEMBER`.
+- Nguyên tắc: Không tự ghi membership trực tiếp vào DynamoDB hoặc tạo user ngẫu nhiên.
+- Bước tiếp theo: Tạo điều kiện test thông qua luồng invitation M1 chuẩn, sau đó chạy lại đầy đủ smoke test create, read, update, cancel, idempotency và authorization regression.
 
 ## 10. Cấu hình frontend cho cả nhóm
 
@@ -391,6 +396,17 @@ npm.cmd run sam:build:app
 Outputs phục vụ tích hợp gồm AI Worker, Knowledge Base/data source, Vector Bucket/Index, role, log group, hai alarm và alarm topic. AI Worker chỉ có quyền DynamoDB theo từng bảng/thao tác, `s3:GetObject` trên bucket được cấp, ghi/xóa dưới `kb/*`, retrieve/ingestion trên đúng Knowledge Base và invoke đúng model ARN. Knowledge Base role chỉ đọc prefix `kb/`, invoke Cohere embedding và đọc/ghi đúng vector index.
 
 Data source dùng fixed-size chunking 300 token, overlap 20% và `DataDeletionPolicy: DELETE`. Khi source có version mới, Worker đánh dấu version cũ `STALE`, đặt TTL 30 ngày cho metadata DynamoDB và xóa normalized file cùng sidecar cũ trước khi sync. Bedrock sync tăng dần sẽ xóa document không còn trong S3 khỏi vector store. Khi teardown dev, CloudFormation xóa data source trước rồi xóa vector index/bucket; phải kiểm tra trạng thái `DELETE_UNSUCCESSFUL` trước khi coi cleanup hoàn tất.
+
+### 14.2. User-content bucket của M4 trong môi trường dev
+
+- Bucket hiện tại: `campusmeet-uploads-dev`
+- Account: `462355914392`
+- Region: `ap-southeast-1`
+- Bucket thuộc phạm vi M4, dùng để lưu trữ file, audio recording và user content.
+- Tuyệt đối không sử dụng `campusmeet-uploads-dev` làm SAM/CloudFormation deployment artifact bucket.
+- M2 deployment ngày 06/08/2026 không đụng chạm hay chỉnh sửa bucket này.
+- `infra/template.yaml` chỉ nhận tên bucket qua parameter `UserContentBucketName`, không sở hữu việc khởi tạo bucket.
+- Cấu hình bảo mật (Block Public Access, encryption, CORS, lifecycle) cần được audit riêng trước khi coi M4 hoàn thành.
 
 ## 15. Chi phí
 
