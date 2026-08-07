@@ -74,13 +74,13 @@ Thu gọn bảng không làm mất entity. Nó chỉ đặt các item thường 
 
 ### 4.1 Item types
 
-| Entity             | PK                  | SK                                          | Index                                                                            |
-| ------------------ | ------------------- | ------------------------------------------- | -------------------------------------------------------------------------------- |
+| Entity             | PK                  | SK                                          | Index                                                                                                    |
+| ------------------ | ------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | User profile       | `USER#<userId>`     | `PROFILE`                                   | `GSI1PK=COGNITO#<sub>`, `GSI1SK=USER#<userId>`; `GSI2PK=EMAIL#<normalizedEmail>`, `GSI2SK=USER#<userId>` |
-| User preference    | `USER#<userId>`     | `PREFERENCE`                                | Không cần                                                                        |
-| Google integration | `USER#<userId>`     | `INTEGRATION#GOOGLE`                        | Có thể dùng sparse index theo trạng thái nếu cần                                 |
-| Notification       | `USER#<userId>`     | `NOTIFICATION#<createdAt>#<notificationId>` | `GSI1PK=NOTIFICATION#<id>`, `GSI1SK=USER#<userId>`; khi unread dùng `GSI2PK=USER#<userId>#UNREAD` |
-| OAuth state        | `OAUTH#<stateHash>` | `STATE`                                     | TTL bắt buộc                                                                     |
+| User preference    | `USER#<userId>`     | `PREFERENCE`                                | Không cần                                                                                                |
+| Google integration | `USER#<userId>`     | `INTEGRATION#GOOGLE`                        | Có thể dùng sparse index theo trạng thái nếu cần                                                         |
+| Notification       | `USER#<userId>`     | `NOTIFICATION#<createdAt>#<notificationId>` | `GSI1PK=NOTIFICATION#<id>`, `GSI1SK=USER#<userId>`; khi unread dùng `GSI2PK=USER#<userId>#UNREAD`        |
+| OAuth state        | `OAUTH#<stateHash>` | `STATE`                                     | TTL bắt buộc                                                                                             |
 
 Google access/refresh token không đặt trực tiếp trong item nếu chưa có lớp mã hóa application phù hợp. Item nên giữ secret reference hoặc ciphertext đã mã hóa; browser không nhận refresh token.
 
@@ -96,12 +96,12 @@ Google access/refresh token không đặt trực tiếp trong item nếu chưa c
 
 ### 5.1 Item types
 
-| Entity      | PK                | SK                            | Index                                                        |
-| ----------- | ----------------- | ----------------------------- | ------------------------------------------------------------ |
-| Group       | `GROUP#<groupId>` | `META`                        | Không cần chỉ mục creator vì creator đồng thời là membership |
-| Membership  | `GROUP#<groupId>` | `MEMBER#<userId>`             | `GSI1PK=USER#<userId>`, `GSI1SK=GROUP#<joinedAt>#<groupId>`  |
+| Entity      | PK                | SK                            | Index                                                                                              |
+| ----------- | ----------------- | ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| Group       | `GROUP#<groupId>` | `META`                        | Không cần chỉ mục creator vì creator đồng thời là membership                                       |
+| Membership  | `GROUP#<groupId>` | `MEMBER#<userId>`             | `GSI1PK=USER#<userId>`, `GSI1SK=GROUP#<joinedAt>#<groupId>`                                        |
 | Invitation  | `GROUP#<groupId>` | `INVITE#<invitationId>`       | `GSI1PK=EMAIL#<normalizedEmail>` để tra lời mời; `GSI2PK=TOKEN#<tokenHash>` để phản hồi bằng token |
-| Audit event | `GROUP#<groupId>` | `AUDIT#<createdAt>#<auditId>` | Không cần                                                    |
+| Audit event | `GROUP#<groupId>` | `AUDIT#<createdAt>#<auditId>` | Không cần                                                                                          |
 
 ### 5.2 Access patterns
 
@@ -121,20 +121,26 @@ Bảng này chứa các aggregate liên quan trực tiếp tới cuộc họp. K
 
 ### 6.1 Meeting aggregate
 
-| Entity                    | PK                    | SK                                      | Index                                                                                                                                 |
-| ------------------------- | --------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Meeting metadata          | `MEETING#<meetingId>` | `META`                                  | `GSI1PK=GROUP#<groupId>`, `GSI1SK=MEETING#<startAt>#<meetingId>`; `GSI2PK=USER#<organizerId>`, `GSI2SK=MEETING#<startAt>#<meetingId>` |
-| External Google reference | cùng item meeting     | cùng item                               | `GSI3PK=EXTERNAL#GOOGLE_EVENT#<id>` hoặc `EXTERNAL#SPACE#<name>`, `GSI3SK=MEETING#<meetingId>`                                        |
-| Attendee                  | `MEETING#<meetingId>` | `ATTENDEE#<userId>`                     | Không cần                                                                                                                             |
-| Agenda item               | `MEETING#<meetingId>` | `AGENDA#<order>#<agendaItemId>`         | Không cần                                                                                                                             |
-| Minutes version           | `MEETING#<meetingId>` | `MINUTES#VERSION#<paddedVersion>`       | Không cần                                                                                                                             |
-| Reminder                  | `MEETING#<meetingId>` | `REMINDER#<runAt>#<reminderId>`         | Khi cần worker query: `GSI1PK=REMINDER_STATUS#<status>`, `GSI1SK=<runAt>#<reminderId>`                                                |
-| Attachment metadata       | `MEETING#<meetingId>` | `ATTACHMENT#<createdAt>#<attachmentId>` | Có thể dùng sparse `GSI1PK=ATTACHMENT_STATUS#<status>` cho quarantine worker                                                          |
-| Recording metadata        | `MEETING#<meetingId>` | `RECORDING#<createdAt>#<recordingId>`   | Không cần                                                                                                                             |
-| Live session              | `MEETING#<meetingId>` | `LIVE_SESSION#<sessionId>`              | TTL chỉ cho session tạm đã đóng nếu retention cho phép                                                                                |
-| Transcript reference      | `MEETING#<meetingId>` | `TRANSCRIPT#<version>#<transcriptId>`   | Không cần                                                                                                                             |
+| Entity               | PK                    | SK                                      | Index                                                                                                                                 |
+| -------------------- | --------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Meeting metadata     | `MEETING#<meetingId>` | `META`                                  | `GSI1PK=GROUP#<groupId>`, `GSI1SK=MEETING#<startAt>#<meetingId>`; `GSI2PK=USER#<organizerId>`, `GSI2SK=MEETING#<startAt>#<meetingId>` |
+| Google Meeting sync  | `MEETING#<meetingId>` | `INTEGRATION#GOOGLE`                    | Không cần; Scheduler nhận trực tiếp `meetingId` + `syncRevision`                                                                      |
+| Attendee             | `MEETING#<meetingId>` | `ATTENDEE#<userId>`                     | Không cần                                                                                                                             |
+| Agenda item          | `MEETING#<meetingId>` | `AGENDA#<order>#<agendaItemId>`         | Không cần                                                                                                                             |
+| Minutes version      | `MEETING#<meetingId>` | `MINUTES#VERSION#<paddedVersion>`       | Không cần                                                                                                                             |
+| Reminder             | `MEETING#<meetingId>` | `REMINDER#<runAt>#<reminderId>`         | Khi cần worker query: `GSI1PK=REMINDER_STATUS#<status>`, `GSI1SK=<runAt>#<reminderId>`                                                |
+| Attachment metadata  | `MEETING#<meetingId>` | `ATTACHMENT#<createdAt>#<attachmentId>` | Có thể dùng sparse `GSI1PK=ATTACHMENT_STATUS#<status>` cho quarantine worker                                                          |
+| Recording metadata   | `MEETING#<meetingId>` | `RECORDING#<createdAt>#<recordingId>`   | Không cần                                                                                                                             |
+| Live session         | `MEETING#<meetingId>` | `LIVE_SESSION#<sessionId>`              | TTL chỉ cho session tạm đã đóng nếu retention cho phép                                                                                |
+| Transcript reference | `MEETING#<meetingId>` | `TRANSCRIPT#<version>#<transcriptId>`   | Không cần                                                                                                                             |
 
 Một item chỉ xuất hiện trong GSI khi có đủ key của index. Việc GSI1 được dùng cho cả meeting timeline, reminder worker và attachment worker là index overloading có chủ đích; prefix khác nhau ngăn truy vấn lẫn dữ liệu.
+
+`GoogleMeetingSyncRecord` là entity logic riêng do M4 sở hữu nhưng nằm trong cùng physical `meeting-data` table và item collection với Meeting. Record có `entityType=GoogleMeetingSyncRecord`, `meetingId`, `groupId`, `organizerId`, `provider=GOOGLE`, `syncStatus`, `syncRevision`, `desiredMeetingVersion`, `desiredMeetingStatus`, `googleEventId?`, `meetUrl?`, `attemptCount`, `failureClass?`, `lastErrorCode?`, `lastErrorAt?`, `nextRetryAt?`, `createdAt`, và `updatedAt`. Optional field không có giá trị được omit theo convention hiện tại; raw Google error body và OAuth credential không được lưu.
+
+Meeting mutation cần Google sync ghi atomically `MEETING#<meetingId>/META` (cùng attendee/agenda cần thiết) và `MEETING#<meetingId>/INTEGRATION#GOOGLE` bằng `TransactWriteItems`. Record sync chuyển `PENDING` và tăng monotonic `syncRevision`; `Meeting.version` vẫn là optimistic concurrency của M2. Google API chỉ được gọi sau durable transaction qua Stream/worker, không nằm trong transaction path.
+
+Không thêm table thứ sáu và không thêm GSI cho retry. `googleEventId`/`meetUrl` chuyển thành M4-owned trusted fields trên sync record; frontend không được mutate. Google account connection/secret reference của organizer vẫn thuộc `identity` tại `USER#<userId>/INTEGRATION#GOOGLE`. Mapping này là accepted design; repository, Stream và migration runtime chưa được triển khai hoặc AWS-verified.
 
 Minutes là các version item immutable có `entityType=MEETING_MINUTES`, `groupId`, nội dung, `version`, `createdBy` và `createdAt`. Action item lưu `id`, `content`, `assigneeId?`, `dueAt?` và `taskId?`; `dueAt` là ISO datetime có timezone, còn `taskId` là metadata server-managed. Action item còn tồn tại ở version kế tiếp giữ nguyên `id` và `taskId`; item mới được server sinh UUID. Sort key dùng đúng 6 chữ số, từ `MINUTES#VERSION#000001` đến `MINUTES#VERSION#999999`; không tạo latest pointer và không dùng GSI. Latest version được đọc bằng base-table `Query` với `PK=MEETING#<meetingId>`, `begins_with(SK, 'MINUTES#VERSION#')`, `ScanIndexForward=false`, `Limit=1` và `ConsistentRead=true`.
 
