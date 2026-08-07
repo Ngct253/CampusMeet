@@ -149,21 +149,51 @@ export const taskProposalSchema = z.object({
 });
 export type TaskProposal = z.infer<typeof taskProposalSchema>;
 
-export const groupProgressSnapshotSchema = z.object({
-  groupId: z.string().min(1),
-  generatedAt: z.string().datetime({ offset: true }),
-  taskCounts: z.object({
-    total: z.number().int().nonnegative(),
-    todo: z.number().int().nonnegative(),
-    doing: z.number().int().nonnegative(),
-    done: z.number().int().nonnegative(),
-    overdue: z.number().int().nonnegative(),
-  }),
-  meetingCounts: z.object({
-    completed: z.number().int().nonnegative(),
-    upcoming: z.number().int().nonnegative(),
-  }),
-});
+const progressSnapshotCountSchema = z.number().int().nonnegative();
+const groupProgressSnapshotVersionSchema = z.number().int().min(1).max(9_999_999_999);
+
+export const groupProgressSnapshotSchema = z
+  .object({
+    groupId: z.string().min(1),
+    version: groupProgressSnapshotVersionSchema,
+    generatedAt: z.string().datetime({ offset: true }),
+    taskCounts: z
+      .object({
+        total: progressSnapshotCountSchema,
+        todo: progressSnapshotCountSchema,
+        doing: progressSnapshotCountSchema,
+        done: progressSnapshotCountSchema,
+        overdue: progressSnapshotCountSchema,
+      })
+      .strict(),
+    meetingCounts: z
+      .object({
+        completed: progressSnapshotCountSchema,
+        upcoming: progressSnapshotCountSchema,
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((snapshot, context) => {
+    if (
+      snapshot.taskCounts.total !==
+      snapshot.taskCounts.todo + snapshot.taskCounts.doing + snapshot.taskCounts.done
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Task total must equal todo + doing + done',
+        path: ['taskCounts', 'total'],
+      });
+    }
+
+    if (snapshot.taskCounts.overdue > snapshot.taskCounts.todo + snapshot.taskCounts.doing) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Overdue tasks cannot exceed unfinished tasks',
+        path: ['taskCounts', 'overdue'],
+      });
+    }
+  });
 export type GroupProgressSnapshot = z.infer<typeof groupProgressSnapshotSchema>;
 
 export const groupProgressAnalysisSchema = z.object({
@@ -274,7 +304,7 @@ export type GenerateMeetingDraftRequest = z.infer<typeof generateMeetingDraftReq
 
 export const groupProgressAnalysisRequestSchema = z
   .object({
-    snapshotVersion: z.number().int().positive().optional(),
+    snapshotVersion: groupProgressSnapshotVersionSchema.optional(),
   })
   .strict();
 export type GroupProgressAnalysisRequest = z.infer<typeof groupProgressAnalysisRequestSchema>;

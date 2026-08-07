@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   aiJobDetailSchema,
   groupKnowledgeQuerySchema,
+  groupProgressAnalysisRequestSchema,
+  groupProgressSnapshotSchema,
   knowledgeIngestionPayloadSchema,
   supportedDocumentContentTypes,
   taskProposalSchema,
@@ -127,5 +129,99 @@ describe('M5 shared schemas', () => {
         },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('groupProgressSnapshotSchema', () => {
+  const validSnapshot = {
+    groupId: 'group-1',
+    version: 1,
+    generatedAt: '2026-08-08T08:00:00.000Z',
+    taskCounts: {
+      total: 6,
+      todo: 2,
+      doing: 3,
+      done: 1,
+      overdue: 2,
+    },
+    meetingCounts: {
+      completed: 4,
+      upcoming: 2,
+    },
+  };
+
+  it('accepts a valid snapshot', () => {
+    expect(groupProgressSnapshotSchema.safeParse(validSnapshot).success).toBe(true);
+  });
+
+  it('requires a version', () => {
+    const withoutVersion: Record<string, unknown> = { ...validSnapshot };
+    delete withoutVersion.version;
+
+    expect(groupProgressSnapshotSchema.safeParse(withoutVersion).success).toBe(false);
+  });
+
+  it.each([0, -1, 10_000_000_000, 1.5])('rejects invalid version %s', (version) => {
+    expect(groupProgressSnapshotSchema.safeParse({ ...validSnapshot, version }).success).toBe(
+      false,
+    );
+  });
+
+  it('requires generatedAt to be an ISO datetime with timezone', () => {
+    expect(
+      groupProgressSnapshotSchema.safeParse({
+        ...validSnapshot,
+        generatedAt: '2026-08-08T08:00:00',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects negative counts', () => {
+    expect(
+      groupProgressSnapshotSchema.safeParse({
+        ...validSnapshot,
+        taskCounts: { ...validSnapshot.taskCounts, todo: -1 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires total to equal todo + doing + done', () => {
+    expect(
+      groupProgressSnapshotSchema.safeParse({
+        ...validSnapshot,
+        taskCounts: { ...validSnapshot.taskCounts, total: 7 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects overdue counts greater than unfinished task counts', () => {
+    expect(
+      groupProgressSnapshotSchema.safeParse({
+        ...validSnapshot,
+        taskCounts: { ...validSnapshot.taskCounts, overdue: 6 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects unknown fields', () => {
+    expect(
+      groupProgressSnapshotSchema.safeParse({ ...validSnapshot, recordType: 'LATEST' }).success,
+    ).toBe(false);
+    expect(
+      groupProgressSnapshotSchema.safeParse({
+        ...validSnapshot,
+        taskCounts: { ...validSnapshot.taskCounts, blocked: 1 },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('groupProgressAnalysisRequestSchema snapshotVersion', () => {
+  it.each([1, 9_999_999_999])('accepts supported version %s', (snapshotVersion) => {
+    expect(groupProgressAnalysisRequestSchema.safeParse({ snapshotVersion }).success).toBe(true);
+  });
+
+  it.each([0, -1, 1.5, 10_000_000_000])('rejects unsupported version %s', (snapshotVersion) => {
+    expect(groupProgressAnalysisRequestSchema.safeParse({ snapshotVersion }).success).toBe(false);
   });
 });

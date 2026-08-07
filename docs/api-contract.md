@@ -66,7 +66,7 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | POST      | `/meetings/:meetingId/ai/minutes-draft`                        | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                     | Phase 4A handler/application đã implement                               |
 | POST      | `/meetings/:meetingId/ai/task-proposals`                       | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                     | Phase 4A handler/application đã implement                               |
 | POST      | `/ai/task-proposals/:proposalId/confirm`                       | `ConfirmTaskProposalRequest/Response`                               | Group Admin theo FR-16; chưa implement                                  |
-| POST      | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                    | Phase 4A; yêu cầu Group Admin                                           |
+| POST      | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                    | Snapshot contract PROPOSED, chờ duyệt; runtime producer chưa có         |
 | POST      | `/groups/:groupId/ai/tool-proposals`                           | `CreateToolProposalRequest`, `ToolProposal`                         | Pha AI mở rộng; chưa implement                                          |
 | POST      | `/ai/tool-proposals/:id/confirm`                               | `ConfirmToolProposalRequest/Response`                               | Pha AI mở rộng; chưa implement                                          |
 | GET       | `/ai/jobs/:aiJobId`                                            | `AIJobDetail`                                                       | M5 đã triển khai                                                        |
@@ -112,7 +112,7 @@ Chi tiết state machine, retry 1m/5m/15m/1h/6h, idempotency và failure classif
 - `GroundedAnswer` gồm `answer`, `citations[]`, `scope` và `insufficientContext`. Citation ánh xạ về group/meeting/source/segment nội bộ, không lộ raw S3 key hoặc presigned URL. Khi thiếu nguồn, API trả `insufficientContext=true`.
 - `GenerateMinutesAndTaskProposalsResponse` gồm minutes draft, quyết định/action item đã được nêu và `TaskProposal[]`; mỗi mục có citation. Assignee/deadline/priority không được model tự điền nếu transcript không nêu rõ.
 - `TaskProposal` có `status=PENDING|CONFIRMED|EXECUTED|REJECTED|EXPIRED|FAILED`, `meetingId`, title/description, `assigneeId?`, `priority?`, `dueAt?`, `missingFields[]` và transcript citations. Trước confirm, `title`, `assigneeId` và `priority` phải hợp lệ theo `CreateTaskRequest`; `dueAt` vẫn tùy chọn. Confirm kiểm tra lại quyền/idempotency rồi gọi Task API chuẩn một lần.
-- `GroupProgressAnalysisResponse` chỉ diễn giải `GroupProgressSnapshot` do backend tính từ task/meeting trong path group; không trả điểm/xếp hạng/suy diễn thái độ cá nhân và không gây mutation.
+- `GroupProgressAnalysisResponse` chỉ diễn giải một immutable `GroupProgressSnapshot` version do backend tính từ task/meeting trong path group; không trả điểm/xếp hạng/suy diễn thái độ cá nhân và không gây mutation.
 - `TranscriptSegment` giữ `startMs`, `endMs`, `text`, `confidence`, `languageCode`, `speakerLabel` dạng `Speaker N`, `version` và audit metadata; không có `speakerUserId`.
 - `LiveTranscriptionSession` giữ `meetingId`, nguồn capture, consent reference, trạng thái `STARTING|ACTIVE|RECONNECTING|STOPPED|FAILED`, sequence cuối đã xác nhận và heartbeat; thông tin kết nối streaming phải ngắn hạn.
 - Endpoint segment chỉ nhận final result có giới hạn kích thước cùng `ResultId/sequence`; gửi lại cùng khóa không tạo segment trùng. Partial result chỉ hiển thị ở client và không được lưu/index.
@@ -126,6 +126,40 @@ Chi tiết state machine, retry 1m/5m/15m/1h/6h, idempotency và failure classif
 - Confirm phải kiểm tra lại JWT, membership/role, schema, policy và idempotency ngay tại thời điểm thực thi; không tin kết quả kiểm tra cũ.
 - Nội dung tài liệu/transcript không được biến thành tool instruction. Tool name phải thuộc server-side allowlist, không nhận tên hàm tùy ý từ model.
 - Google artifact sync lưu trạng thái `POLLING|AVAILABLE|UNAVAILABLE|ACTION_REQUIRED|FAILED`; `UNAVAILABLE` là kết quả hợp lệ và phải dẫn tới fallback upload/capture.
+
+## Contract Group Progress Snapshot
+
+`GroupProgressSnapshot` là aggregate xác định cấp group do M3 sở hữu. Shared schema strict gồm:
+
+```ts
+interface GroupProgressSnapshot {
+  groupId: string;
+  version: number; // integer 1..9_999_999_999
+  generatedAt: ISODateTime;
+  taskCounts: {
+    total: number;
+    todo: number;
+    doing: number;
+    done: number;
+    overdue: number;
+  };
+  meetingCounts: {
+    completed: number;
+    upcoming: number;
+  };
+}
+```
+
+Mọi count là integer không âm; `total = todo + doing + done` và `overdue <= todo + doing`. `generatedAt` là một UTC cutoff do server tạo cho toàn bộ lần aggregate. Task overdue phải có `dueAt < generatedAt` và status khác `DONE`. Meeting completed có status `COMPLETED`; upcoming có status `SCHEDULED` và `startsAt >= generatedAt`; `DRAFT`/`CANCELLED` và Minutes không được tính. Snapshot không chứa dữ liệu hoặc đánh giá cá nhân.
+
+Với `POST /groups/:groupId/ai/progress-analysis`:
+
+- request có `snapshotVersion` phải resolve đúng immutable version đó trước khi enqueue;
+- request không có `snapshotVersion` phải tạo và persist snapshot mới trước khi enqueue, rồi cố định resolved version trong job;
+- M5 chỉ đọc exact immutable version đã resolve, không fallback sang `LATEST`;
+- snapshot thiếu hoặc sai integrity phải fail-safe trước khi gọi model.
+
+`PROGRESS_SNAPSHOT#LATEST` là full copy của lần generate thành công gần nhất, không phải dữ liệu live. Source GSI chấp nhận eventual consistency ngắn. Producer/runtime chưa được implement trong PR contract này. Error code public ổn định cho snapshot thiếu/corrupt và cách idempotency AI request ràng buộc resolved version vẫn là follow-up; chưa tự thêm error code mới. Chi tiết persistence, concurrency và ownership nằm tại [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md).
 
 ## Response format hiện có
 
@@ -212,7 +246,7 @@ Nghiệp vụ khác chưa triển khai:
 | AI job         | Chốt state transition, timeout, retry, DLQ/failure handling và token/phút/cost metadata                                                                                                                                       |
 | Grounding      | Chốt citation schema cho tài liệu/transcript/biên bản; current/selected/whole-group scope và filter `groupId`/meeting-set/ACL                                                                                                 |
 | Task proposal  | Chốt mapping ActionItem/Task DTO, missing fields, quyền confirm và liên kết citation nguồn                                                                                                                                    |
-| Group progress | Chốt `GroupProgressSnapshot` do M3 cung cấp; AI chỉ diễn giải dữ liệu cấp nhóm                                                                                                                                                |
+| Group progress | Contract `GroupProgressSnapshot` đang ở trạng thái PROPOSED, chờ team/maintainer duyệt; runtime producer/idempotency chưa implement                                                                                           |
 | Tool allowlist | Chốt tool MVP, quyền, trường cần xác nhận, expiry và audit; không expose CRUD tùy ý cho model                                                                                                                                 |
 | Retention      | Upload chưa hoàn tất 1 ngày, raw audio 7 ngày, AIJob/conversation 30 ngày; source/vector tồn tại đến khi source hoặc meeting bị xóa                                                                                           |
 | Shared states  | Tách `MeetingStatus` khỏi `GoogleSyncStatus`; cập nhật `@campusmeet/shared` trước khi implement route mới                                                                                                                     |

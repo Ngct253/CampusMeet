@@ -203,6 +203,25 @@ Status update ghi atomically bằng `TransactWriteItems`: conditional Update ite
 
 Với task không có `dueAt`, item không lưu trường `dueAt`; riêng `GSI1SK` và `GSI2SK` dùng sentinel `9999-12-31T23:59:59.999Z` tại vị trí `<dueAt>`. Sentinel là data-key contract để task không hạn nằm sau task có hạn và không được trả ra API.
 
+### 7.1 Group Progress Snapshot
+
+`GroupProgressSnapshot` là aggregate versioned cấp group do M3 ghi trong `task-data`. Không cần table hoặc GSI mới.
+
+| Record            | PK                | SK                                             | Metadata                                                                                          |
+| ----------------- | ----------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Immutable version | `GROUP#<groupId>` | `PROGRESS_SNAPSHOT#VERSION#<10-digit-version>` | `entityType=GROUP_PROGRESS_SNAPSHOT`, `recordType=VERSION`, `generationId`                        |
+| Latest full copy  | `GROUP#<groupId>` | `PROGRESS_SNAPSHOT#LATEST`                     | `entityType=GROUP_PROGRESS_SNAPSHOT`, `recordType=LATEST`, cùng `generationId` với immutable item |
+
+Cả hai item chứa full domain fields `groupId`, `version`, `generatedAt`, `taskCounts` và `meetingCounts`. Persistence metadata `PK`, `SK`, `entityType`, `recordType`, `generationId` không thuộc public `GroupProgressSnapshot`; repository phải validate và loại chúng trước khi parse/return strict shared schema.
+
+Version hợp lệ từ `1` đến `9999999999`; sort-key version dùng đúng 10 chữ số từ `0000000001` đến `9999999999`. Version item là immutable. `LATEST` là full copy của snapshot được generate thành công gần nhất, không phải pointer và không phản ánh live mọi mutation.
+
+Writer tương lai strong-read `LATEST`, cấp version `N+1`, dùng một UTC `generatedAt` cutoff để aggregate, rồi ghi atomically immutable VERSION và conditional LATEST bằng `TransactWriteItems`. Condition của LATEST phải khóa version đã đọc. Writer thua cạnh tranh phải đọc lại và recompute bằng cutoff mới; không được publish aggregation cũ dưới version mới. Generation/persistence lỗi không để lộ một nửa cặp VERSION/LATEST.
+
+Nguồn Task dùng GSI1 `GROUP#<groupId>` và nguồn Meeting dùng GSI1 timeline của `meeting-data`; hai GSI chấp nhận eventual consistency ngắn. M5 đọc exact version bằng base-table `GetItem` với consistent read và không fallback sang `LATEST`. Contract không thêm retention; cleanup immutable versions là quyết định follow-up.
+
+Schema và lifecycle chi tiết nằm tại [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md). Runtime writer chưa được implement trong PR contract này.
+
 ## 8. AI-work table
 
 ### 8.1 Item types

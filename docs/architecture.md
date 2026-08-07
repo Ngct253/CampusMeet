@@ -120,6 +120,14 @@ Mỗi entity logic vẫn tồn tại. Việc gom bảng dùng composite `PK/SK`,
 - Phân tích tiến độ chỉ diễn giải snapshot task/meeting do backend tính; không đánh giá cá nhân.
 - CampusMeet web là sản phẩm chính; Meet Add-on chỉ là client surface dùng chung API, data và authorization.
 
+### Ranh giới Group Progress Snapshot
+
+M3 sở hữu việc aggregate dữ liệu Task/Meeting cấp group, validate shared schema và ghi immutable snapshot version cùng full `LATEST` copy vào `task-data`. M5 sở hữu orchestration/AI interpretation và chỉ tiêu thụ exact immutable version đã được resolve; M5 không tự aggregate, sửa snapshot hoặc fallback từ version sang `LATEST`.
+
+Thiết kế runtime tối thiểu là on-demand khi Group Admin yêu cầu progress analysis: nếu request chỉ định version thì resolve exact version; nếu không chỉ định thì M3 tạo snapshot mới trước khi enqueue AIJob. Worker nhận resolved version và dùng consistent read cho version item. Source Task/Meeting GSI là eventually consistent, nên snapshot biểu diễn một aggregate tại UTC cutoff chứ không phải distributed transaction live.
+
+Theo contract đề xuất, mỗi lần publish tương lai phải dùng một transaction trong `task-data` để ghi VERSION immutable và conditional full LATEST. Contract đang chờ team/maintainer duyệt; producer/orchestration chưa implement và idempotency binding giữa AI request retry với resolved snapshot version vẫn là follow-up. Xem [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md).
+
 ## Nguyên tắc dữ liệu và quyền
 
 - Timestamp lưu UTC; frontend hiển thị theo timezone người dùng.
