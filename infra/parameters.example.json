@@ -1,6 +1,7 @@
 {
   "Environment": "dev",
   "DataTablePrefix": "campusmeet-dev",
+  "MeetingDataStreamArn": "arn:aws:dynamodb:ap-southeast-1:123456789012:table/campusmeet-dev-meeting-data/stream/replace-with-latest-stream-label",
   "DomainName": "campusmeet.example.com",
   "GoogleSecretReference": "campusmeet/dev/google-oauth",
   "GoogleRedirectUri": "https://replace-with-api-id.execute-api.ap-southeast-1.amazonaws.com/integrations/google/callback",

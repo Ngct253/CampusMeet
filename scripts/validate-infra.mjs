@@ -73,6 +73,13 @@ for (const [logicalId, contract] of expected) {
   assert.equal(dataModel.includes(`campusmeet-dev-${contract.suffix}`), true);
 }
 
+assert.deepEqual(resources.MeetingDataTable.Properties.StreamSpecification, {
+  StreamViewType: 'NEW_AND_OLD_IMAGES',
+});
+assert.deepEqual(dataTemplate.Outputs.MeetingDataTableStreamArn, {
+  Value: { 'Fn::GetAtt': ['MeetingDataTable', 'StreamArn'] },
+});
+
 assert.equal(
   appTemplate.includes('Type: AWS::DynamoDB::Table'),
   false,
@@ -115,6 +122,16 @@ for (const parameter of [
 }
 
 for (const marker of [
+  'MeetingDataStreamArn:',
+  'GoogleSyncWorkerRole:',
+  'GoogleSyncWorkerFunction:',
+  'Handler: services/api/src/index.googleSyncWorkerHandler',
+  'GoogleSyncSchedulerRole:',
+  'GOOGLE_SYNC_WORKER_ARN:',
+  'GOOGLE_SYNC_SCHEDULER_ROLE_ARN:',
+  'Stream: !Ref MeetingDataStreamArn',
+  'GoogleMeetingSyncRecord',
+  'MaximumRetryAttempts: 3',
   'AIWorkerRole:',
   'AIWorkerFunction:',
   'Handler: services/ai-worker/src/index.handler',
@@ -241,5 +258,5 @@ assert.equal(
 );
 
 console.log(
-  'Infrastructure contract validation passed: data foundation, M5 AI Worker, Knowledge Base, and S3 Vectors.',
+  'Infrastructure contract validation passed: data foundation, Google sync runtime, M5 AI Worker, Knowledge Base, and S3 Vectors.',
 );
