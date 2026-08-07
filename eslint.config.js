@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/.agents/**', '**/.aws-sam/**', '**/dist/**', '**/coverage/**', 'node_modules/**'],
+    ignores: ['**/.agents/**', '**/.aws-sam/**', '**/.tmp/**', '**/dist/**', '**/coverage/**', 'node_modules/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

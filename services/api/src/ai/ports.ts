@@ -1,4 +1,4 @@
-import type { AIJob, AIJobType, AIRequestPayload } from '@campusmeet/shared';
+import type { AIJob, AIJobType, AIWorkerPayload } from '@campusmeet/shared';
 
 export interface MembershipAuthorizer {
   requireMember(actorId: string, groupId: string): Promise<void>;
@@ -19,6 +19,6 @@ export interface AIJobOrchestrator {
     idempotencyKey: string;
     requestId: string;
     type: AIJobType;
-    payload: AIRequestPayload;
+    payload: AIWorkerPayload;
   }): Promise<AIJob>;
 }

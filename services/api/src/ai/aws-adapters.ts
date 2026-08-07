@@ -212,3 +212,15 @@ export const createProductionAIRequestServiceAdapters = () => {
   );
   return { access, meetings: access, jobs };
 };
+
+export const createProductionAIJobOrchestrator = (): AIJobOrchestrator => {
+  const aiWorkTable = requireValue(process.env.AI_WORK_TABLE, 'AI_WORK_TABLE');
+  const stateMachineArn = requireValue(process.env.AI_STATE_MACHINE_ARN, 'AI_STATE_MACHINE_ARN');
+  const database = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  return new StepFunctionsAIJobOrchestrator(
+    database,
+    new SFNClient({}),
+    aiWorkTable,
+    stateMachineArn,
+  );
+};
