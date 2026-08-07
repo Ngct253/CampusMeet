@@ -90,7 +90,14 @@ const findRoute = createRouter([
 ]);
 
 export const handler: APIGatewayProxyHandlerV2 = async (event, context, callback) => {
-  const match = findRoute(event.requestContext.http.method, event.rawPath);
+  const stage = event.requestContext.stage;
+  const stagePrefix = `/${stage}`;
+  const rawPath =
+    stage !== '$default' &&
+    (event.rawPath === stagePrefix || event.rawPath.startsWith(`${stagePrefix}/`))
+      ? event.rawPath.slice(stagePrefix.length) || '/'
+      : event.rawPath;
+  const match = findRoute(event.requestContext.http.method, rawPath);
   if (!match) return notImplemented(getRequestId(event), 'Route');
   event.pathParameters = { ...event.pathParameters, ...match.pathParameters };
   const result = await match.handler(event, context, callback);
