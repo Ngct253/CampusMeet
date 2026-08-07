@@ -103,6 +103,7 @@ for (const invalidAction of ['dynamodb:TransactGetItems']) {
 
 for (const parameter of [
   'UserContentBucketName',
+  'MeetingDataTableStreamArn',
   'BedrockEmbeddingModelId',
   'BedrockEmbeddingDimensions',
   'BedrockGenerationModelArn',
@@ -112,6 +113,25 @@ for (const parameter of [
     true,
     `Application template is missing required AI parameter ${parameter}.`,
   );
+}
+
+assert.equal(
+  dataTemplate.Resources.MeetingDataTable.Properties.StreamSpecification?.StreamViewType,
+  'NEW_AND_OLD_IMAGES',
+  'MeetingDataTable must publish NEW_AND_OLD_IMAGES for M4 Google synchronization.',
+);
+
+for (const marker of [
+  'GoogleSyncLambdaRole:',
+  'GoogleSyncSchedulerRole:',
+  'GoogleSyncFunction:',
+  'Handler: services/api/src/index.googleSyncHandler',
+  'GoogleSyncStream:',
+  'GoogleMeetingSyncRecord',
+  'GoogleSyncLogGroup:',
+  'GoogleSyncErrorAlarm:',
+]) {
+  assert.equal(appTemplate.includes(marker), true, `Application template is missing ${marker}.`);
 }
 
 for (const marker of [
