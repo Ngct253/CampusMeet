@@ -96,7 +96,11 @@ export interface NotificationRepository {
 }
 
 export interface GoogleCalendarGateway {
-  createEvent(meeting: Meeting): Promise<{ eventId: string; meetUrl?: string }>;
+  createEvent(meeting: Meeting): Promise<{
+    eventId: string;
+    meetUrl?: string;
+    googleMeetingId?: string;
+  }>;
 }
 
 export interface ReminderSchedulerGateway {

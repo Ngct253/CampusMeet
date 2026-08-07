@@ -7,13 +7,16 @@ import {
   type Meeting,
   type UpdateMeetingRequest,
 } from '@campusmeet/shared';
+import { randomUUID } from 'node:crypto';
 import type {
+  GoogleCalendarGateway,
   MembershipAuthorizer,
   MeetingAccessBoundary,
   MeetingRepository,
 } from '../domain/ports';
 import {
   ConflictError,
+  ApiError,
   ForbiddenError,
   ResourceNotFoundError,
   UnprocessableEntityError,
@@ -30,7 +33,7 @@ const normalizeAgenda = (items: NonNullable<CreateMeetingRequest['agenda']> = []
   const orders = new Set<number>();
   return items
     .map((item) => {
-      const id = item.id?.trim() || crypto.randomUUID();
+      const id = item.id?.trim() || randomUUID();
       if (ids.has(id) || orders.has(item.order)) {
         throw new UnprocessableEntityError('Agenda id và thứ tự phải duy nhất.');
       }
@@ -52,6 +55,7 @@ export class MeetingService implements MeetingAccessBoundary {
     private readonly memberships: MembershipAuthorizer,
     private readonly now: () => Date = () => new Date(),
     private readonly id: () => string = () => crypto.randomUUID(),
+    private readonly calendar?: GoogleCalendarGateway,
   ) {}
 
   private async requireMember(groupId: string, userId: string, admin = false) {
@@ -107,7 +111,32 @@ export class MeetingService implements MeetingAccessBoundary {
       updatedBy: actorId,
       version: 1,
     };
-    return this.meetings.create(meeting);
+    const created = await this.meetings.create(meeting);
+    if (!this.calendar) return created;
+    try {
+      const google = await this.calendar.createEvent(created);
+      return this.meetings.update({
+        ...created,
+        googleSyncStatus: GoogleSyncStatus.READY,
+        integrationStatus: IntegrationStatus.READY,
+        googleEventId: google.eventId,
+        ...(google.googleMeetingId ? { googleMeetingId: google.googleMeetingId } : {}),
+        ...(google.meetUrl ? { meetUrl: google.meetUrl } : {}),
+        updatedAt: this.now().toISOString(),
+        version: created.version + 1,
+      }, created.version);
+    } catch (error) {
+      const actionRequired = error instanceof ApiError && error.code === 'UNAUTHORIZED';
+      return this.meetings.update({
+        ...created,
+        googleSyncStatus: actionRequired
+          ? GoogleSyncStatus.ACTION_REQUIRED
+          : GoogleSyncStatus.FAILED_RETRYABLE,
+        integrationStatus: IntegrationStatus.FAILED,
+        updatedAt: this.now().toISOString(),
+        version: created.version + 1,
+      }, created.version);
+    }
   }
 
   async list(groupId: string, actorId: string, limit = 20, cursor?: string) {

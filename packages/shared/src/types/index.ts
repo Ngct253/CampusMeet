@@ -86,6 +86,8 @@ export interface Meeting {
   googleSyncStatus: GoogleSyncStatus;
   /** @deprecated Google synchronization state is exposed through googleSyncStatus. */
   integrationStatus: IntegrationStatus;
+  googleEventId?: string;
+  googleMeetingId?: string;
   meetUrl?: string;
   createdAt: ISODateTime;
   createdBy: string;

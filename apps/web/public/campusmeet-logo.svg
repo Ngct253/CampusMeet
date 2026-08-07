@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">CampusMeet</title>
+  <rect width="256" height="256" rx="56" fill="#3159dc"/>
+  <path d="M48 88l80-40 80 40-80 40L48 88z" fill="#fff"/>
+  <path d="M76 113v47c0 21 23 38 52 38s52-17 52-38v-47l-52 26-52-26z" fill="#dce5ff"/>
+  <path d="M205 95v53" stroke="#fff" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="205" cy="164" r="12" fill="#fff"/>
+</svg>

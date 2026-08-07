@@ -18,13 +18,14 @@ Source of truth data model: [Mô hình dữ liệu DynamoDB](dynamodb-data-model
 
 CampusMeet tách stack để giảm blast radius:
 
-| Template                      | Vai trò                                                                                               |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `infra/auth-integration.yaml` | Cognito + API/Lambda cho toàn bộ vertical slice M1                                                    |
-| `infra/data-foundation.yaml`  | 5 bảng DynamoDB dùng chung                                                                            |
-| `infra/template.yaml`         | Application stack: frontend/API/reminder/Cognito và hạ tầng AI; tham chiếu bảng qua `DataTablePrefix` |
+| Template                                | Vai trò                                                                                             |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `infra/auth-integration.yaml`           | Cognito + API/Lambda cho toàn bộ vertical slice M1                                                  |
+| `infra/data-foundation.yaml`            | 5 bảng DynamoDB dùng chung                                                                          |
+| `infra/user-content-orchestration.yaml` | M4 stack: S3 user-content, Step Functions, Reminder Lambda, Scheduler role và SES configuration set |
+| `infra/template.yaml`                   | Application stack: frontend/API/Cognito và hạ tầng AI; tham chiếu bảng và outputs của M4            |
 
-`infra/template.yaml` không tạo lại bảng. Data stack phải tồn tại trước application stack.
+`infra/template.yaml` không tạo lại bảng hoặc resource do M4 sở hữu. Data stack và M4 stack phải tồn tại trước application stack.
 
 Thứ tự bắt buộc:
 

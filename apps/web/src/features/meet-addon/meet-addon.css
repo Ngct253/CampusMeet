@@ -1,0 +1,30 @@
+.meet-addon-panel {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 1rem;
+  background: #f7f9fd;
+  color: #172033;
+  font-family: Inter, system-ui, sans-serif;
+}
+.meet-addon-panel > span {
+  color: #3859d9;
+  font-weight: 750;
+}
+.meet-addon-panel h1 {
+  margin: 0.75rem 0 0.5rem;
+  font-size: 1.2rem;
+}
+.meet-addon-panel p {
+  color: #5c667a;
+  line-height: 1.5;
+}
+.meet-addon-action {
+  display: inline-block;
+  margin-top: 0.75rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.65rem;
+  background: #3859d9;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 650;
+}
