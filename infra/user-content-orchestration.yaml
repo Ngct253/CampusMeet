@@ -20,6 +20,14 @@ Parameters:
     Type: String
     AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
     Description: SES-verified sender address used by the reminder Lambda.
+  ExistingUserContentBucketName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    Description: Optional existing private bucket to reuse; leave empty to create one.
+
+Conditions:
+  CreateUserContentBucket: !Equals [!Ref ExistingUserContentBucketName, '']
 
 Globals:
   Function:
@@ -39,6 +47,7 @@ Globals:
 Resources:
   UserContentBucket:
     Type: AWS::S3::Bucket
+    Condition: CreateUserContentBucket
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
@@ -214,7 +223,11 @@ Resources:
       Tags: *ResourceTags
 
 Outputs:
-  UserContentBucketName: { Value: !Ref UserContentBucket }
+  UserContentBucketName:
+    Value: !If
+      - CreateUserContentBucket
+      - !Ref UserContentBucket
+      - !Ref ExistingUserContentBucketName
   AIStateMachineArn: { Value: !Ref AIJobStateMachine }
   ReminderFunctionArn: { Value: !GetAtt ReminderFunction.Arn }
   SchedulerExecutionRoleArn: { Value: !GetAtt SchedulerExecutionRole.Arn }

@@ -20,6 +20,8 @@ The standalone M4 stack owns the private user-content bucket, Step Functions sta
 
 Do not deploy the standalone M4 stack over manually-created resources with the same physical names. Import/adopt those resources into CloudFormation first, or deploy the stack with non-conflicting names and migrate deliberately.
 
+For a brownfield environment whose user-content bucket was created manually, pass its name as `ExistingUserContentBucketName`. The stack then reuses that bucket and doesn't create or manage its CORS, encryption, public-access block or lifecycle settings. Leave the parameter empty in a clean environment so CloudFormation creates and manages the bucket.
+
 The SES sender supplied as `SesFromEmail` must already be verified. Accounts still in the SES sandbox can send only to verified recipients.
 
 ## Google Meet Add-on

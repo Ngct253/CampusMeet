@@ -200,6 +200,8 @@ for (const marker of [
   'ReminderFunctionArn:',
   'SchedulerExecutionRoleArn:',
   'SesConfigurationSetName:',
+  'ExistingUserContentBucketName:',
+  'CreateUserContentBucket:',
 ]) {
   assert.equal(m4Template.includes(marker), true, `M4 template is missing ${marker}.`);
 }
