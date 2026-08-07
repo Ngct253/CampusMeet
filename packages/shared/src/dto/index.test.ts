@@ -1,20 +1,45 @@
 import { describe, expect, it } from 'vitest';
 import type { CreateMinutesRequest, MinutesResponse } from './index';
-import { convertActionItemToTaskInputSchema, meetingMinutesInputSchema } from './index';
+import {
+  convertActionItemToTaskInputSchema,
+  meetingInputSchema,
+  meetingMinutesInputSchema,
+  updateMeetingInputSchema,
+} from './index';
 import { Priority } from '../enums';
 
 const validInput = {
   summary: ' Tóm tắt ',
   discussion: ' Nội dung ',
   decisions: [{ content: ' Quyết định ' }],
-  actionItems: [{
-    id: ' action-1 ',
-    content: ' Việc cần làm ',
-    assigneeId: ' user-1 ',
-    dueAt: '2026-08-10T10:30:00+07:00',
-  }],
+  actionItems: [
+    {
+      id: ' action-1 ',
+      content: ' Việc cần làm ',
+      assigneeId: ' user-1 ',
+      dueAt: '2026-08-10T10:30:00+07:00',
+    },
+  ],
   expectedVersion: 0,
 };
+
+describe('trusted Google sync fields', () => {
+  const meeting = {
+    title: 'Planning',
+    attendeeIds: [],
+    agenda: [],
+    startsAt: '2029-01-01T10:00:00.000Z',
+    endsAt: '2029-01-01T11:00:00.000Z',
+  };
+  it('does not expose trusted integration fields through create or update parsing', () => {
+    expect(
+      meetingInputSchema.parse({ ...meeting, googleEventId: 'forged', syncRevision: 99 }),
+    ).not.toHaveProperty('googleEventId');
+    expect(
+      updateMeetingInputSchema.parse({ ...meeting, version: 1, meetUrl: 'https://evil.invalid' }),
+    ).not.toHaveProperty('meetUrl');
+  });
+});
 
 describe('meetingMinutesInputSchema', () => {
   it('keeps deprecated Minutes DTO exports available for existing consumers', () => {
@@ -33,12 +58,14 @@ describe('meetingMinutesInputSchema', () => {
       summary: 'Tóm tắt',
       discussion: 'Nội dung',
       decisions: [{ content: 'Quyết định' }],
-      actionItems: [{
-        id: 'action-1',
-        content: 'Việc cần làm',
-        assigneeId: 'user-1',
-        dueAt: '2026-08-10T10:30:00+07:00',
-      }],
+      actionItems: [
+        {
+          id: 'action-1',
+          content: 'Việc cần làm',
+          assigneeId: 'user-1',
+          dueAt: '2026-08-10T10:30:00+07:00',
+        },
+      ],
       expectedVersion: 0,
     });
     expect(
@@ -74,7 +101,10 @@ describe('meetingMinutesInputSchema', () => {
     ['empty action', { ...validInput, actionItems: [{ content: ' ' }] }],
     ['empty assignee', { ...validInput, actionItems: [{ content: 'x', assigneeId: ' ' }] }],
     ['empty action id', { ...validInput, actionItems: [{ id: ' ', content: 'x' }] }],
-    ['due date without timezone', { ...validInput, actionItems: [{ content: 'x', dueAt: '2026-08-10T10:30:00' }] }],
+    [
+      'due date without timezone',
+      { ...validInput, actionItems: [{ content: 'x', dueAt: '2026-08-10T10:30:00' }] },
+    ],
     ['negative version', { ...validInput, expectedVersion: -1 }],
     ['fractional version', { ...validInput, expectedVersion: 1.5 }],
     ['version above maximum', { ...validInput, expectedVersion: 1000000 }],

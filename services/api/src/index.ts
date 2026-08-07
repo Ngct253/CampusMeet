@@ -35,6 +35,7 @@ import {
   groupMeetingsHandler,
   meetingDetailHandler,
   myMeetingsHandler,
+  retryGoogleSyncHandler,
 } from './handlers/meetings';
 import { meHandler } from './handlers/me';
 import { minutesHandler } from './handlers/minutes';
@@ -64,6 +65,11 @@ const findRoute = createRouter([
   { method: 'GET', path: '/meetings', handler: myMeetingsHandler },
   { method: 'ANY', path: '/meetings/:meetingId', handler: meetingDetailHandler },
   { method: 'POST', path: '/meetings/:meetingId/cancel', handler: cancelMeetingHandler },
+  {
+    method: 'POST',
+    path: '/meetings/:meetingId/google-sync/retry',
+    handler: retryGoogleSyncHandler,
+  },
   { method: 'GET', path: '/meetings/:meetingId/attachments', handler: meetingAttachmentsHandler },
   {
     method: 'POST',
@@ -134,3 +140,4 @@ export const handler: APIGatewayProxyHandlerV2 = async (event, context, callback
 };
 
 export { reminderHandler } from './handlers/reminder';
+export { googleSyncWorkerHandler } from './handlers/google-sync-worker';

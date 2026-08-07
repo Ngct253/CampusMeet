@@ -5,6 +5,8 @@ import type {
   Group,
   GroupRole,
   Meeting,
+  GoogleMeetingFailureClass,
+  GoogleMeetingSyncRecord,
   MeetingMinutes,
   Notification,
   Priority,
@@ -22,17 +24,51 @@ export interface GroupRepository {
 }
 
 export interface MeetingRepository {
-  create(meeting: Meeting): Promise<Meeting>;
+  create(meeting: Meeting, sync?: GoogleMeetingSyncRecord): Promise<Meeting>;
   getById(id: string): Promise<Meeting | null>;
   resolveGroupId(id: string): Promise<string | null>;
   listByGroup(groupId: string, limit?: number, cursor?: string): Promise<MeetingPage>;
-  update(meeting: Meeting, expectedVersion: number): Promise<Meeting>;
+  update(
+    meeting: Meeting,
+    expectedVersion: number,
+    sync?: GoogleMeetingSyncRecord,
+    expectedSyncRevision?: number,
+  ): Promise<Meeting>;
   cancel(
     id: string,
     actorId: string,
     reason: string | undefined,
     expectedVersion?: number,
+    sync?: GoogleMeetingSyncRecord,
+    expectedSyncRevision?: number,
   ): Promise<Meeting>;
+}
+
+export interface GoogleMeetingSyncRepository {
+  get(meetingId: string): Promise<GoogleMeetingSyncRecord | null>;
+  createForLegacy(meeting: Meeting, now: string): Promise<GoogleMeetingSyncRecord>;
+  markSuccess(
+    meetingId: string,
+    syncRevision: number,
+    result: { googleEventId?: string; meetUrl?: string; attemptCount: number },
+  ): Promise<boolean>;
+  markFailure(
+    meetingId: string,
+    syncRevision: number,
+    failure: {
+      status: GoogleMeetingSyncRecord['syncStatus'];
+      attemptCount: number;
+      failureClass: GoogleMeetingFailureClass;
+      lastErrorCode: string;
+      lastErrorAt: string;
+      nextRetryAt?: string;
+    },
+  ): Promise<boolean>;
+  manualRetry(
+    meeting: Meeting,
+    expectedSyncRevision: number,
+    now: string,
+  ): Promise<GoogleMeetingSyncRecord>;
 }
 
 export interface MeetingPage {
@@ -113,11 +149,23 @@ export interface NotificationRepository {
 }
 
 export interface GoogleCalendarGateway {
-  createEvent(meeting: Meeting): Promise<{
+  ensureScheduledMeeting(
+    meeting: Meeting,
+    current: Pick<GoogleMeetingSyncRecord, 'googleEventId' | 'meetUrl'>,
+  ): Promise<{
     eventId: string;
     meetUrl?: string;
-    googleMeetingId?: string;
   }>;
+  ensureCancelledMeeting(meeting: Meeting, googleEventId?: string): Promise<void>;
+}
+
+export interface GoogleSyncRetryScheduler {
+  schedule(input: {
+    meetingId: string;
+    syncRevision: number;
+    attemptCount: number;
+    runAt: string;
+  }): Promise<void>;
 }
 
 export interface ReminderSchedulerGateway {

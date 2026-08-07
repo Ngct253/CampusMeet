@@ -116,31 +116,27 @@ describe('MeetingService', () => {
     expect((await repository.getById(first.id))?.status).toBe(MeetingStatus.CANCELLED);
   });
 
-  it('stores Google event details after creating a meeting', async () => {
+  it('persists a pending Google sync intent atomically without calling Google', async () => {
     const { repository, memberships } = setup();
     const service = new MeetingService(
       repository,
       memberships,
       () => new Date('2029-01-01T00:00:00Z'),
       () => 'meeting-google',
-      {
-        createEvent: async () => ({
-          eventId: 'event-1',
-          googleMeetingId: 'abc-defg-hij',
-          meetUrl: 'https://meet.google.com/abc-defg-hij',
-        }),
-      },
+      undefined,
+      undefined,
+      repository,
     );
-    await expect(service.create('g1', 'admin', input())).resolves.toMatchObject({
-      googleSyncStatus: 'READY',
-      integrationStatus: 'READY',
-      googleEventId: 'event-1',
-      googleMeetingId: 'abc-defg-hij',
-      version: 2,
+    await expect(service.create('g1', 'admin', input())).resolves.toMatchObject({ version: 1 });
+    await expect(repository.get('meeting-google')).resolves.toMatchObject({
+      syncStatus: 'PENDING',
+      syncRevision: 1,
+      desiredMeetingVersion: 1,
+      attemptCount: 0,
     });
   });
 
-  it('keeps meetings when Google Calendar is temporarily unavailable', async () => {
+  it('does not call Google in the synchronous create path', async () => {
     const { repository, memberships } = setup();
     const service = new MeetingService(
       repository,
@@ -148,18 +144,83 @@ describe('MeetingService', () => {
       () => new Date('2029-01-01T00:00:00Z'),
       () => 'meeting-google-failed',
       {
-        createEvent: async () => {
-          throw new Error('Google unavailable');
-        },
+        ensureScheduledMeeting: vi.fn(async () => {
+          throw new Error('must not run');
+        }),
+        ensureCancelledMeeting: vi.fn(async () => undefined),
       },
+      undefined,
+      repository,
     );
     const created = await service.create('g1', 'admin', input());
-    expect(created).toMatchObject({
-      googleSyncStatus: 'FAILED_RETRYABLE',
-      integrationStatus: 'FAILED',
-      version: 2,
-    });
+    expect(created).toMatchObject({ version: 1 });
     expect(await repository.getById(created.id)).not.toBeNull();
+  });
+
+  it('increments syncRevision atomically on update and preserves organizer/version semantics', async () => {
+    const { repository, memberships } = setup();
+    const service = new MeetingService(
+      repository,
+      memberships,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      repository,
+    );
+    const created = await service.create('g1', 'admin', input(), 'meeting-revision');
+    const updated = await service.update(created.id, { title: 'Updated', version: 1 }, 'admin');
+    expect(updated).toMatchObject({ organizerId: 'admin', version: 2 });
+    await expect(repository.get(created.id)).resolves.toMatchObject({
+      syncRevision: 2,
+      desiredMeetingVersion: 2,
+      syncStatus: 'PENDING',
+    });
+  });
+
+  it('persists cancellation and its desired sync revision together', async () => {
+    const { repository, memberships } = setup();
+    const service = new MeetingService(
+      repository,
+      memberships,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      repository,
+    );
+    const created = await service.create('g1', 'admin', input(), 'meeting-cancel-sync');
+    const cancelled = await service.cancel(created.id, 'admin', 'done', 1);
+    expect(cancelled).toMatchObject({ status: 'CANCELLED', version: 2 });
+    await expect(repository.get(created.id)).resolves.toMatchObject({
+      syncRevision: 2,
+      desiredMeetingStatus: 'CANCELLED',
+    });
+  });
+
+  it('allows only an active Group Admin to create a manual retry revision', async () => {
+    const { repository, memberships } = setup();
+    const service = new MeetingService(
+      repository,
+      memberships,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      repository,
+    );
+    await service.create('g1', 'admin', input(), 'meeting-manual-retry');
+    await expect(service.retryGoogleSync('meeting-manual-retry', 'member')).rejects.toMatchObject({
+      statusCode: 403,
+    });
+    await expect(service.retryGoogleSync('meeting-manual-retry', 'admin')).resolves.toEqual({
+      provider: 'GOOGLE',
+      status: 'PENDING',
+    });
+    await expect(repository.get('meeting-manual-retry')).resolves.toMatchObject({
+      syncRevision: 2,
+      attemptCount: 0,
+    });
   });
 
   it('creates, reschedules, and cancels the one-time meeting reminder', async () => {
