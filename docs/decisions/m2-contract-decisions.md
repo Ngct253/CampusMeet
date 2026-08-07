@@ -16,7 +16,7 @@ Audit precedence remains SRS, API contract, DynamoDB model, team plan/architectu
 
 ## Scope
 
-This record includes Organizer, PATCH version, Meeting pagination, and the high-level M2-M4 Google synchronization principle. It excludes implementation in this branch, AWS deployment, transcription/recording/AI, DynamoDB migration, and the detailed M2-M4 retry/status design.
+This record includes Organizer, PATCH version, Meeting pagination, and the original M2-M4 Google synchronization decision. The complete runtime follow-up is now accepted separately. This record excludes implementation, AWS deployment, transcription/recording/AI, and DynamoDB migration.
 
 ## Accepted decisions
 
@@ -97,7 +97,7 @@ Consumer requirements:
 
 ## Related accepted decision: M2-M4 Google synchronization
 
-Option 4A is accepted at the following principle level:
+Option 4A is accepted. Its complete runtime design was accepted on 2026-08-07 in [M2–M4 synchronization](m2-m4-synchronization.md):
 
 - Internal Meeting is the source of truth for its internal lifecycle.
 - Internal create, update, or cancel is not rolled back only because Google Calendar/Meet synchronization fails.
@@ -107,23 +107,21 @@ Option 4A is accepted at the following principle level:
 - Users can recognize an appropriate pending/failed state under UX defined in the follow-up.
 - Retry must not create duplicate Google events.
 
-Accepted now: no Meeting rollback, eventual consistency, stored failure state, and idempotent retry.
-
-Not yet specified: exact status enum, retry count, backoff, EventBridge versus SQS versus manual retry, Google event ID and Meet URL storage location, and exact UX. A separate decision/design follow-up will settle these details.
+The follow-up locks the status enum, separate sync record in `meeting-data`, DynamoDB Stream initial trigger, `syncRevision`, current-state reconciliation, at-most-one active Google event, EventBridge Scheduler retry schedule, manual retry, UX, security, and observability. Runtime implementation and AWS verification remain incomplete.
 
 ## Decision authority
 
 The authority classification remains useful architecture context, although the required cross-module choices are now accepted.
 
-| Decision                           | Original authority boundary          | Current outcome                       | Why cross-module review mattered           |
-| ---------------------------------- | ------------------------------------ | ------------------------------------- | ------------------------------------------ |
-| First-party web sends `version`    | M2-owned                             | Accepted and retained                 | M2 controls its client                     |
-| Organizer equals creator           | M2-led, cross-module review required | Option 1A accepted                    | M1 authorization and M4 identity           |
-| Required PATCH `version`           | Shared-contract approval required    | Option 2B accepted                    | Breaking API and caller impact             |
-| Public Meeting page response       | Shared-contract approval required    | Option 3A accepted                    | M3, M5, Dashboard, and frontend impact     |
-| M2-M4 eventual consistency         | Cross-module approval required       | Option 4A accepted at principle level | Shared lifecycle and external side effects |
-| Internal repository implementation | M2-owned                             | Remains M2-owned                      | No public behavior change by itself        |
-| DynamoDB schema/GSI                | Infra/data approval required         | Not changed by this decision          | Shared infrastructure                      |
+| Decision                           | Original authority boundary          | Current outcome                   | Why cross-module review mattered           |
+| ---------------------------------- | ------------------------------------ | --------------------------------- | ------------------------------------------ |
+| First-party web sends `version`    | M2-owned                             | Accepted and retained             | M2 controls its client                     |
+| Organizer equals creator           | M2-led, cross-module review required | Option 1A accepted                | M1 authorization and M4 identity           |
+| Required PATCH `version`           | Shared-contract approval required    | Option 2B accepted                | Breaking API and caller impact             |
+| Public Meeting page response       | Shared-contract approval required    | Option 3A accepted                | M3, M5, Dashboard, and frontend impact     |
+| M2-M4 eventual consistency         | Cross-module approval required       | Option 4A runtime design accepted | Shared lifecycle and external side effects |
+| Internal repository implementation | M2-owned                             | Remains M2-owned                  | No public behavior change by itself        |
+| DynamoDB schema/GSI                | Infra/data approval required         | Not changed by this decision      | Shared infrastructure                      |
 
 Acceptance of the choices authorizes coordinated implementation planning; it does not mean the implementation follow-ups are already complete.
 
@@ -149,13 +147,13 @@ Option 2B closes the stale-client gap consistently for all Meeting PATCH callers
 
 ### Implementation checklist
 
-- [ ] Make `UpdateMeetingRequest.version` required.
-- [ ] Require `version` in the PATCH Zod schema.
-- [ ] Add missing-version validation test.
-- [ ] Retain/add stale-version `409` test.
-- [ ] Ensure every Meeting PATCH caller sends version.
-- [ ] Remove persisted-version fallback.
-- [ ] Update API contract in the implementation PR.
+- [x] Make `UpdateMeetingRequest.version` required.
+- [x] Require `version` in the PATCH Zod schema.
+- [x] Add missing-version validation test.
+- [x] Retain/add stale-version `409` test.
+- [x] Ensure every Meeting PATCH caller sends version.
+- [x] Remove persisted-version fallback.
+- [x] Update API contract in the implementation PR.
 
 ## Decision 3 rationale, consumer impact, and alternatives
 
@@ -190,23 +188,21 @@ Option 4A preserves an internally successful Meeting mutation when an external p
 
 Do not implement any follow-up on this documentation branch.
 
-### Follow-up 1 - Required PATCH version
+### Completed follow-up 1 - Required PATCH version
 
-Proposed branch: `fix/m2-require-update-version`
+Merged implementation branch: `fix/m2-require-update-version`.
 
-Scope: required DTO; required Zod schema; remove service fallback; audit/update all callers; missing-version validation; stale-version `409`; regression tests; API contract update.
+Implemented on main: required DTO/Zod version, no service fallback, updated first-party callers, validation/conflict coverage, and API contract.
 
-### Follow-up 2 - Meeting pagination
+### Completed follow-up 2 - Meeting pagination
 
-Proposed branch: `feature/m2-meeting-pagination`
+Merged implementation branch: `feature/m2-meeting-pagination`.
 
-Scope: public page DTO; handler limit/cursor; opaque cursor; service preserves `nextCursor`; M2 timeline; M3 Task selector; M5 consumers; Dashboard; coordinated tests.
+Implemented on main: public page DTO, handler limit/cursor, opaque cursor, preserved `nextCursor`, migrated first-party consumers, and coordinated coverage.
 
-### Follow-up 3 - M2-M4 synchronization details
+### Follow-up 3 - M2-M4 synchronization implementation
 
-Proposed docs branch: `docs/m2-m4-sync-contract`
-
-Unresolved scope: sync status model; retry mechanism; idempotency details; Google event ownership; Meet URL storage; manual retry; monitoring; retry count and backoff.
+The runtime design is resolved in [M2–M4 synchronization](m2-m4-synchronization.md). A later implementation PR must implement its shared DTO, repository transaction, Stream worker, Google adapter, Scheduler retry, manual retry, UX, observability, IaC, deployment, and smoke verification requirements.
 
 ### Follow-up 4 - AWS deployment and smoke testing
 

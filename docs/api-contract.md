@@ -12,63 +12,95 @@ Khi email được mời đã có profile CampusMeet, notification lời mời �
 
 Khi lời mời được chấp nhận hoặc từ chối, notification `invitation-<invitationId>` tương ứng được chuyển sang đã đọc; phản hồi lời mời không thất bại nếu notification cũ không tồn tại.
 
-| Method    | Endpoint dự kiến                                               | Shared contract                                                    | Trạng thái hiện tại                                              |
-| --------- | -------------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| GET       | `/health`                                                      | `ApiSuccessResponse<{service,status,timestamp}>`                   | Đã có health handler                                             |
-| GET/PATCH | `/me`                                                          | `UserProfile`, `UpdateProfileRequest`                              | M1 đã triển khai                                                 |
-| GET/POST  | `/groups`                                                      | `CreateGroupRequest`, `GroupSummary[]`                             | M1 đã triển khai                                                 |
-| GET/PATCH | `/groups/:groupId`                                             | `GroupDetails`, `CreateGroupRequest`                               | M1 đã triển khai, PATCH yêu cầu Group Admin                      |
-| DELETE    | `/groups/:groupId/members/:userId`                             | `{removed:true}`                                                   | M1 đã triển khai, không cho xóa Group Admin                      |
-| POST      | `/groups/:groupId/invitations`                                 | `CreateInvitationRequest`, `CreateInvitationResponse`              | M1 đã triển khai                                                 |
-| GET       | `/groups/:groupId/invitations`                                 | `InvitationDetails[]`                                              | M1 đã triển khai, yêu cầu Group Admin                            |
-| POST      | `/groups/:groupId/invitations/:invitationId/revoke`            | `{revoked:true}`                                                   | M1 đã triển khai, vô hiệu hóa token cũ                           |
-| GET       | `/invitations`                                                 | `InvitationDetails[]`                                              | M1 đã triển khai theo email đăng nhập                            |
-| POST      | `/invitations/by-id/:invitationId/accept`                      | `InvitationDetails`                                                | M1 đã triển khai                                                 |
-| POST      | `/invitations/by-id/:invitationId/decline`                     | `InvitationDetails`                                                | M1 đã triển khai                                                 |
-| GET       | `/invitations/:token`                                          | `InvitationDetails`                                                | M1 đã triển khai                                                 |
-| POST      | `/invitations/:token/accept`                                   | `InvitationDetails`                                                | M1 đã triển khai                                                 |
-| POST      | `/invitations/:token/decline`                                  | `InvitationDetails`                                                | M1 đã triển khai                                                 |
-| GET       | `/meetings`                                                    | `Meeting[]`                                                        | Đã triển khai, trả lịch của các nhóm người dùng đang tham gia    |
-| GET/POST  | `/groups/:groupId/meetings`                                    | `Meeting[]`, `CreateMeetingRequest`                                | Đã triển khai; POST yêu cầu Group Admin và `Idempotency-Key`     |
-| GET/PATCH | `/meetings/:meetingId`                                         | `Meeting`, `UpdateMeetingRequest`                                  | Đã triển khai; PATCH yêu cầu Group Admin                         |
-| POST      | `/meetings/:meetingId/cancel`                                  | `CancelMeetingRequest`, `Meeting`                                  | Đã triển khai; yêu cầu Group Admin                               |
-| GET       | `/meetings/:meetingId/minutes`                                 | `MeetingMinutes`                                                   | Active member; trả latest version, chưa có trả `404`             |
-| PUT       | `/meetings/:meetingId/minutes`                                 | `UpdateMeetingMinutesRequest`, `MeetingMinutes`                    | Active Group Admin; optimistic version                           |
-| POST      | `/meetings/:meetingId/minutes/action-items/:actionItemId/task` | `ConvertActionItemToTaskRequest`, `ConvertActionItemToTaskResponse` | Active Group Admin; atomic Task + Minutes version                |
-| GET       | `/tasks`                                                       | `Task[]`                                                           | Đã triển khai; trả toàn bộ task có `assigneeId` bằng user từ JWT |
-| POST      | `/tasks`                                                       | `CreateTaskRequest`, `Task`                                        | Group Admin; bắt buộc `Idempotency-Key`                          |
-| PATCH     | `/tasks/:taskId/status`                                        | `UpdateTaskStatusRequest`, `Task`                                  | Assignee hoặc active Group Admin; optimistic version             |
-| GET       | `/dashboard`                                                   | `DashboardResponse`                                                | M3 đã triển khai task summary cá nhân                            |
-| GET       | `/notifications`                                               | `Notification[]`                                                   | M1 đã triển khai                                                 |
-| POST      | `/notifications/:notificationId/read`                          | `{read:true}`                                                      | M1 đã triển khai                                                 |
-| POST      | `/integrations/google/connect`                                 | Authorization URL                                                  | M4 đã triển khai OAuth connect                                   |
-| GET       | `/integrations/google/callback`                                | Google OAuth callback                                              | M4 đã triển khai; public callback có one-time state              |
-| GET       | `/integrations/google/meet-context`                            | `Meeting`                                                          | M4 đã triển khai; xác thực membership từ Meet context            |
-| POST      | `/meetings/:meetingId/google-artifacts/sync`                   | `StartGoogleArtifactSyncRequest/Response`                          | Đã chốt contract mục tiêu; chưa implement                        |
-| POST      | `/meetings/:meetingId/attachments/upload-url`                  | `CreateUploadUrlResponse`                                          | M4 đã triển khai                                                 |
-| POST      | `/meetings/:meetingId/attachments/:attachmentId/complete`      | `CompleteUploadResponse`                                           | M4 đã triển khai cho tài liệu                                    |
-| GET       | `/meetings/:meetingId/attachments`                             | `Attachment[]`                                                     | M4 đã triển khai                                                 |
-| POST      | `/attachments/:attachmentId/download-url`                      | `AttachmentDownloadTarget`                                         | M4 đã triển khai                                                 |
-| POST      | `/meetings/:meetingId/recordings`                              | `CreateRecordingRequest`, `Recording`                              | Đã chốt contract mục tiêu; chưa implement                        |
-| POST      | `/meetings/:meetingId/transcriptions`                          | `StartTranscriptionRequest`, `AIJob`                               | Đã chốt contract mục tiêu; chưa implement                        |
-| GET       | `/meetings/:meetingId/transcripts`                             | `Transcript[]`, `TranscriptSegment[]`                              | Đã chốt contract mục tiêu; chưa implement                        |
-| PATCH     | `/transcripts/:transcriptId/segments/:segmentId`               | `UpdateTranscriptSegmentRequest`, `TranscriptSegment`              | Đã chốt contract mục tiêu; chưa implement                        |
-| POST      | `/transcripts/:transcriptId/approve`                           | `ApproveTranscriptRequest`, `Transcript`, `AIJob`                  | Đã chốt contract mục tiêu; chưa implement                        |
-| POST      | `/meetings/:meetingId/live-transcription`                      | `StartLiveTranscriptionRequest`, `LiveTranscriptionSession`        | Đã chốt contract mục tiêu; chưa implement                        |
-| GET       | `/meetings/:meetingId/live-transcription/:sessionId`           | `LiveTranscriptionSession`                                         | Đã chốt contract mục tiêu; chưa implement                        |
-| POST      | `/meetings/:meetingId/live-transcription/:sessionId/segments`  | `AppendFinalSegmentsRequest`, `TranscriptSegment[]`                | Đã chốt contract mục tiêu; chưa implement                        |
-| POST      | `/meetings/:meetingId/live-transcription/:sessionId/heartbeat` | `LiveTranscriptionHeartbeatRequest`, `LiveTranscriptionSession`    | Đã chốt contract mục tiêu; chưa implement                        |
-| POST      | `/meetings/:meetingId/live-transcription/:sessionId/reconnect` | `ReconnectLiveTranscriptionRequest`, `LiveTranscriptionConnection` | Đã chốt contract mục tiêu; chưa implement                        |
-| POST      | `/meetings/:meetingId/live-transcription/:sessionId/stop`      | `StopLiveTranscriptionRequest`, `LiveTranscriptionSession`         | Đã chốt contract mục tiêu; chưa implement                        |
-| POST      | `/meetings/:meetingId/ai/chat`                                 | `MeetingChatRequest` → `AIJob` (`202`)                             | Phase 4A handler/application đã implement                        |
-| POST      | `/groups/:groupId/ai/search`                                   | `GroupKnowledgeQuery` → `AIJob` (`202`)                            | Phase 4A handler/application đã implement                        |
-| POST      | `/meetings/:meetingId/ai/minutes-draft`                        | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                    | Phase 4A handler/application đã implement                        |
-| POST      | `/meetings/:meetingId/ai/task-proposals`                       | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                    | Phase 4A handler/application đã implement                        |
-| POST      | `/ai/task-proposals/:proposalId/confirm`                       | `ConfirmTaskProposalRequest/Response`                              | Group Admin theo FR-16; chưa implement                           |
-| POST      | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                   | Phase 4A; yêu cầu Group Admin                                    |
-| POST      | `/groups/:groupId/ai/tool-proposals`                           | `CreateToolProposalRequest`, `ToolProposal`                        | Pha AI mở rộng; chưa implement                                   |
-| POST      | `/ai/tool-proposals/:id/confirm`                               | `ConfirmToolProposalRequest/Response`                              | Pha AI mở rộng; chưa implement                                   |
-| GET       | `/ai/jobs/:aiJobId`                                            | `AIJobDetail`                                                      | M5 đã triển khai                                                 |
+| Method    | Endpoint dự kiến                                               | Shared contract                                                     | Trạng thái hiện tại                                                     |
+| --------- | -------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| GET       | `/health`                                                      | `ApiSuccessResponse<{service,status,timestamp}>`                    | Đã có health handler                                                    |
+| GET/PATCH | `/me`                                                          | `UserProfile`, `UpdateProfileRequest`                               | M1 đã triển khai                                                        |
+| GET/POST  | `/groups`                                                      | `CreateGroupRequest`, `GroupSummary[]`                              | M1 đã triển khai                                                        |
+| GET/PATCH | `/groups/:groupId`                                             | `GroupDetails`, `CreateGroupRequest`                                | M1 đã triển khai, PATCH yêu cầu Group Admin                             |
+| DELETE    | `/groups/:groupId/members/:userId`                             | `{removed:true}`                                                    | M1 đã triển khai, không cho xóa Group Admin                             |
+| POST      | `/groups/:groupId/invitations`                                 | `CreateInvitationRequest`, `CreateInvitationResponse`               | M1 đã triển khai                                                        |
+| GET       | `/groups/:groupId/invitations`                                 | `InvitationDetails[]`                                               | M1 đã triển khai, yêu cầu Group Admin                                   |
+| POST      | `/groups/:groupId/invitations/:invitationId/revoke`            | `{revoked:true}`                                                    | M1 đã triển khai, vô hiệu hóa token cũ                                  |
+| GET       | `/invitations`                                                 | `InvitationDetails[]`                                               | M1 đã triển khai theo email đăng nhập                                   |
+| POST      | `/invitations/by-id/:invitationId/accept`                      | `InvitationDetails`                                                 | M1 đã triển khai                                                        |
+| POST      | `/invitations/by-id/:invitationId/decline`                     | `InvitationDetails`                                                 | M1 đã triển khai                                                        |
+| GET       | `/invitations/:token`                                          | `InvitationDetails`                                                 | M1 đã triển khai                                                        |
+| POST      | `/invitations/:token/accept`                                   | `InvitationDetails`                                                 | M1 đã triển khai                                                        |
+| POST      | `/invitations/:token/decline`                                  | `InvitationDetails`                                                 | M1 đã triển khai                                                        |
+| GET       | `/meetings`                                                    | `Meeting[]`                                                         | Đã triển khai, trả lịch của các nhóm người dùng đang tham gia           |
+| GET/POST  | `/groups/:groupId/meetings`                                    | `MeetingTimelineResponse`, `CreateMeetingRequest`                   | Đã triển khai pagination; POST yêu cầu Group Admin và `Idempotency-Key` |
+| GET/PATCH | `/meetings/:meetingId`                                         | `Meeting`, `UpdateMeetingRequest`                                   | Đã triển khai; PATCH yêu cầu Group Admin và required `version`          |
+| POST      | `/meetings/:meetingId/cancel`                                  | `CancelMeetingRequest`, `Meeting`                                   | Đã triển khai; yêu cầu Group Admin                                      |
+| POST      | `/meetings/:meetingId/google-sync/retry`                       | `GoogleMeetingSyncSummary`                                          | Contract ACCEPTED; chưa implement                                       |
+| GET       | `/meetings/:meetingId/minutes`                                 | `MeetingMinutes`                                                    | Active member; trả latest version, chưa có trả `404`                    |
+| PUT       | `/meetings/:meetingId/minutes`                                 | `UpdateMeetingMinutesRequest`, `MeetingMinutes`                     | Active Group Admin; optimistic version                                  |
+| POST      | `/meetings/:meetingId/minutes/action-items/:actionItemId/task` | `ConvertActionItemToTaskRequest`, `ConvertActionItemToTaskResponse` | Active Group Admin; atomic Task + Minutes version                       |
+| GET       | `/tasks`                                                       | `Task[]`                                                            | Đã triển khai; trả toàn bộ task có `assigneeId` bằng user từ JWT        |
+| POST      | `/tasks`                                                       | `CreateTaskRequest`, `Task`                                         | Group Admin; bắt buộc `Idempotency-Key`                                 |
+| PATCH     | `/tasks/:taskId/status`                                        | `UpdateTaskStatusRequest`, `Task`                                   | Assignee hoặc active Group Admin; optimistic version                    |
+| GET       | `/dashboard`                                                   | `DashboardResponse`                                                 | M3 đã triển khai task summary cá nhân                                   |
+| GET       | `/notifications`                                               | `Notification[]`                                                    | M1 đã triển khai                                                        |
+| POST      | `/notifications/:notificationId/read`                          | `{read:true}`                                                       | M1 đã triển khai                                                        |
+| POST      | `/integrations/google/connect`                                 | Authorization URL                                                   | M4 đã triển khai OAuth connect                                          |
+| GET       | `/integrations/google/callback`                                | Google OAuth callback                                               | M4 đã triển khai; public callback có one-time state                     |
+| GET       | `/integrations/google/meet-context`                            | `Meeting`                                                           | M4 đã triển khai; xác thực membership từ Meet context                   |
+| POST      | `/meetings/:meetingId/google-artifacts/sync`                   | `StartGoogleArtifactSyncRequest/Response`                           | Đã chốt contract mục tiêu; chưa implement                               |
+| POST      | `/meetings/:meetingId/attachments/upload-url`                  | `CreateUploadUrlResponse`                                           | M4 đã triển khai                                                        |
+| POST      | `/meetings/:meetingId/attachments/:attachmentId/complete`      | `CompleteUploadResponse`                                            | M4 đã triển khai cho tài liệu                                           |
+| GET       | `/meetings/:meetingId/attachments`                             | `Attachment[]`                                                      | M4 đã triển khai                                                        |
+| POST      | `/attachments/:attachmentId/download-url`                      | `AttachmentDownloadTarget`                                          | M4 đã triển khai                                                        |
+| POST      | `/meetings/:meetingId/recordings`                              | `CreateRecordingRequest`, `Recording`                               | Đã chốt contract mục tiêu; chưa implement                               |
+| POST      | `/meetings/:meetingId/transcriptions`                          | `StartTranscriptionRequest`, `AIJob`                                | Đã chốt contract mục tiêu; chưa implement                               |
+| GET       | `/meetings/:meetingId/transcripts`                             | `Transcript[]`, `TranscriptSegment[]`                               | Đã chốt contract mục tiêu; chưa implement                               |
+| PATCH     | `/transcripts/:transcriptId/segments/:segmentId`               | `UpdateTranscriptSegmentRequest`, `TranscriptSegment`               | Đã chốt contract mục tiêu; chưa implement                               |
+| POST      | `/transcripts/:transcriptId/approve`                           | `ApproveTranscriptRequest`, `Transcript`, `AIJob`                   | Đã chốt contract mục tiêu; chưa implement                               |
+| POST      | `/meetings/:meetingId/live-transcription`                      | `StartLiveTranscriptionRequest`, `LiveTranscriptionSession`         | Đã chốt contract mục tiêu; chưa implement                               |
+| GET       | `/meetings/:meetingId/live-transcription/:sessionId`           | `LiveTranscriptionSession`                                          | Đã chốt contract mục tiêu; chưa implement                               |
+| POST      | `/meetings/:meetingId/live-transcription/:sessionId/segments`  | `AppendFinalSegmentsRequest`, `TranscriptSegment[]`                 | Đã chốt contract mục tiêu; chưa implement                               |
+| POST      | `/meetings/:meetingId/live-transcription/:sessionId/heartbeat` | `LiveTranscriptionHeartbeatRequest`, `LiveTranscriptionSession`     | Đã chốt contract mục tiêu; chưa implement                               |
+| POST      | `/meetings/:meetingId/live-transcription/:sessionId/reconnect` | `ReconnectLiveTranscriptionRequest`, `LiveTranscriptionConnection`  | Đã chốt contract mục tiêu; chưa implement                               |
+| POST      | `/meetings/:meetingId/live-transcription/:sessionId/stop`      | `StopLiveTranscriptionRequest`, `LiveTranscriptionSession`          | Đã chốt contract mục tiêu; chưa implement                               |
+| POST      | `/meetings/:meetingId/ai/chat`                                 | `MeetingChatRequest` → `AIJob` (`202`)                              | Phase 4A handler/application đã implement                               |
+| POST      | `/groups/:groupId/ai/search`                                   | `GroupKnowledgeQuery` → `AIJob` (`202`)                             | Phase 4A handler/application đã implement                               |
+| POST      | `/meetings/:meetingId/ai/minutes-draft`                        | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                     | Phase 4A handler/application đã implement                               |
+| POST      | `/meetings/:meetingId/ai/task-proposals`                       | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                     | Phase 4A handler/application đã implement                               |
+| POST      | `/ai/task-proposals/:proposalId/confirm`                       | `ConfirmTaskProposalRequest/Response`                               | Group Admin theo FR-16; chưa implement                                  |
+| POST      | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                    | Phase 4A; yêu cầu Group Admin                                           |
+| POST      | `/groups/:groupId/ai/tool-proposals`                           | `CreateToolProposalRequest`, `ToolProposal`                         | Pha AI mở rộng; chưa implement                                          |
+| POST      | `/ai/tool-proposals/:id/confirm`                               | `ConfirmToolProposalRequest/Response`                               | Pha AI mở rộng; chưa implement                                          |
+| GET       | `/ai/jobs/:aiJobId`                                            | `AIJobDetail`                                                       | M5 đã triển khai                                                        |
+
+## Contract đồng bộ Google của Meeting
+
+Decision 4A runtime đã **ACCEPTED** ngày 2026-08-07; runtime và AWS chưa hoàn tất. Meeting create, update và cancel thành công khi transaction nội bộ đã ghi đồng thời Meeting và synchronization intent. Các response này không chờ Google; Google failure sau đó không biến mutation nội bộ đã thành công thành `5xx` hoặc rollback Meeting.
+
+Meeting detail mục tiêu bổ sung summary chỉ đọc, tách khỏi lifecycle:
+
+```json
+{
+  googleSync: {
+    provider: GOOGLE,
+    status: PENDING|SYNCED|FAILED|ACTION_REQUIRED,
+    meetUrl: https://meet.google.com/...,
+    failureCode: GOOGLE_CONNECTION_REQUIRED,
+    nextRetryAt: 2026-08-07T10:00:00.000Z
+  }
+}
+```
+
+`meetUrl`, `failureCode` và `nextRetryAt` là optional và chỉ xuất hiện khi phù hợp. API chỉ trả `meetUrl` từ trusted Google state. Không expose raw provider error, `googleEventId`, OAuth credential, `syncRevision` hoặc `attemptCount`. Create/update body không nhận bất kỳ trusted integration field nào.
+
+### `POST /meetings/:meetingId/google-sync/retry`
+
+- Authentication: Cognito JWT.
+- Authorization: actor là active member và `GROUP_ADMIN` của group được resolve server-side từ Meeting; không tin `groupId` trong body.
+- Request body: không chứa Meeting snapshot hoặc integration fields; body rỗng được chấp nhận theo parser contract mà implementation PR chốt.
+- Behavior: đọc Meeting và sync record hiện tại; không đổi Meeting lifecycle; tạo revision mới ở `PENDING`, reset attempt/failure metadata, rồi xử lý bất đồng bộ.
+- Success: `200` theo envelope hiện tại, `data` là read-only `GoogleMeetingSyncSummary` ở `PENDING`. Response xác nhận intent đã durable, không xác nhận Google đã đồng bộ.
+- `400`: malformed input; `401`: thiếu/sai authentication; `403`: không phải active Group Admin; `404`: Meeting hoặc sync resource không tồn tại theo access boundary; `409`: conditional revision conflict hoặc trạng thái không thể tạo retry an toàn; `5xx`: chỉ khi không thể persist retry intent/internal dependency lỗi, không dùng để biểu diễn Google attempt bất đồng bộ thất bại.
+
+Chi tiết state machine, retry 1m/5m/15m/1h/6h, idempotency và failure classification nằm tại [M2–M4 synchronization runtime contract](decisions/m2-m4-synchronization.md).
 
 ## Quy ước contract cho AI và artifact
 
@@ -184,6 +216,7 @@ Nghiệp vụ khác chưa triển khai:
 | Tool allowlist | Chốt tool MVP, quyền, trường cần xác nhận, expiry và audit; không expose CRUD tùy ý cho model                                                                                                                                 |
 | Retention      | Upload chưa hoàn tất 1 ngày, raw audio 7 ngày, AIJob/conversation 30 ngày; source/vector tồn tại đến khi source hoặc meeting bị xóa                                                                                           |
 | Shared states  | Tách `MeetingStatus` khỏi `GoogleSyncStatus`; cập nhật `@campusmeet/shared` trước khi implement route mới                                                                                                                     |
+| Google sync    | Runtime design 4A đã ACCEPTED; implement sync record/transaction, Stream worker, Scheduler retry, manual retry và read-only detail summary; runtime/AWS chưa complete                                                         |
 
 Không triển khai route hoặc CRUD thật chỉ để làm bảng này trông hoàn chỉnh.
 
@@ -193,4 +226,4 @@ For Meeting creation, the authenticated creator is the organizer; `organizerId` 
 
 `GET /groups/{groupId}/meetings` returns `CursorPage<Meeting>` in the success envelope. Query `limit` defaults to 20 and must be an integer from 1 through 100. `cursor` is an opaque, versioned logical cursor scoped to the group and stable `startsAt + meetingId` ordering; malformed or wrong-group cursors return `400`. `nextCursor` is omitted at the end. Clients must not decode the cursor.
 
-Google synchronization follows eventual consistency: an external failure does not roll back the internal Meeting. Runtime failure persistence and idempotent retry remain pending the M4 design prerequisites in `docs/decisions/m2-m4-synchronization.md`; they are not AWS-runtime verified.
+Google synchronization follows eventual consistency: an external failure does not roll back the internal Meeting. The complete runtime design is ACCEPTED in `docs/decisions/m2-m4-synchronization.md`. Latest main has OAuth and Calendar create code, but sync-record persistence, Stream worker, `syncRevision`, update/cancel reconciliation and bounded retry remain unimplemented and are not AWS-runtime verified.

@@ -212,6 +212,13 @@ M5 không ghi task hoặc minutes chính thức trực tiếp. M5 tạo draft c�
 
 ## 8. M4 — Google, Meet Add-on, upload, AIJob và reminder
 
+### Trạng thái M2–M4
+
+- M2–M4 runtime design 4A: **ACCEPTED** ngày 2026-08-07; chi tiết tại [runtime contract](decisions/m2-m4-synchronization.md).
+- M4 Google synchronization runtime: **NOT YET COMPLETE**.
+- M4 Google synchronization AWS verification: **NOT YET COMPLETE**.
+- Implementation phải dùng sync record riêng trong `meeting-data`, DynamoDB Stream cho initial attempt và EventBridge Scheduler one-shot cho tối đa năm retry; không thêm physical table.
+
 ### Kết quả phải bàn giao
 
 ```text
@@ -251,9 +258,11 @@ User kết nối Google
 
 - Refresh token không trả browser hoặc log.
 - Secret nằm Secrets Manager/SSM hoặc ciphertext được mã hóa phù hợp.
-- `meetingStatus` và `googleSyncStatus` độc lập.
-- Chỉ hiển thị Meet URL khi `READY`.
-- Retry dùng idempotency/request ID; không tạo event mới mù quáng.
+- `meetingStatus` và Google sync status độc lập; Google failure không rollback create/update/cancel nội bộ.
+- Sync status runtime là `PENDING`, `SYNCED`, `FAILED`, `ACTION_REQUIRED`; chỉ hiển thị trusted Meet URL khi `SYNCED` và URL tồn tại.
+- Mỗi desired state tăng `syncRevision`; stale delivery no-op. Retry reconcile Meeting hiện tại và không tạo event mới mù quáng.
+- Initial attempt dùng DynamoDB Stream. Automatic retry dùng EventBridge Scheduler one-shot theo 1m/5m/15m/1h/6h, tối đa năm retry sau initial attempt.
+- Group Admin có thể gọi manual retry sau server-side authorization; missing/revoked Google connection chuyển `ACTION_REQUIRED` và cần reconnect.
 - Google artifact không có là kết quả hợp lệ, không làm mất meeting/minutes/task nội bộ.
 - Upload khóa ở 10 file/meeting, 50 MB/file; tài liệu TXT/Markdown/CSV/TSV/JSON/NDJSON/HTML/XHTML/XML/YAML/iCalendar, PDF, DOCX/PPTX/XLSX và ODT/ODP/ODS; audio MP3/WAV/WebM/M4A và tối đa 60 phút. Complete handler kiểm tra `HeadObject`; worker kiểm tra extension, MIME và signature/cấu trúc file khi áp dụng trước khi chuyển `READY`.
 - Upload chưa hoàn tất expire sau 1 ngày; raw audio giữ 7 ngày và có thể bị xóa sớm theo quyền.
