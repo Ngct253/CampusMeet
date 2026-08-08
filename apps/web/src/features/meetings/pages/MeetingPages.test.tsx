@@ -423,7 +423,7 @@ it('chỉ cho tải tài liệu đã sẵn sàng và dùng tên định dạng t
   open.mockRestore();
 });
 
-it('không gửi lại metadata đã được ký sẵn trong URL upload S3', async () => {
+it('gửi đúng metadata checksum bắt buộc trong URL upload S3', async () => {
   const bytes = new TextEncoder().encode('Nội dung kiểm thử upload');
   const file = new File([bytes], 'ghi-chu.txt', { type: 'text/plain' });
   Object.defineProperty(file, 'arrayBuffer', {
@@ -479,13 +479,18 @@ it('không gửi lại metadata đã được ký sẵn trong URL upload S3', as
     'https://example.com/signed-upload',
     expect.objectContaining({
       method: 'PUT',
-      headers: { 'content-type': 'text/plain' },
+      headers: {
+        'content-type': 'text/plain',
+        'x-amz-meta-checksum': expect.any(String),
+      },
       body: file,
     }),
   );
   expect(
-    Object.keys((uploadFetch.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>),
-  ).not.toContain('x-amz-meta-checksum');
+    ((uploadFetch.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>)[
+      'x-amz-meta-checksum'
+    ],
+  ).toMatch(/^[a-f0-9]{64}$/);
   uploadFetch.mockRestore();
 });
 

@@ -1111,6 +1111,7 @@ function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
         method: 'PUT',
         headers: {
           'content-type': contentType,
+          'x-amz-meta-checksum': checksum,
         },
         body: file,
       });
