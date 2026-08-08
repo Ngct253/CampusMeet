@@ -25,7 +25,19 @@ const setup = () => {
     requireMeetingsInGroup: vi.fn().mockResolvedValue(undefined),
   };
   const jobs: AIJobOrchestrator = { enqueue: vi.fn().mockResolvedValue(queuedJob) };
-  return { access, meetings, jobs, service: new AIRequestService(access, meetings, jobs) };
+  const snapshots = {
+    getVersion: vi.fn().mockResolvedValue({ groupId: 'group-1', version: 4 }),
+    generate: vi.fn().mockResolvedValue({ groupId: 'group-1', version: 5 }),
+  };
+  const jobReplays = { findExisting: vi.fn().mockResolvedValue(null) };
+  return {
+    access,
+    meetings,
+    jobs,
+    snapshots,
+    jobReplays,
+    service: new AIRequestService(access, meetings, jobs, snapshots, jobReplays),
+  };
 };
 
 describe('AI request service', () => {
@@ -125,9 +137,181 @@ describe('AI request service', () => {
       expect.objectContaining({
         groupId: 'group-1',
         type: 'PROGRESS_ANALYSIS',
-        payload: expect.objectContaining({ operation: 'PROGRESS_ANALYSIS' }),
+        payload: expect.objectContaining({
+          operation: 'PROGRESS_ANALYSIS',
+          request: { snapshotVersion: 5 },
+        }),
       }),
     );
+  });
+
+  it('does not inspect replay or snapshots when Group Admin authorization fails', async () => {
+    const { access, service, snapshots, jobs, jobReplays } = setup();
+    vi.mocked(access.requireGroupAdmin).mockRejectedValue(new Error('FORBIDDEN'));
+
+    await expect(
+      service.requestProgressAnalysis({
+        actorId: 'member-1',
+        groupId: 'group-1',
+        request: {},
+        idempotencyKey: 'idem-forbidden-progress',
+        requestId: 'request-forbidden-progress',
+      }),
+    ).rejects.toThrow('FORBIDDEN');
+
+    expect(jobReplays.findExisting).not.toHaveBeenCalled();
+    expect(snapshots.generate).not.toHaveBeenCalled();
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('resolves an explicitly requested immutable snapshot without generating', async () => {
+    const { service, snapshots, jobs } = setup();
+
+    await service.requestProgressAnalysis({
+      actorId: 'admin-1',
+      groupId: 'group-1',
+      request: { snapshotVersion: 4 },
+      idempotencyKey: 'idem-explicit',
+      requestId: 'request-explicit',
+    });
+
+    expect(snapshots.getVersion).toHaveBeenCalledWith('group-1', 4);
+    expect(snapshots.generate).not.toHaveBeenCalled();
+    expect(jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ request: { snapshotVersion: 4 } }),
+      }),
+    );
+  });
+
+  it('does not enqueue when an explicit immutable snapshot cannot be resolved', async () => {
+    const { service, snapshots, jobs } = setup();
+    snapshots.getVersion.mockRejectedValue(new Error('GROUP_PROGRESS_SNAPSHOT_NOT_FOUND'));
+
+    await expect(
+      service.requestProgressAnalysis({
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        request: { snapshotVersion: 7 },
+        idempotencyKey: 'idem-missing-version',
+        requestId: 'request-missing-version',
+      }),
+    ).rejects.toThrow('GROUP_PROGRESS_SNAPSHOT_NOT_FOUND');
+
+    expect(snapshots.generate).not.toHaveBeenCalled();
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('generates before enqueue and does not enqueue when snapshot generation fails', async () => {
+    const { service, snapshots, jobs } = setup();
+    snapshots.generate.mockRejectedValue(new Error('SNAPSHOT_FAILED'));
+
+    await expect(
+      service.requestProgressAnalysis({
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        request: {},
+        idempotencyKey: 'idem-failed',
+        requestId: 'request-failed',
+      }),
+    ).rejects.toThrow('SNAPSHOT_FAILED');
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('surfaces enqueue failure after a snapshot was successfully resolved', async () => {
+    const { service, snapshots, jobs } = setup();
+    vi.mocked(jobs.enqueue).mockRejectedValue(new Error('AI_JOB_PERSIST_FAILED'));
+
+    await expect(
+      service.requestProgressAnalysis({
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        request: {},
+        idempotencyKey: 'idem-enqueue-failed',
+        requestId: 'request-enqueue-failed',
+      }),
+    ).rejects.toThrow('AI_JOB_PERSIST_FAILED');
+
+    expect(snapshots.generate).toHaveBeenCalledOnce();
+    expect(jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ request: { snapshotVersion: 5 } }),
+      }),
+    );
+  });
+
+  it('returns an existing idempotent job before resolving a different snapshot', async () => {
+    const { service, snapshots, jobs, jobReplays } = setup();
+    jobReplays.findExisting.mockResolvedValue({
+      job: queuedJob,
+      payload: {
+        operation: 'PROGRESS_ANALYSIS',
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        request: { snapshotVersion: 4 },
+      },
+    });
+
+    await expect(
+      service.requestProgressAnalysis({
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        request: {},
+        idempotencyKey: 'idem-replay',
+        requestId: 'request-replay',
+      }),
+    ).resolves.toBe(queuedJob);
+
+    expect(jobReplays.findExisting).toHaveBeenCalledWith({
+      actorId: 'admin-1',
+      groupId: 'group-1',
+      operation: 'PROGRESS_ANALYSIS',
+      idempotencyKey: 'idem-replay',
+    });
+    expect(snapshots.generate).not.toHaveBeenCalled();
+    expect(snapshots.getVersion).not.toHaveBeenCalled();
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('fails safely when an existing progress job is not bound to an exact snapshot version', async () => {
+    const { service, snapshots, jobs, jobReplays } = setup();
+    jobReplays.findExisting.mockResolvedValue({
+      job: queuedJob,
+      payload: {
+        operation: 'PROGRESS_ANALYSIS',
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        request: {},
+      },
+    });
+
+    await expect(
+      service.requestProgressAnalysis({
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        request: {},
+        idempotencyKey: 'idem-legacy',
+        requestId: 'request-legacy',
+      }),
+    ).rejects.toThrow('AI_IDEMPOTENCY_DATA_INTEGRITY');
+    expect(snapshots.generate).not.toHaveBeenCalled();
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('does not perform progress snapshot work for other AI request types', async () => {
+    const { service, snapshots, jobReplays } = setup();
+
+    await service.requestGroupSearch({
+      actorId: 'user-1',
+      groupId: 'group-1',
+      request: { question: 'Tìm quyết định', scope: 'WHOLE_GROUP' },
+      idempotencyKey: 'idem-search',
+      requestId: 'request-search',
+    });
+
+    expect(snapshots.generate).not.toHaveBeenCalled();
+    expect(snapshots.getVersion).not.toHaveBeenCalled();
+    expect(jobReplays.findExisting).not.toHaveBeenCalled();
   });
 
   it.each([

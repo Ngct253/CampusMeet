@@ -126,7 +126,7 @@ M3 sở hữu việc aggregate dữ liệu Task/Meeting cấp group, validate sh
 
 Thiết kế runtime tối thiểu là on-demand khi Group Admin yêu cầu progress analysis: nếu request chỉ định version thì resolve exact version; nếu không chỉ định thì M3 tạo snapshot mới trước khi enqueue AIJob. Worker nhận resolved version và dùng consistent read cho version item. Source Task/Meeting GSI là eventually consistent, nên snapshot biểu diễn một aggregate tại UTC cutoff chứ không phải distributed transaction live.
 
-Theo contract đề xuất, mỗi lần publish tương lai phải dùng một transaction trong `task-data` để ghi VERSION immutable và conditional full LATEST. Contract đang chờ team/maintainer duyệt; producer/orchestration chưa implement và idempotency binding giữa AI request retry với resolved snapshot version vẫn là follow-up. Xem [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md).
+Theo contract đề xuất, mỗi lần publish dùng một transaction trong `task-data` để ghi VERSION immutable và conditional full LATEST. Contract vẫn chờ team/maintainer duyệt; producer/exact-version orchestration đã implement và kiểm thử local nhưng chưa deploy. Replay dùng AI idempotency record hiện có để khôi phục persisted job cùng exact snapshot version trước khi generate lại. Xem [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md).
 
 ## Nguyên tắc dữ liệu và quyền
 

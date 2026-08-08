@@ -66,7 +66,7 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | POST      | `/meetings/:meetingId/ai/minutes-draft`                        | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                     | Phase 4A handler/application đã implement                               |
 | POST      | `/meetings/:meetingId/ai/task-proposals`                       | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                     | Phase 4A handler/application đã implement                               |
 | POST      | `/ai/task-proposals/:proposalId/confirm`                       | `ConfirmTaskProposalRequest/Response`                               | Group Admin theo FR-16; chưa implement                                  |
-| POST      | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                    | Snapshot contract PROPOSED, chờ duyệt; runtime producer chưa có         |
+| POST      | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                    | Snapshot contract PROPOSED; runtime local, chưa deploy                  |
 | POST      | `/groups/:groupId/ai/tool-proposals`                           | `CreateToolProposalRequest`, `ToolProposal`                         | Pha AI mở rộng; chưa implement                                          |
 | POST      | `/ai/tool-proposals/:id/confirm`                               | `ConfirmToolProposalRequest/Response`                               | Pha AI mở rộng; chưa implement                                          |
 | GET       | `/ai/jobs/:aiJobId`                                            | `AIJobDetail`                                                       | M5 đã triển khai                                                        |
@@ -159,7 +159,7 @@ Với `POST /groups/:groupId/ai/progress-analysis`:
 - M5 chỉ đọc exact immutable version đã resolve, không fallback sang `LATEST`;
 - snapshot thiếu hoặc sai integrity phải fail-safe trước khi gọi model.
 
-`PROGRESS_SNAPSHOT#LATEST` là full copy của lần generate thành công gần nhất, không phải dữ liệu live. Source GSI chấp nhận eventual consistency ngắn. Producer/runtime chưa được implement trong PR contract này. Error code public ổn định cho snapshot thiếu/corrupt và cách idempotency AI request ràng buộc resolved version vẫn là follow-up; chưa tự thêm error code mới. Chi tiết persistence, concurrency và ownership nằm tại [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md).
+`PROGRESS_SNAPSHOT#LATEST` là full copy của lần generate thành công gần nhất, không phải dữ liệu live. Source GSI chấp nhận eventual consistency ngắn. Runtime source hiện generate on-demand, persist VERSION/LATEST atomically và cố định exact version trước khi enqueue; chưa deploy AWS. Error code public ổn định cho snapshot thiếu/corrupt vẫn là follow-up và chưa tự thêm code mới. AI idempotency tiếp tục dùng record hiện có: replay đã có job trả đúng persisted job/payload, không generate snapshot khác. Chi tiết persistence, concurrency và ownership nằm tại [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md).
 
 ## Response format hiện có
 
@@ -246,7 +246,7 @@ Nghiệp vụ khác chưa triển khai:
 | AI job         | Chốt state transition, timeout, retry, DLQ/failure handling và token/phút/cost metadata                                                                                                                                       |
 | Grounding      | Chốt citation schema cho tài liệu/transcript/biên bản; current/selected/whole-group scope và filter `groupId`/meeting-set/ACL                                                                                                 |
 | Task proposal  | Chốt mapping ActionItem/Task DTO, missing fields, quyền confirm và liên kết citation nguồn                                                                                                                                    |
-| Group progress | Contract `GroupProgressSnapshot` đang ở trạng thái PROPOSED, chờ team/maintainer duyệt; runtime producer/idempotency chưa implement                                                                                           |
+| Group progress | Contract `GroupProgressSnapshot` vẫn PROPOSED; runtime producer/exact-version integration đã local verified, chưa deploy                                                                                                      |
 | Tool allowlist | Chốt tool MVP, quyền, trường cần xác nhận, expiry và audit; không expose CRUD tùy ý cho model                                                                                                                                 |
 | Retention      | Upload chưa hoàn tất 1 ngày, raw audio 7 ngày, AIJob/conversation 30 ngày; source/vector tồn tại đến khi source hoặc meeting bị xóa                                                                                           |
 | Shared states  | Tách `MeetingStatus` khỏi `GoogleSyncStatus`; cập nhật `@campusmeet/shared` trước khi implement route mới                                                                                                                     |

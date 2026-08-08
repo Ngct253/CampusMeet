@@ -220,7 +220,7 @@ Writer tương lai strong-read `LATEST`, cấp version `N+1`, dùng một UTC `g
 
 Nguồn Task dùng GSI1 `GROUP#<groupId>` và nguồn Meeting dùng GSI1 timeline của `meeting-data`; hai GSI chấp nhận eventual consistency ngắn. M5 đọc exact version bằng base-table `GetItem` với consistent read và không fallback sang `LATEST`. Contract không thêm retention; cleanup immutable versions là quyết định follow-up.
 
-Schema và lifecycle chi tiết nằm tại [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md). Runtime writer chưa được implement trong PR contract này.
+Schema và lifecycle chi tiết nằm tại [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md). Runtime writer đã có source và unit tests local; AWS deployment/integration chưa thực hiện.
 
 ## 8. AI-work table
 

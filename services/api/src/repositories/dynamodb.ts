@@ -66,6 +66,20 @@ const fromMeta = (item: Item): Meeting => ({
   ...(item.cancelledBy ? { cancelledBy: String(item.cancelledBy) } : {}),
   ...(item.cancellationReason ? { cancellationReason: String(item.cancellationReason) } : {}),
 });
+const fromGroupMeta = (item: Item, expectedGroupId: string): Meeting => {
+  const meeting = fromMeta(item);
+  if (
+    item.entityType !== 'Meeting' ||
+    item.PK !== `MEETING#${meeting.id}` ||
+    item.SK !== 'META' ||
+    item.groupId !== expectedGroupId ||
+    item.GSI1PK !== `GROUP#${expectedGroupId}` ||
+    item.GSI1SK !== `MEETING#${meeting.startsAt}#${meeting.id}`
+  ) {
+    throw new Error('GROUP_MEETING_DATA_INTEGRITY');
+  }
+  return meeting;
+};
 type MeetingCursor = { v: 1; groupId: string; startsAt: string; meetingId: string };
 const encodeCursor = (groupId: string, key?: Item) => {
   if (!key) return undefined;
@@ -221,7 +235,7 @@ export class DynamoDbMeetingRepository implements MeetingRepository {
       }),
     );
     return {
-      items: (result.Items ?? []).map(fromMeta),
+      items: (result.Items ?? []).map((item) => fromGroupMeta(item, groupId)),
       ...(result.LastEvaluatedKey
         ? { nextCursor: encodeCursor(groupId, result.LastEvaluatedKey) }
         : {}),

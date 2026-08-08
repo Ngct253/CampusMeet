@@ -295,6 +295,9 @@ export class AIExecutionService {
         return normalized;
       }
       case 'PROGRESS_ANALYSIS': {
+        if (payload.request.snapshotVersion === undefined) {
+          throw new Error('GROUP_PROGRESS_SNAPSHOT_VERSION_REQUIRED');
+        }
         const snapshot = await this.dependencies.progressSnapshots.get(
           payload.groupId,
           payload.request.snapshotVersion,

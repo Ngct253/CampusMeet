@@ -7,6 +7,7 @@ import type {
   Meeting,
   GoogleMeetingFailureClass,
   GoogleMeetingSyncRecord,
+  GroupProgressSnapshot,
   MeetingMinutes,
   Notification,
   Priority,
@@ -142,6 +143,25 @@ export interface TaskRepository {
     expectedVersion: number,
     isLegacyVersion: boolean,
   ): Promise<Task>;
+}
+
+export interface GroupTaskReader {
+  listByGroup(groupId: string): Promise<Task[]>;
+}
+
+export interface GroupProgressSnapshotRepository {
+  getLatest(groupId: string): Promise<GroupProgressSnapshot | null>;
+  getVersion(groupId: string, version: number): Promise<GroupProgressSnapshot | null>;
+  publish(
+    snapshot: GroupProgressSnapshot,
+    expectedPreviousVersion: number,
+    generationId: string,
+  ): Promise<void>;
+}
+
+export interface GroupProgressSnapshotProvider {
+  getVersion(groupId: string, version: number): Promise<GroupProgressSnapshot>;
+  generate(groupId: string): Promise<GroupProgressSnapshot>;
 }
 
 export interface NotificationRepository {
