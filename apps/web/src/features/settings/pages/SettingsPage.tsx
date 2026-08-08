@@ -31,7 +31,9 @@ export function SettingsPage() {
   const googleCallbackState = searchParams.get('google');
   const googleState = googleMutation.isPending
     ? 'Đang kết nối'
-    : googleMutation.isError || googleCallbackState === 'error' || googleCallbackState === 'action-required'
+    : googleMutation.isError ||
+        googleCallbackState === 'error' ||
+        googleCallbackState === 'action-required'
       ? 'Cần kết nối lại'
       : googleCallbackState === 'connected'
         ? 'Đã kết nối'
@@ -108,6 +110,16 @@ export function SettingsPage() {
             Cho phép CampusMeet tạo sự kiện Calendar và liên kết phòng họp Google Meet thay mặt bạn.
           </p>
         </div>
+        <ol className="settings-integration-steps">
+          <li>Chọn “Kết nối Google”.</li>
+          <li>Đăng nhập đúng tài khoản đã được cấp quyền kiểm thử.</li>
+          <li>Cho phép CampusMeet truy cập Calendar; bạn sẽ được đưa trở lại trang này.</li>
+        </ol>
+        <p className="settings-integration-note">
+          Bản thử nghiệm hiện chỉ chấp nhận tài khoản nằm trong danh sách người kiểm thử của Google.
+          Nếu Google báo lỗi 403, quản trị viên Google Cloud cần thêm email của bạn vào danh sách
+          này.
+        </p>
         <p className={googleState === 'Đã kết nối' ? 'success' : undefined} role="status">
           Trạng thái: <strong>{googleState}</strong>
         </p>

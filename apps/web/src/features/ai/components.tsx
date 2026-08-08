@@ -703,7 +703,7 @@ export function TaskProposalEditor({
           >
             <option value="">Chọn mức ưu tiên</option>
             <option value="LOW">Thấp</option>
-            <option value="MEDIUM">Trung bình</option>
+            <option value="MEDIUM">Vừa</option>
             <option value="HIGH">Cao</option>
           </select>
         </label>

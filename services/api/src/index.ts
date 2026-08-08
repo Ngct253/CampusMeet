@@ -44,6 +44,7 @@ import { taskProposalConfirmationHandler } from './handlers/task-proposals';
 import { notificationsHandler, readNotificationHandler } from './handlers/notifications';
 import { meetContextHandler } from './handlers/meet-context';
 import { tasksHandler, taskStatusHandler } from './handlers/tasks';
+import { meetingTranscriptsHandler, transcriptSegmentHandler } from './handlers/transcripts';
 import { getRequestId } from './utils/request';
 import { notImplemented } from './utils/response';
 import { createRouter } from './utils/router';
@@ -102,6 +103,12 @@ const findRoute = createRouter([
   { method: 'POST', path: '/invitations/:token/accept', handler: acceptInvitationHandler },
   { method: 'POST', path: '/invitations/:token/decline', handler: declineInvitationHandler },
   { method: 'GET', path: '/meetings/:meetingId/minutes', handler: minutesHandler },
+  { method: 'GET', path: '/meetings/:meetingId/transcripts', handler: meetingTranscriptsHandler },
+  {
+    method: 'PATCH',
+    path: '/transcripts/:transcriptId/segments/:segmentId',
+    handler: transcriptSegmentHandler,
+  },
   { method: 'PUT', path: '/meetings/:meetingId/minutes', handler: minutesHandler },
   {
     method: 'POST',
