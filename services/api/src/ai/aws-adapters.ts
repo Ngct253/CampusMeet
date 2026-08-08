@@ -7,7 +7,7 @@ import {
   TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { GroupRole, aiWorkerPayloadSchema, type AIJob } from '@campusmeet/shared';
+import { GroupRole, aiJobSchema, aiWorkerPayloadSchema, type AIJob } from '@campusmeet/shared';
 import { MeetingService } from '../application/meeting-service';
 import type { MeetingAccessBoundary } from '../domain/ports';
 import { requireGroupMembership, SharedMembershipAuthorizer } from '../middleware/authorization';
@@ -113,6 +113,7 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobI
   async enqueue(input: Parameters<AIJobOrchestrator['enqueue']>[0]): Promise<AIJob> {
     const now = new Date().toISOString();
     const aiJobId = `aij_${randomUUID()}`;
+    const executionName = aiJobId.replace(/[^A-Za-z0-9-_]/g, '-');
     const idempotencyKey = this.idempotencyKey({
       actorId: input.actorId,
       groupId: input.groupId,
@@ -149,6 +150,9 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobI
                   GSI1SK: `AIJOB#${now}#${aiJobId}`,
                   GSI2PK: 'AIJOB_STATUS#QUEUED',
                   GSI2SK: `${now}#${aiJobId}`,
+                  orchestrationState: 'STARTING',
+                  executionName,
+                  orchestrationAttempt: 1,
                 },
                 ConditionExpression: 'attribute_not_exists(PK)',
               },
@@ -203,27 +207,251 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobI
       await this.stateMachines.send(
         new StartExecutionCommand({
           stateMachineArn: this.stateMachineArn,
-          name: aiJobId.replace(/[^A-Za-z0-9-_]/g, '-'),
+          name: executionName,
           input: JSON.stringify({ aiJobId }),
         }),
       );
     } catch (error) {
+      try {
+        await this.database.send(
+          new UpdateCommand({
+            TableName: this.tableName,
+            Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
+            UpdateExpression:
+              'SET #status = :failed, errorCode = :code, updatedAt = :now, GSI2PK = :gsi',
+            ConditionExpression:
+              '#status = :queued AND orchestrationState = :starting AND executionName = :executionName',
+            ExpressionAttributeNames: { '#status': 'status' },
+            ExpressionAttributeValues: {
+              ':queued': 'QUEUED',
+              ':failed': 'FAILED',
+              ':code': 'ORCHESTRATION_START_FAILED',
+              ':now': new Date().toISOString(),
+              ':gsi': 'AIJOB_STATUS#FAILED',
+              ':starting': 'STARTING',
+              ':executionName': executionName,
+            },
+          }),
+        );
+      } catch (updateError) {
+        if ((updateError as { name?: string }).name !== 'ConditionalCheckFailedException') {
+          throw updateError;
+        }
+        const current = await this.database.send(
+          new GetCommand({
+            TableName: this.tableName,
+            Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
+            ConsistentRead: true,
+          }),
+        );
+        if (current.Item) {
+          const currentJob = this.toJob(current.Item);
+          if (
+            current.Item.executionName === executionName &&
+            (current.Item.orchestrationState === 'STARTED' ||
+              ['PROCESSING', 'COMPLETED', 'CANCELLED'].includes(currentJob.status))
+          ) {
+            return currentJob;
+          }
+        }
+        throw updateError;
+      }
+      throw error;
+    }
+
+    await this.database.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
+        UpdateExpression: 'SET orchestrationState = :started, orchestrationStartedAt = :now',
+        ConditionExpression: 'orchestrationState = :starting AND executionName = :executionName',
+        ExpressionAttributeValues: {
+          ':started': 'STARTED',
+          ':starting': 'STARTING',
+          ':executionName': executionName,
+          ':now': new Date().toISOString(),
+        },
+      }),
+    );
+    return job;
+  }
+
+  async ensureStarted(aiJobId: string): Promise<AIJob> {
+    const read = async () => {
+      const response = await this.database.send(
+        new GetCommand({
+          TableName: this.tableName,
+          Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
+          ConsistentRead: true,
+        }),
+      );
+      if (!response.Item) throw new ResourceNotFoundError('Không tìm thấy AIJob.');
+      const item = response.Item;
+      const job = this.toJob(item);
+      const payload = this.parseRecoveredPayload(item);
+      if (
+        !aiJobSchema.safeParse(job).success ||
+        item.PK !== `AIJOB#${aiJobId}` ||
+        item.SK !== 'META' ||
+        item.entityType !== 'AIJob' ||
+        job.aiJobId !== aiJobId ||
+        payload.groupId !== job.groupId
+      ) {
+        throw new Error('AI_JOB_DATA_INTEGRITY');
+      }
+      return { item, job };
+    };
+
+    let { item, job } = await read();
+    if (['PROCESSING', 'COMPLETED', 'CANCELLED'].includes(job.status)) return job;
+    if (job.status === 'FAILED' && item.errorCode !== 'ORCHESTRATION_START_FAILED') return job;
+    if (item.orchestrationState === 'STARTED') return job;
+
+    let executionName =
+      item.orchestrationState === 'STARTING' && typeof item.executionName === 'string'
+        ? item.executionName
+        : undefined;
+    if (!executionName) {
+      executionName = `${aiJobId.replace(/[^A-Za-z0-9-_]/g, '-')}-attempt-${randomUUID()}`.slice(
+        0,
+        80,
+      );
+      try {
+        const claimed = await this.database.send(
+          new UpdateCommand({
+            TableName: this.tableName,
+            Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
+            UpdateExpression:
+              'SET #status = :queued, orchestrationState = :starting, executionName = :executionName, orchestrationAttempt = if_not_exists(orchestrationAttempt, :zero) + :one, updatedAt = :now REMOVE errorCode',
+            ConditionExpression:
+              '(#status = :queued AND attribute_not_exists(orchestrationState)) OR (#status = :failed AND errorCode = :startFailed)',
+            ExpressionAttributeNames: { '#status': 'status' },
+            ExpressionAttributeValues: {
+              ':queued': 'QUEUED',
+              ':failed': 'FAILED',
+              ':startFailed': 'ORCHESTRATION_START_FAILED',
+              ':starting': 'STARTING',
+              ':executionName': executionName,
+              ':zero': 0,
+              ':one': 1,
+              ':now': new Date().toISOString(),
+            },
+            ReturnValues: 'ALL_NEW',
+          }),
+        );
+        if (!claimed.Attributes) throw new Error('AI_JOB_DATA_INTEGRITY');
+        item = claimed.Attributes;
+        job = this.toJob(item);
+        if (item.orchestrationState !== 'STARTING' || typeof item.executionName !== 'string') {
+          throw new Error('AI_JOB_DATA_INTEGRITY');
+        }
+        executionName = item.executionName;
+      } catch (error) {
+        if ((error as { name?: string }).name !== 'ConditionalCheckFailedException') throw error;
+        ({ item, job } = await read());
+        if (item.orchestrationState === 'STARTED') return job;
+        if (item.orchestrationState !== 'STARTING' || typeof item.executionName !== 'string') {
+          throw new Error('AI_JOB_DATA_INTEGRITY');
+        }
+        executionName = item.executionName;
+      }
+    }
+
+    try {
+      await this.stateMachines.send(
+        new StartExecutionCommand({
+          stateMachineArn: this.stateMachineArn,
+          name: executionName,
+          input: JSON.stringify({ aiJobId }),
+        }),
+      );
+    } catch (error) {
+      if ((error as { name?: string }).name !== 'ExecutionAlreadyExists') throw error;
+    }
+    const reconcilesFailedStart =
+      job.status === 'FAILED' && item.errorCode === 'ORCHESTRATION_START_FAILED';
+    const reconciliationTime = new Date().toISOString();
+    try {
       await this.database.send(
         new UpdateCommand({
           TableName: this.tableName,
           Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
-          UpdateExpression:
-            'SET #status = :failed, errorCode = :code, updatedAt = :now, GSI2PK = :gsi',
-          ExpressionAttributeNames: { '#status': 'status' },
+          UpdateExpression: reconcilesFailedStart
+            ? 'SET orchestrationState = :started, orchestrationStartedAt = :now, #status = :queued, updatedAt = :now, GSI2PK = :queuedGsi REMOVE errorCode'
+            : 'SET orchestrationState = :started, orchestrationStartedAt = :now',
+          ConditionExpression: reconcilesFailedStart
+            ? 'orchestrationState = :starting AND executionName = :executionName AND #status = :failed AND errorCode = :startFailed'
+            : 'orchestrationState = :starting AND executionName = :executionName',
+          ...(reconcilesFailedStart ? { ExpressionAttributeNames: { '#status': 'status' } } : {}),
           ExpressionAttributeValues: {
-            ':failed': 'FAILED',
-            ':code': 'ORCHESTRATION_START_FAILED',
-            ':now': new Date().toISOString(),
-            ':gsi': 'AIJOB_STATUS#FAILED',
+            ':started': 'STARTED',
+            ':starting': 'STARTING',
+            ':executionName': executionName,
+            ':now': reconciliationTime,
+            ...(reconcilesFailedStart
+              ? {
+                  ':queued': 'QUEUED',
+                  ':queuedGsi': 'AIJOB_STATUS#QUEUED',
+                  ':failed': 'FAILED',
+                  ':startFailed': 'ORCHESTRATION_START_FAILED',
+                }
+              : {}),
           },
         }),
       );
-      throw error;
+      if (reconcilesFailedStart) {
+        job = { ...job, status: 'QUEUED', updatedAt: reconciliationTime };
+      }
+    } catch (error) {
+      if ((error as { name?: string }).name !== 'ConditionalCheckFailedException') throw error;
+      ({ item, job } = await read());
+      if (
+        item.executionName === executionName &&
+        item.orchestrationState === 'STARTED' &&
+        !(job.status === 'FAILED' && item.errorCode === 'ORCHESTRATION_START_FAILED')
+      ) {
+        return job;
+      }
+      if (
+        item.executionName !== executionName ||
+        item.orchestrationState !== 'STARTING' ||
+        !['PROCESSING', 'COMPLETED', 'CANCELLED'].includes(job.status)
+      ) {
+        throw new Error('AI_JOB_DATA_INTEGRITY');
+      }
+      try {
+        await this.database.send(
+          new UpdateCommand({
+            TableName: this.tableName,
+            Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
+            UpdateExpression: 'SET orchestrationState = :started, orchestrationStartedAt = :now',
+            ConditionExpression:
+              'orchestrationState = :starting AND executionName = :executionName AND #status IN (:processing, :completed, :cancelled)',
+            ExpressionAttributeNames: { '#status': 'status' },
+            ExpressionAttributeValues: {
+              ':started': 'STARTED',
+              ':starting': 'STARTING',
+              ':executionName': executionName,
+              ':processing': 'PROCESSING',
+              ':completed': 'COMPLETED',
+              ':cancelled': 'CANCELLED',
+              ':now': new Date().toISOString(),
+            },
+          }),
+        );
+      } catch (progressError) {
+        if ((progressError as { name?: string }).name !== 'ConditionalCheckFailedException') {
+          throw progressError;
+        }
+        ({ item, job } = await read());
+        if (
+          item.executionName !== executionName ||
+          item.orchestrationState !== 'STARTED' ||
+          !['PROCESSING', 'COMPLETED', 'CANCELLED'].includes(job.status)
+        ) {
+          throw new Error('AI_JOB_DATA_INTEGRITY');
+        }
+      }
     }
     return job;
   }

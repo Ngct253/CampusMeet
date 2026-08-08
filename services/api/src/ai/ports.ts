@@ -21,6 +21,7 @@ export interface AIJobOrchestrator {
     type: AIJobType;
     payload: AIWorkerPayload;
   }): Promise<AIJob>;
+  ensureStarted(aiJobId: string): Promise<AIJob>;
 }
 
 export interface AIJobIdempotencyReader {

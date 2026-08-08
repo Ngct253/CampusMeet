@@ -24,7 +24,10 @@ const setup = () => {
     getMeetingGroupId: vi.fn().mockResolvedValue('group-1'),
     requireMeetingsInGroup: vi.fn().mockResolvedValue(undefined),
   };
-  const jobs: AIJobOrchestrator = { enqueue: vi.fn().mockResolvedValue(queuedJob) };
+  const jobs: AIJobOrchestrator = {
+    enqueue: vi.fn().mockResolvedValue(queuedJob),
+    ensureStarted: vi.fn().mockResolvedValue(queuedJob),
+  };
   const snapshots = {
     getVersion: vi.fn().mockResolvedValue({ groupId: 'group-1', version: 4 }),
     generate: vi.fn().mockResolvedValue({ groupId: 'group-1', version: 5 }),

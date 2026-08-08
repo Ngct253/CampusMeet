@@ -235,6 +235,69 @@ describe('StepFunctionsAIJobOrchestrator enqueue recovery', () => {
       payload: progressPayload,
     });
 
+  it('persists the initial execution identity before start and confirms it after public status may advance', async () => {
+    const send = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({});
+    const start = vi.fn().mockResolvedValueOnce({});
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      { send: start } as unknown as SFNClient,
+      'ai-work',
+      'state-machine-arn',
+    );
+
+    await enqueueProgress(orchestrator);
+
+    const initialJob = send.mock.calls[0]![0].input.TransactItems[0].Put.Item;
+    expect(initialJob).toMatchObject({
+      orchestrationState: 'STARTING',
+      executionName: expect.any(String),
+      orchestrationAttempt: 1,
+    });
+    expect(start.mock.calls[0]![0].input.name).toBe(initialJob.executionName);
+    expect(send.mock.calls[1]![0].input).toMatchObject({
+      UpdateExpression: 'SET orchestrationState = :started, orchestrationStartedAt = :now',
+      ConditionExpression: 'orchestrationState = :starting AND executionName = :executionName',
+      ExpressionAttributeValues: {
+        ':starting': 'STARTING',
+        ':executionName': initialJob.executionName,
+      },
+    });
+    expect(send.mock.calls[1]![0].input.UpdateExpression).not.toContain('errorCode');
+    expect(send.mock.calls[1]![0].input.ConditionExpression).not.toContain('status');
+  });
+
+  it('does not mark a demonstrably progressed job failed after an ambiguous start error', async () => {
+    const claimLost = Object.assign(new Error('status advanced'), {
+      name: 'ConditionalCheckFailedException',
+    });
+    let persistedJob: Record<string, unknown> | undefined;
+    const send = vi
+      .fn()
+      .mockImplementationOnce(async (command) => {
+        persistedJob = command.input.TransactItems[0].Put.Item;
+        return {};
+      })
+      .mockRejectedValueOnce(claimLost)
+      .mockImplementationOnce(async () => ({
+        Item: { ...persistedJob, status: 'PROCESSING' },
+      }));
+    const startError = Object.assign(new Error('timeout after dispatch'), { name: 'TimeoutError' });
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      { send: vi.fn().mockRejectedValueOnce(startError) } as unknown as SFNClient,
+      'ai-work',
+      'state-machine-arn',
+    );
+
+    await expect(enqueueProgress(orchestrator)).resolves.toMatchObject({ status: 'PROCESSING' });
+
+    expect(send.mock.calls[1]![0].input).toMatchObject({
+      ConditionExpression:
+        '#status = :queued AND orchestrationState = :starting AND executionName = :executionName',
+    });
+    expect(send.mock.calls).toHaveLength(3);
+  });
+
   it('returns the existing job when concurrent recovery has the same snapshot version', async () => {
     const { orchestrator, stateMachines } = createRecoveryOrchestrator(
       recoveredJobItem(progressPayload),
@@ -299,5 +362,326 @@ describe('StepFunctionsAIJobOrchestrator enqueue recovery', () => {
       }),
     ).resolves.toMatchObject({ aiJobId: 'aij-existing', type: 'GENERATE_ANSWER' });
     expect(stateMachines.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('StepFunctionsAIJobOrchestrator ensureStarted', () => {
+  const payload = {
+    operation: 'INGEST_SOURCE' as const,
+    actorId: 'admin-1',
+    groupId: 'group-1',
+    meetingId: 'meeting-1',
+    sourceId: 'source-1',
+    sourceType: 'TRANSCRIPT' as const,
+    sourceVersion: 1,
+    approved: true as const,
+    inputObjectKey: 'uploads/group-1/meeting-1/source.txt',
+    contentType: 'text/plain' as const,
+  };
+  const item = (override: Record<string, unknown> = {}) => ({
+    PK: 'AIJOB#aij-existing',
+    SK: 'META',
+    entityType: 'AIJob',
+    aiJobId: 'aij-existing',
+    groupId: 'group-1',
+    meetingId: 'meeting-1',
+    type: 'INGEST_SOURCE',
+    status: 'QUEUED',
+    attempt: 0,
+    requestId: 'request-1',
+    provider: 'BEDROCK',
+    createdAt: '2026-08-08T10:00:00.000Z',
+    updatedAt: '2026-08-08T10:00:00.000Z',
+    payload,
+    ...override,
+  });
+  const create = (send: ReturnType<typeof vi.fn>, start = vi.fn().mockResolvedValue({})) => ({
+    orchestrator: new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      { send: start } as unknown as SFNClient,
+      'ai-work',
+      'state-machine-arn',
+    ),
+    start,
+  });
+
+  it('starts an existing job without creating an AIJob or idempotency record', async () => {
+    const claimed = item({
+      orchestrationState: 'STARTING',
+      executionName: 'aij-existing-attempt-one',
+      orchestrationAttempt: 1,
+    });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Item: item() })
+      .mockResolvedValueOnce({ Attributes: claimed })
+      .mockResolvedValueOnce({});
+    const { orchestrator, start } = create(send);
+    await expect(orchestrator.ensureStarted('aij-existing')).resolves.toMatchObject({
+      aiJobId: 'aij-existing',
+    });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]![0].input).toMatchObject({
+      name: 'aij-existing-attempt-one',
+      input: JSON.stringify({ aiJobId: 'aij-existing' }),
+    });
+    expect(send.mock.calls.map(([command]) => command.constructor.name)).toEqual([
+      'GetCommand',
+      'UpdateCommand',
+      'UpdateCommand',
+    ]);
+  });
+
+  it('heals ORCHESTRATION_START_FAILED using the same logical job and a new attempt name', async () => {
+    const failed = item({ status: 'FAILED', errorCode: 'ORCHESTRATION_START_FAILED' });
+    const claimed = item({
+      orchestrationState: 'STARTING',
+      executionName: 'aij-existing-attempt-recovery',
+      orchestrationAttempt: 2,
+    });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Item: failed })
+      .mockResolvedValueOnce({ Attributes: claimed })
+      .mockResolvedValueOnce({});
+    const { orchestrator, start } = create(send);
+    await expect(orchestrator.ensureStarted('aij-existing')).resolves.toMatchObject({
+      aiJobId: 'aij-existing',
+    });
+    expect(start.mock.calls[0]![0].input.name).toBe('aij-existing-attempt-recovery');
+    expect(send.mock.calls[1]![0].input.UpdateExpression).toContain('REMOVE errorCode');
+  });
+
+  it.each([
+    ['a successful retry', undefined],
+    [
+      'ExecutionAlreadyExists reconciliation',
+      Object.assign(new Error('execution exists'), { name: 'ExecutionAlreadyExists' }),
+    ],
+  ])(
+    'reconciles a modern failed-start record through %s without changing its attempt identity',
+    async (_scenario, startResult) => {
+      const failed = item({
+        status: 'FAILED',
+        errorCode: 'ORCHESTRATION_START_FAILED',
+        orchestrationState: 'STARTING',
+        executionName: 'persisted-attempt',
+        orchestrationAttempt: 3,
+      });
+      const send = vi.fn().mockResolvedValueOnce({ Item: failed }).mockResolvedValueOnce({});
+      const start = startResult
+        ? vi.fn().mockRejectedValueOnce(startResult)
+        : vi.fn().mockResolvedValueOnce({});
+      const { orchestrator } = create(send, start);
+
+      await expect(orchestrator.ensureStarted('aij-existing')).resolves.toMatchObject({
+        aiJobId: 'aij-existing',
+        status: 'QUEUED',
+      });
+
+      expect(start.mock.calls[0]![0].input).toMatchObject({
+        name: 'persisted-attempt',
+        input: JSON.stringify({ aiJobId: 'aij-existing' }),
+      });
+      expect(send.mock.calls.map(([command]) => command.constructor.name)).toEqual([
+        'GetCommand',
+        'UpdateCommand',
+      ]);
+      expect(send.mock.calls[1]![0].input).toMatchObject({
+        UpdateExpression: expect.stringContaining('#status = :queued'),
+        ConditionExpression:
+          'orchestrationState = :starting AND executionName = :executionName AND #status = :failed AND errorCode = :startFailed',
+        ExpressionAttributeValues: {
+          ':executionName': 'persisted-attempt',
+          ':failed': 'FAILED',
+          ':startFailed': 'ORCHESTRATION_START_FAILED',
+          ':queued': 'QUEUED',
+        },
+      });
+      expect(send.mock.calls[1]![0].input.UpdateExpression).toContain(
+        'orchestrationState = :started',
+      );
+      expect(send.mock.calls[1]![0].input.UpdateExpression).toContain('REMOVE errorCode');
+      expect(send.mock.calls[1]![0].input.UpdateExpression).not.toContain('orchestrationAttempt');
+    },
+  );
+
+  it.each(['PROCESSING', 'COMPLETED', 'CANCELLED'] as const)(
+    'preserves worker-advanced %s while reconciling a modern failed-start attempt',
+    async (status) => {
+      const failed = item({
+        status: 'FAILED',
+        errorCode: 'ORCHESTRATION_START_FAILED',
+        orchestrationState: 'STARTING',
+        executionName: 'persisted-attempt',
+        orchestrationAttempt: 3,
+      });
+      const advanced = item({
+        status,
+        orchestrationState: 'STARTING',
+        executionName: 'persisted-attempt',
+        orchestrationAttempt: 3,
+      });
+      const conflict = Object.assign(new Error('worker advanced'), {
+        name: 'ConditionalCheckFailedException',
+      });
+      const send = vi
+        .fn()
+        .mockResolvedValueOnce({ Item: failed })
+        .mockRejectedValueOnce(conflict)
+        .mockResolvedValueOnce({ Item: advanced })
+        .mockResolvedValueOnce({});
+      const { orchestrator, start } = create(send);
+
+      await expect(orchestrator.ensureStarted('aij-existing')).resolves.toMatchObject({ status });
+
+      expect(start.mock.calls[0]![0].input.name).toBe('persisted-attempt');
+      expect(send.mock.calls[3]![0].input).toMatchObject({
+        UpdateExpression: 'SET orchestrationState = :started, orchestrationStartedAt = :now',
+        ConditionExpression:
+          'orchestrationState = :starting AND executionName = :executionName AND #status IN (:processing, :completed, :cancelled)',
+      });
+      expect(send.mock.calls[3]![0].input.UpdateExpression).not.toContain('#status');
+    },
+  );
+
+  it.each(['PROCESSING', 'COMPLETED'] as const)(
+    'does not duplicate a %s job execution',
+    async (status) => {
+      const send = vi.fn().mockResolvedValueOnce({ Item: item({ status }) });
+      const { orchestrator, start } = create(send);
+      await expect(orchestrator.ensureStarted('aij-existing')).resolves.toMatchObject({ status });
+      expect(start).not.toHaveBeenCalled();
+      expect(send).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('is idempotent after orchestration is marked STARTED', async () => {
+    const send = vi.fn().mockResolvedValueOnce({
+      Item: item({ orchestrationState: 'STARTED', executionName: 'attempt-one' }),
+    });
+    const { orchestrator, start } = create(send);
+    await orchestrator.ensureStarted('aij-existing');
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('retries an ambiguous start with the exact persisted name and input', async () => {
+    const ambiguous = Object.assign(new Error('timeout'), { name: 'TimeoutError' });
+    const claimed = item({
+      orchestrationState: 'STARTING',
+      executionName: 'stable-attempt',
+      orchestrationAttempt: 1,
+    });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Item: item() })
+      .mockResolvedValueOnce({ Attributes: claimed });
+    const start = vi.fn().mockRejectedValueOnce(ambiguous);
+    const { orchestrator } = create(send, start);
+    await expect(orchestrator.ensureStarted('aij-existing')).rejects.toBe(ambiguous);
+    expect(send).toHaveBeenCalledTimes(2);
+
+    send.mockResolvedValueOnce({ Item: claimed }).mockResolvedValueOnce({});
+    start.mockRejectedValueOnce(
+      Object.assign(new Error('execution exists'), { name: 'ExecutionAlreadyExists' }),
+    );
+    await orchestrator.ensureStarted('aij-existing');
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(start.mock.calls[0]![0].input).toEqual(start.mock.calls[1]![0].input);
+  });
+
+  it('reconciles ExecutionAlreadyExists for the same persisted attempt without another job', async () => {
+    const alreadyExists = Object.assign(new Error('execution exists'), {
+      name: 'ExecutionAlreadyExists',
+    });
+    const claimed = item({
+      orchestrationState: 'STARTING',
+      executionName: 'stable-attempt',
+      orchestrationAttempt: 1,
+    });
+    const send = vi.fn().mockResolvedValueOnce({ Item: claimed }).mockResolvedValueOnce({});
+    const start = vi.fn().mockRejectedValueOnce(alreadyExists);
+    const { orchestrator } = create(send, start);
+
+    await expect(orchestrator.ensureStarted('aij-existing')).resolves.toMatchObject({
+      aiJobId: 'aij-existing',
+    });
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]![0].input).toMatchObject({
+      name: 'stable-attempt',
+      input: JSON.stringify({ aiJobId: 'aij-existing' }),
+    });
+    expect(send.mock.calls.map(([command]) => command.constructor.name)).toEqual([
+      'GetCommand',
+      'UpdateCommand',
+    ]);
+    expect(send.mock.calls[1]![0].input).toMatchObject({
+      ConditionExpression: 'orchestrationState = :starting AND executionName = :executionName',
+      ExpressionAttributeValues: { ':executionName': 'stable-attempt' },
+    });
+  });
+
+  it('reuses the winning execution identity when a concurrent legacy claim loses', async () => {
+    const claimLost = Object.assign(new Error('claim lost'), {
+      name: 'ConditionalCheckFailedException',
+    });
+    const winner = item({
+      orchestrationState: 'STARTING',
+      executionName: 'caller-a-attempt',
+      orchestrationAttempt: 1,
+    });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Item: item() })
+      .mockRejectedValueOnce(claimLost)
+      .mockResolvedValueOnce({ Item: winner })
+      .mockResolvedValueOnce({});
+    const { orchestrator, start } = create(send);
+
+    await orchestrator.ensureStarted('aij-existing');
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]![0].input.name).toBe('caller-a-attempt');
+    expect(send.mock.calls[3]![0].input.ExpressionAttributeValues[':executionName']).toBe(
+      'caller-a-attempt',
+    );
+    expect(send.mock.calls.map(([command]) => command.constructor.name)).toEqual([
+      'GetCommand',
+      'UpdateCommand',
+      'GetCommand',
+      'UpdateCommand',
+    ]);
+  });
+
+  it('returns 404 for a missing job and integrity failure for malformed persistence', async () => {
+    const missing = create(vi.fn().mockResolvedValueOnce({})).orchestrator;
+    await expect(missing.ensureStarted('aij-existing')).rejects.toMatchObject({ statusCode: 404 });
+    const malformed = create(
+      vi.fn().mockResolvedValueOnce({ Item: item({ entityType: 'Wrong' }) }),
+    ).orchestrator;
+    await expect(malformed.ensureStarted('aij-existing')).rejects.toThrow('AI_JOB_DATA_INTEGRITY');
+  });
+
+  it('rethrows unrelated DynamoDB and Step Functions failures unchanged', async () => {
+    const databaseFailure = Object.assign(new Error('db denied'), {
+      name: 'AccessDeniedException',
+    });
+    await expect(
+      create(vi.fn().mockRejectedValueOnce(databaseFailure)).orchestrator.ensureStarted(
+        'aij-existing',
+      ),
+    ).rejects.toBe(databaseFailure);
+    const sfnFailure = Object.assign(new Error('sfn denied'), { name: 'AccessDeniedException' });
+    const claimed = item({ orchestrationState: 'STARTING', executionName: 'stable-attempt' });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Item: item() })
+      .mockResolvedValueOnce({ Attributes: claimed });
+    await expect(
+      create(send, vi.fn().mockRejectedValueOnce(sfnFailure)).orchestrator.ensureStarted(
+        'aij-existing',
+      ),
+    ).rejects.toBe(sfnFailure);
   });
 });
