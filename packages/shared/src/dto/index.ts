@@ -91,7 +91,10 @@ export const updateTaskStatusInputSchema = z
   })
   .strict();
 const minutesDecisionInputSchema = z
-  .object({ content: z.string().trim().min(1).max(1000) })
+  .object({
+    id: z.string().trim().min(1).optional(),
+    content: z.string().trim().min(1).max(1000),
+  })
   .strict();
 const minutesActionItemInputSchema = z
   .object({
