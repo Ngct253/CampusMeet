@@ -339,6 +339,11 @@ assert.equal(
   true,
   'API role must be able to read verified Cognito attributes.',
 );
+assert.equal(
+  appTemplate.includes('states:DescribeExecution'),
+  true,
+  'API role must reconcile ambiguous Step Functions start outcomes.',
+);
 
 console.log(
   'Infrastructure contract validation passed: data foundation, Google sync runtime, M5 AI Worker, Knowledge Base, and S3 Vectors.',

@@ -249,7 +249,7 @@ describe('StepFunctionsAIJobOrchestrator enqueue recovery', () => {
       { send } as unknown as DynamoDBDocumentClient,
       { send: start } as unknown as SFNClient,
       'ai-work',
-      'state-machine-arn',
+      'arn:aws:states:ap-southeast-1:123456789012:stateMachine:campusmeet-dev-ai-jobs',
     );
 
     await enqueueProgress(orchestrator);
@@ -452,7 +452,7 @@ describe('StepFunctionsAIJobOrchestrator ensureStarted', () => {
       { send } as unknown as DynamoDBDocumentClient,
       { send: start } as unknown as SFNClient,
       'ai-work',
-      'state-machine-arn',
+      'arn:aws:states:ap-southeast-1:123456789012:stateMachine:campusmeet-dev-ai-jobs',
     ),
     start,
   });
@@ -617,7 +617,7 @@ describe('StepFunctionsAIJobOrchestrator ensureStarted', () => {
     expect(start).not.toHaveBeenCalled();
   });
 
-  it('retries an ambiguous start with the exact persisted name and input', async () => {
+  it('reconciles an ambiguous start immediately with the persisted execution identity', async () => {
     const ambiguous = Object.assign(new Error('timeout'), { name: 'TimeoutError' });
     const claimed = item({
       orchestrationState: 'STARTING',
@@ -628,18 +628,20 @@ describe('StepFunctionsAIJobOrchestrator ensureStarted', () => {
       .fn()
       .mockResolvedValueOnce({ Item: item() })
       .mockResolvedValueOnce({ Attributes: claimed });
-    const start = vi.fn().mockRejectedValueOnce(ambiguous);
+    const start = vi
+      .fn()
+      .mockRejectedValueOnce(ambiguous)
+      .mockResolvedValueOnce({ status: 'RUNNING' });
     const { orchestrator } = create(send, start);
-    await expect(orchestrator.ensureStarted('aij-existing')).rejects.toBe(ambiguous);
-    expect(send).toHaveBeenCalledTimes(2);
-
-    send.mockResolvedValueOnce({ Item: claimed }).mockResolvedValueOnce({});
-    start.mockRejectedValueOnce(
-      Object.assign(new Error('execution exists'), { name: 'ExecutionAlreadyExists' }),
-    );
-    await orchestrator.ensureStarted('aij-existing');
+    await expect(orchestrator.ensureStarted('aij-existing')).resolves.toMatchObject({
+      aiJobId: 'aij-existing',
+    });
     expect(start).toHaveBeenCalledTimes(2);
-    expect(start.mock.calls[0]![0].input).toEqual(start.mock.calls[1]![0].input);
+    expect(start.mock.calls[1]![0].constructor.name).toBe('DescribeExecutionCommand');
+    expect(start.mock.calls[1]![0].input.executionArn).toBe(
+      'arn:aws:states:ap-southeast-1:123456789012:execution:campusmeet-dev-ai-jobs:stable-attempt',
+    );
+    expect(send).toHaveBeenCalledTimes(3);
   });
 
   it('reconciles ExecutionAlreadyExists for the same persisted attempt without another job', async () => {

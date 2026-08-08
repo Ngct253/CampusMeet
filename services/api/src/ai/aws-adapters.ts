@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+import { DescribeExecutionCommand, SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -373,7 +373,17 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobI
         }),
       );
     } catch (error) {
-      if ((error as { name?: string }).name !== 'ExecutionAlreadyExists') throw error;
+      if ((error as { name?: string }).name !== 'ExecutionAlreadyExists') {
+        if (!this.isAmbiguousStartError(error)) throw error;
+        try {
+          await this.stateMachines.send(
+            new DescribeExecutionCommand({ executionArn: this.executionArn(executionName) }),
+          );
+        } catch (describeError) {
+          if ((describeError as { name?: string }).name === 'ExecutionDoesNotExist') throw error;
+          throw describeError;
+        }
+      }
     }
     const reconcilesFailedStart =
       job.status === 'FAILED' && item.errorCode === 'ORCHESTRATION_START_FAILED';
@@ -461,6 +471,18 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobI
       }
     }
     return job;
+  }
+
+  private executionArn(executionName: string) {
+    const marker = ':stateMachine:';
+    if (!this.stateMachineArn.includes(marker)) throw new Error('AI_STATE_MACHINE_ARN_INVALID');
+    return this.stateMachineArn.replace(marker, ':execution:') + `:${executionName}`;
+  }
+
+  private isAmbiguousStartError(error: unknown) {
+    return ['TimeoutError', 'RequestTimeout', 'NetworkingError', 'AbortError'].includes(
+      (error as { name?: string }).name ?? '',
+    );
   }
 
   private toJob(item: Record<string, unknown>): AIJob {
