@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   GetObjectCommand,
   HeadObjectCommand,
@@ -7,7 +8,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ServiceConfigurationError } from '../utils/errors';
 
-const client = new S3Client({
+const defaultClient = new S3Client({
   region: process.env.AWS_REGION ?? 'ap-southeast-1',
   requestChecksumCalculation: 'WHEN_REQUIRED',
 });
@@ -55,7 +56,7 @@ const validateUploadKey = (objectKey: string) => {
 
 export class S3ImmutableObjectStore implements ImmutableObjectStore {
   constructor(
-    private readonly s3: S3Client = client,
+    private readonly s3: S3Client = defaultClient,
     private readonly resolveBucket: () => string = bucketName,
   ) {}
 
@@ -103,7 +104,7 @@ export class S3ImmutableObjectStore implements ImmutableObjectStore {
 
 export class S3AttachmentObjectStore implements AttachmentObjectStore {
   constructor(
-    private readonly s3: S3Client = client,
+    private readonly s3: S3Client = defaultClient,
     private readonly signer: typeof getSignedUrl = getSignedUrl,
   ) {}
 
@@ -147,4 +148,3 @@ export class S3AttachmentObjectStore implements AttachmentObjectStore {
 
 export const attachmentObjectStore = new S3AttachmentObjectStore();
 export const immutableObjectStore = new S3ImmutableObjectStore();
-import { createHash } from 'node:crypto';

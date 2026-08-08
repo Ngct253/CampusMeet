@@ -126,27 +126,27 @@ Resources:
                   "action": "EXECUTE"
                 }
               },
-              "ResultPath": "$.workerResult",
+              "ResultPath": "$.worker",
               "Retry": [{
                 "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "AI_RATE_LIMITED"],
                 "IntervalSeconds": 2,
                 "MaxAttempts": 3,
                 "BackoffRate": 2
               }],
-              "Next": "RequiresIngestionCheck"
+              "Next": "IngestionPending"
             },
-            "RequiresIngestionCheck": {
+            "IngestionPending": {
               "Type": "Choice",
               "Choices": [{
-                "Variable": "$.workerResult.Payload.ingestionJobId",
-                "IsPresent": true,
+                "Variable": "$.worker.Payload.pending",
+                "BooleanEquals": true,
                 "Next": "WaitForIngestion"
               }],
-              "Default": "Completed"
+              "Default": "AIJobComplete"
             },
             "WaitForIngestion": {
               "Type": "Wait",
-              "Seconds": 10,
+              "Seconds": 15,
               "Next": "CheckIngestion"
             },
             "CheckIngestion": {
@@ -157,28 +157,19 @@ Resources:
                 "Payload": {
                   "aiJobId.$": "$.aiJobId",
                   "action": "CHECK_INGESTION",
-                  "ingestionJobId.$": "$.workerResult.Payload.ingestionJobId"
+                  "ingestionJobId.$": "$.worker.Payload.ingestionJobId"
                 }
               },
-              "ResultPath": "$.ingestionResult",
+              "ResultPath": "$.worker",
               "Retry": [{
                 "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
                 "IntervalSeconds": 2,
                 "MaxAttempts": 3,
                 "BackoffRate": 2
               }],
-              "Next": "IngestionCompleted"
+              "Next": "IngestionPending"
             },
-            "IngestionCompleted": {
-              "Type": "Choice",
-              "Choices": [{
-                "Variable": "$.ingestionResult.Payload.pending",
-                "BooleanEquals": true,
-                "Next": "WaitForIngestion"
-              }],
-              "Default": "Completed"
-            },
-            "Completed": {
+            "AIJobComplete": {
               "Type": "Succeed"
             }
           }

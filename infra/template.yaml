@@ -67,14 +67,21 @@ Parameters:
     Default: 1024
     AllowedValues: [1024]
     Description: Vector dimension required by Cohere Embed Multilingual v3.
-  BedrockGenerationModelArn:
+  BedrockMantleRegion:
     Type: String
-    AllowedPattern: '^arn:[^:]+:bedrock:[^:]+:[^:]*:(foundation-model|inference-profile|application-inference-profile)/.+$'
-    Description: Model or inference-profile ARN passed to Converse and scoped in the worker policy.
-  BedrockGenerationFoundationModelId:
+    Default: us-east-1
+    AllowedValues: [us-east-1, us-east-2, us-west-2]
+    Description: Region hosting the Mantle generation model; independent from the stack region.
+  BedrockMantleModelId:
     Type: String
-    AllowedPattern: '^[a-z0-9][a-z0-9._:-]+$'
-    Description: Foundation model ID behind the configured inference profile; used only to scope destination-region IAM access.
+    Default: openai.gpt-oss-20b
+    AllowedValues: [openai.gpt-oss-20b]
+    Description: OpenAI-compatible model ID exposed by the Bedrock Mantle endpoint.
+  BedrockMantleApiKeySecretArn:
+    Type: String
+    NoEcho: true
+    AllowedPattern: '^arn:[^:]+:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+    Description: Secrets Manager ARN containing a JSON apiKey field; never put the key itself here.
   ExistingKnowledgeVectorIndexArn:
     Type: String
     Default: ''
@@ -92,19 +99,11 @@ Rules:
       - Assert:
           !Not [
             !Equals [
-              !Ref BedrockGenerationModelArn,
-              'arn:aws:bedrock:ap-southeast-1:123456789012:inference-profile/apac.replace-with-approved-profile-id',
+              !Ref BedrockMantleApiKeySecretArn,
+              'arn:aws:secretsmanager:ap-southeast-1:123456789012:secret:replace-with-bedrock-mantle-api-key',
             ],
           ]
-        AssertDescription: BedrockGenerationModelArn must be an approved model resource.
-      - Assert:
-          !Not [
-            !Equals [
-              !Ref BedrockGenerationFoundationModelId,
-              replace-with-profile-foundation-model-id,
-            ],
-          ]
-        AssertDescription: BedrockGenerationFoundationModelId must match the configured inference profile.
+        AssertDescription: BedrockMantleApiKeySecretArn must be a real secret ARN.
 
 Globals:
   Function:
@@ -462,6 +461,10 @@ Resources:
       DataType: float32
       Dimension: !Ref BedrockEmbeddingDimensions
       DistanceMetric: cosine
+      MetadataConfiguration:
+        NonFilterableMetadataKeys:
+          - AMAZON_BEDROCK_METADATA
+          - AMAZON_BEDROCK_TEXT
       Tags:
         - { Key: Project, Value: CampusMeet }
         - { Key: Environment, Value: !Ref Environment }
@@ -531,7 +534,7 @@ Resources:
   CampusMeetKnowledgeBase:
     Type: AWS::Bedrock::KnowledgeBase
     Properties:
-      Name: !Sub 'campusmeet-${Environment}-knowledge'
+      Name: !Sub 'campusmeet-${Environment}-knowledge-v2'
       Description: Group-scoped CampusMeet sources with filterable authorization metadata.
       RoleArn: !GetAtt KnowledgeBaseRole.Arn
       KnowledgeBaseConfiguration:
@@ -635,17 +638,10 @@ Resources:
                   - bedrock:StartIngestionJob
                   - bedrock:GetIngestionJob
                 Resource: !GetAtt CampusMeetKnowledgeBase.KnowledgeBaseArn
-              - Sid: InvokeConfiguredGenerationProfile
+              - Sid: ReadBedrockMantleApiKey
                 Effect: Allow
-                Action: bedrock:InvokeModel
-                Resource: !Ref BedrockGenerationModelArn
-              - Sid: InvokeConfiguredGenerationProfileModels
-                Effect: Allow
-                Action: bedrock:InvokeModel
-                Resource: !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/${BedrockGenerationFoundationModelId}'
-                Condition:
-                  StringEquals:
-                    bedrock:InferenceProfileArn: !Ref BedrockGenerationModelArn
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref BedrockMantleApiKeySecretArn
       Tags:
         - { Key: Project, Value: CampusMeet }
         - { Key: Environment, Value: !Ref Environment }
@@ -677,7 +673,9 @@ Resources:
           USER_CONTENT_BUCKET: !Ref UserContentBucketName
           BEDROCK_KNOWLEDGE_BASE_ID: !Ref CampusMeetKnowledgeBase
           BEDROCK_DATA_SOURCE_ID: !GetAtt CampusMeetKnowledgeDataSource.DataSourceId
-          BEDROCK_GENERATION_MODEL_ID: !Ref BedrockGenerationModelArn
+          BEDROCK_MANTLE_BASE_URL: !Sub 'https://bedrock-mantle.${BedrockMantleRegion}.api.aws/v1'
+          BEDROCK_MANTLE_MODEL_ID: !Ref BedrockMantleModelId
+          BEDROCK_MANTLE_API_KEY_SECRET: !Ref BedrockMantleApiKeySecretArn
           NODE_OPTIONS: --enable-source-maps
       Tags:
         Project: CampusMeet

@@ -101,6 +101,8 @@ describe('StepFunctionsAIJobOrchestrator idempotency lookup', () => {
           status: 'QUEUED',
           attempt: 0,
           requestId: 'request-original',
+          inputTokens: 120,
+          outputTokens: 30,
           createdAt: '2026-08-08T10:00:00.000Z',
           updatedAt: '2026-08-08T10:00:00.000Z',
           payload: {
@@ -127,7 +129,12 @@ describe('StepFunctionsAIJobOrchestrator idempotency lookup', () => {
         idempotencyKey: 'idem-1',
       }),
     ).resolves.toMatchObject({
-      job: { aiJobId: 'aij-existing', type: 'PROGRESS_ANALYSIS' },
+      job: {
+        aiJobId: 'aij-existing',
+        type: 'PROGRESS_ANALYSIS',
+        inputTokens: 120,
+        outputTokens: 30,
+      },
       payload: {
         operation: 'PROGRESS_ANALYSIS',
         actorId: 'admin-1',
@@ -298,6 +305,23 @@ describe('StepFunctionsAIJobOrchestrator enqueue recovery', () => {
     expect(send.mock.calls).toHaveLength(3);
   });
 
+  it('persists a canonical payload fingerprint with the idempotency record', async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const stateMachines = { send: vi.fn().mockResolvedValue({}) };
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      stateMachines as unknown as SFNClient,
+      'ai-work',
+      'state-machine-arn',
+    );
+
+    await enqueueProgress(orchestrator);
+
+    expect(send.mock.calls[0]![0].input.TransactItems[1].Put.Item).toMatchObject({
+      requestPayloadHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+  });
+
   it('returns the existing job when concurrent recovery has the same snapshot version', async () => {
     const { orchestrator, stateMachines } = createRecoveryOrchestrator(
       recoveredJobItem(progressPayload),
@@ -316,7 +340,7 @@ describe('StepFunctionsAIJobOrchestrator enqueue recovery', () => {
       recoveredJobItem({ ...progressPayload, request: { snapshotVersion: 5 } }),
     );
 
-    await expect(enqueueProgress(orchestrator)).rejects.toThrow('AI_IDEMPOTENCY_DATA_INTEGRITY');
+    await expect(enqueueProgress(orchestrator)).rejects.toMatchObject({ code: 'CONFLICT' });
     expect(stateMachines.send).not.toHaveBeenCalled();
   });
 
@@ -361,6 +385,34 @@ describe('StepFunctionsAIJobOrchestrator enqueue recovery', () => {
         payload,
       }),
     ).resolves.toMatchObject({ aiJobId: 'aij-existing', type: 'GENERATE_ANSWER' });
+    expect(stateMachines.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects a reused key when a non-progress request changes', async () => {
+    const existingPayload = {
+      operation: 'GROUP_SEARCH' as const,
+      actorId: 'member-1',
+      groupId: 'group-1',
+      request: { question: 'Original question', scope: 'WHOLE_GROUP' as const },
+    };
+    const { orchestrator, stateMachines } = createRecoveryOrchestrator({
+      ...recoveredJobItem(existingPayload),
+      type: 'GENERATE_ANSWER',
+    });
+
+    await expect(
+      orchestrator.enqueue({
+        actorId: 'member-1',
+        groupId: 'group-1',
+        idempotencyKey: 'idem-search',
+        requestId: 'request-racing',
+        type: 'GENERATE_ANSWER',
+        payload: {
+          ...existingPayload,
+          request: { question: 'Different question', scope: 'WHOLE_GROUP' },
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
     expect(stateMachines.send).not.toHaveBeenCalled();
   });
 });
