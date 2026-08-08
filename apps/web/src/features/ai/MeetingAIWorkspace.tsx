@@ -183,7 +183,7 @@ export function MeetingAIWorkspace({
             <div className="ai-feedback ai-feedback--empty" role="status">
               <div>
                 <strong>Chưa có công việc được nêu</strong>
-                <p>AI không tìm thấy action item có đủ căn cứ trong nguồn cuộc họp.</p>
+                <p>AI không tìm thấy việc cần làm có đủ căn cứ trong nội dung cuộc họp.</p>
               </div>
             </div>
           )}

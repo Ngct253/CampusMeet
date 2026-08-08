@@ -327,7 +327,7 @@ export function AIChatPanel({
             ? 'Hỏi từ tài liệu, bản ghi và biên bản mà bạn được phép truy cập.'
             : 'Hỏi từ tài liệu, bản ghi và biên bản đã duyệt trong nhóm hiện tại.'
         }
-        eyebrow={context === 'meeting' ? 'Meeting copilot' : 'Group copilot'}
+        eyebrow={context === 'meeting' ? 'Trợ lý cuộc họp' : 'Trợ lý nhóm'}
         icon="message"
         title={context === 'meeting' ? 'Nối lại mạch cuộc họp' : 'Đối chiếu kiến thức nhóm'}
       />
@@ -563,7 +563,7 @@ export function MinutesDraftPreview({ draft }: { draft: MinutesDraft }) {
       <PanelHeader
         aside={<span className="ai-review-label">Chờ duyệt</span>}
         description="Chỉ ghi lại nội dung đã được nêu; bạn vẫn là người quyết định bản cuối."
-        eyebrow="Meeting record"
+        eyebrow="Biên bản cuộc họp"
         icon="document"
         title="Biên bản nháp"
       />

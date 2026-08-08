@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useParams } from 'react-router-dom';
 import { groundedAnswerSchema } from '@campusmeet/shared';
 import { useAuth } from '../auth/AuthProvider';
+import { environment } from '../config/environment';
 import {
   AIChatPanel,
   AIJobState,
@@ -160,6 +161,7 @@ export function AppShell() {
         </main>
       </div>
 
+      {environment.capabilities.ai && (
       <div className={`meeting-ai-sidebar${aiOpen ? ' meeting-ai-sidebar--open' : ''}`}>
         <button
           aria-expanded={aiOpen}
@@ -236,7 +238,7 @@ export function AppShell() {
                       </svg>
                     </div>
                     <div className="ai-panel-header__copy">
-                      <span className="ai-eyebrow">CampusMeet Copilot</span>
+                      <span className="ai-eyebrow">Trợ lý CampusMeet</span>
                       <h3>Trợ lý điều phối</h3>
                       <p>Hỏi đáp thông tin và tóm tắt tiến độ công việc.</p>
                     </div>
@@ -287,6 +289,7 @@ export function AppShell() {
           </>
         )}
       </div>
+      )}
     </div>
   );
 }

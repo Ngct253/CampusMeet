@@ -1,8 +1,53 @@
 .task-page-layout {
   display: grid;
-  grid-template-columns: minmax(18rem, 0.8fr) minmax(22rem, 1.2fr);
+  grid-template-columns: minmax(22rem, 1.35fr) minmax(18rem, 0.65fr);
+  grid-template-areas: 'tasks create';
   align-items: start;
   gap: 1rem;
+}
+
+.create-task-panel {
+  grid-area: create;
+}
+
+.assigned-task-panel {
+  grid-area: tasks;
+}
+
+.create-task-panel > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.create-task-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.create-task-panel > summary > span:first-child {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.create-task-panel > summary strong {
+  font-size: 1.15rem;
+}
+
+.create-task-panel > summary > span:last-child {
+  color: var(--color-primary);
+  font-size: 1.35rem;
+  transition: transform 160ms ease;
+}
+
+.create-task-panel[open] > summary > span:last-child {
+  transform: rotate(45deg);
+}
+
+.create-task-panel[open] > summary {
+  margin-bottom: 1rem;
 }
 
 .task-page-layout h2 {
@@ -62,5 +107,22 @@
 @media (max-width: 760px) {
   .task-page-layout {
     grid-template-columns: 1fr;
+    grid-template-areas: 'tasks' 'create';
   }
+}
+
+.task-form-optional {
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.75rem;
+}
+
+.task-form-optional summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.task-form-optional[open] summary {
+  margin-bottom: 0.75rem;
 }
