@@ -1,13 +1,18 @@
 import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
-import { updateTranscriptSegmentRequestSchema } from '@campusmeet/shared';
+import {
+  approveTranscriptRequestSchema,
+  updateTranscriptSegmentRequestSchema,
+} from '@campusmeet/shared';
+import { createProductionAIJobOrchestrator } from '../ai/aws-adapters';
 import { authenticate } from '../middleware/authentication';
 import { handleError } from '../middleware/error-handler';
 import { DynamoDbCollaborationRepository } from '../repositories/collaboration';
 import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
 import { DynamoDbTranscriptRepository } from '../repositories/transcripts';
+import { immutableObjectStore } from '../integrations/s3';
 import { TranscriptService } from '../services/transcript-service';
 import { BadRequestError } from '../utils/errors';
-import { getPathParameter, getRequestId, parseBody } from '../utils/request';
+import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
 import { ok } from '../utils/response';
 
 const service = new TranscriptService(
@@ -42,6 +47,30 @@ export const transcriptSegmentHandler: APIGatewayProxyHandlerV2 = async (event) 
         getPathParameter(event, 'transcriptId'),
         getPathParameter(event, 'segmentId'),
         parseBody(event, updateTranscriptSegmentRequestSchema),
+      ),
+      requestId,
+    );
+  } catch (error) {
+    return handleError(error, requestId);
+  }
+};
+export const transcriptApprovalHandler: APIGatewayProxyHandlerV2 = async (event) => {
+  const requestId = getRequestId(event);
+  try {
+    const { userId } = authenticate(event);
+    const approvalService = new TranscriptService(
+      new DynamoDbTranscriptRepository(),
+      new DynamoDbMeetingRepository(),
+      new DynamoDbCollaborationRepository(),
+      { objects: immutableObjectStore, jobs: createProductionAIJobOrchestrator() },
+    );
+    return ok(
+      await approvalService.approve(
+        userId,
+        getPathParameter(event, 'transcriptId'),
+        parseBody(event, approveTranscriptRequestSchema),
+        requireIdempotencyKey(event),
+        requestId,
       ),
       requestId,
     );
