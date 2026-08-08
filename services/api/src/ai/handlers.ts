@@ -16,7 +16,13 @@ let productionService: AIRequestService | undefined;
 const getProductionService = () => {
   if (!productionService) {
     const adapters = createProductionAIRequestServiceAdapters();
-    productionService = new AIRequestService(adapters.access, adapters.meetings, adapters.jobs);
+    productionService = new AIRequestService(
+      adapters.access,
+      adapters.meetings,
+      adapters.jobs,
+      adapters.snapshots,
+      adapters.jobReplays,
+    );
   }
   return productionService;
 };

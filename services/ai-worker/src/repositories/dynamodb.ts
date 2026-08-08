@@ -321,18 +321,38 @@ export class DynamoGroupProgressSnapshotReader implements GroupProgressSnapshotR
     private readonly tableName: string,
   ) {}
 
-  async get(groupId: string, version?: number): Promise<GroupProgressSnapshot> {
+  async get(groupId: string, version: number): Promise<GroupProgressSnapshot> {
+    const expectedPk = `GROUP#${groupId}`;
+    const expectedSk = `PROGRESS_SNAPSHOT#${versionKey(version)}`;
     const response = await this.database.send(
       new GetCommand({
         TableName: this.tableName,
-        Key: {
-          PK: `GROUP#${groupId}`,
-          SK: version ? `PROGRESS_SNAPSHOT#${versionKey(version)}` : 'PROGRESS_SNAPSHOT#LATEST',
-        },
+        Key: { PK: expectedPk, SK: expectedSk },
         ConsistentRead: true,
       }),
     );
     if (!response.Item) throw new Error('GROUP_PROGRESS_SNAPSHOT_NOT_FOUND');
-    return groupProgressSnapshotSchema.parse(response.Item);
+    const item = response.Item;
+    const snapshot = groupProgressSnapshotSchema.safeParse({
+      groupId: item.groupId,
+      version: item.version,
+      generatedAt: item.generatedAt,
+      taskCounts: item.taskCounts,
+      meetingCounts: item.meetingCounts,
+    });
+    if (
+      !snapshot.success ||
+      item.PK !== expectedPk ||
+      item.SK !== expectedSk ||
+      item.entityType !== 'GROUP_PROGRESS_SNAPSHOT' ||
+      item.recordType !== 'VERSION' ||
+      item.groupId !== groupId ||
+      item.version !== version ||
+      typeof item.generationId !== 'string' ||
+      item.generationId.length === 0
+    ) {
+      throw new Error('GROUP_PROGRESS_SNAPSHOT_DATA_INTEGRITY');
+    }
+    return snapshot.data;
   }
 }

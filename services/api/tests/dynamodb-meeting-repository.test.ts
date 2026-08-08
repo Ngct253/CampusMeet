@@ -71,7 +71,18 @@ describe('DynamoDbMeetingRepository', () => {
       send: (command: Command) => {
         captured = command;
         return Promise.resolve({
-          Items: [{ ...meeting, startAt: meeting.startsAt, endAt: meeting.endsAt }],
+          Items: [
+            {
+              PK: 'MEETING#m1',
+              SK: 'META',
+              entityType: 'Meeting',
+              GSI1PK: 'GROUP#g1',
+              GSI1SK: `MEETING#${meeting.startsAt}#${meeting.id}`,
+              ...meeting,
+              startAt: meeting.startsAt,
+              endAt: meeting.endsAt,
+            },
+          ],
           LastEvaluatedKey: {
             PK: 'MEETING#m1',
             SK: 'META',
@@ -91,6 +102,27 @@ describe('DynamoDbMeetingRepository', () => {
     });
     expect(page.items).toHaveLength(1);
     expect(page.nextCursor).toBeTruthy();
+  });
+  it('rejects malformed metadata returned by the group Meeting index', async () => {
+    const db = {
+      send: () =>
+        Promise.resolve({
+          Items: [
+            {
+              PK: 'MEETING#m1',
+              SK: 'META',
+              entityType: 'Reminder',
+              GSI1PK: 'GROUP#g1',
+              GSI1SK: `MEETING#${meeting.startsAt}#${meeting.id}`,
+              ...meeting,
+            },
+          ],
+        }),
+    } as unknown as DynamoDBDocumentClient;
+
+    await expect(
+      new DynamoDbMeetingRepository(db, 'meeting-data').listByGroup('g1', 100),
+    ).rejects.toThrow('GROUP_MEETING_DATA_INTEGRITY');
   });
   it('conditional conflict được map 409', async () => {
     const conflict = Object.assign(new Error('conflict'), { name: 'TransactionCanceledException' });
