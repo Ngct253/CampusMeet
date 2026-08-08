@@ -11,6 +11,7 @@ describe('BedrockMantleClient', () => {
       new Response(
         JSON.stringify({
           choices: [{ message: { content: '{"answer":"ok"}' } }],
+          usage: { prompt_tokens: 12, completion_tokens: 4 },
         }),
         { status: 200 },
       ),
@@ -22,7 +23,10 @@ describe('BedrockMantleClient', () => {
       fetcher,
     );
 
-    await expect(client.generate('system', 'prompt')).resolves.toBe('{"answer":"ok"}');
+    await expect(client.generate('system', 'prompt')).resolves.toEqual({
+      content: '{"answer":"ok"}',
+      usage: { inputTokens: 12, outputTokens: 4 },
+    });
     expect(fetcher).toHaveBeenCalledWith(
       'https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions',
       expect.objectContaining({ method: 'POST' }),
@@ -42,7 +46,21 @@ describe('BedrockMantleClient', () => {
   it('does not expose provider error bodies', async () => {
     const fetcher = vi
       .fn()
-      .mockResolvedValue(new Response('sensitive provider detail', { status: 429 }));
+      .mockResolvedValue(new Response('sensitive provider detail', { status: 500 }));
+    const client = new BedrockMantleClient('https://example.invalid/v1', 'model', 'key', fetcher);
+    await expect(client.generate('system', 'prompt')).rejects.toThrow('MODEL_PROVIDER_ERROR');
+  });
+
+  it('classifies HTTP 429 as a safe retryable error', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(new Response('sensitive quota detail', { status: 429 }));
+    const client = new BedrockMantleClient('https://example.invalid/v1', 'model', 'key', fetcher);
+    await expect(client.generate('system', 'prompt')).rejects.toThrow('AI_RATE_LIMITED');
+  });
+
+  it('maps malformed success payloads to a safe provider error', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('{"choices":[]}', { status: 200 }));
     const client = new BedrockMantleClient('https://example.invalid/v1', 'model', 'key', fetcher);
     await expect(client.generate('system', 'prompt')).rejects.toThrow('MODEL_PROVIDER_ERROR');
   });

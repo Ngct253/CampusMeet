@@ -4,7 +4,14 @@ import type { GroundedModelClient } from './bedrock-grounded-generator';
 
 const responseSchema = z.object({
   choices: z.array(z.object({ message: z.object({ content: z.string().min(1) }) })).min(1),
+  usage: z.object({
+    prompt_tokens: z.number().int().nonnegative(),
+    completion_tokens: z.number().int().nonnegative(),
+  }),
 });
+
+const providerError = (code: 'AI_RATE_LIMITED' | 'MODEL_PROVIDER_ERROR') =>
+  Object.assign(new Error(code), { name: code });
 
 export class BedrockMantleClient implements GroundedModelClient {
   constructor(
@@ -14,7 +21,7 @@ export class BedrockMantleClient implements GroundedModelClient {
     private readonly fetcher: typeof fetch = fetch,
   ) {}
 
-  async generate(system: string, prompt: string): Promise<string> {
+  async generate(system: string, prompt: string) {
     const response = await this.fetcher(`${this.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -31,8 +38,20 @@ export class BedrockMantleClient implements GroundedModelClient {
         temperature: 0,
       }),
     });
-    if (!response.ok) throw new Error('MODEL_PROVIDER_ERROR');
-    return responseSchema.parse(await response.json()).choices[0]!.message.content;
+    if (!response.ok)
+      throw providerError(response.status === 429 ? 'AI_RATE_LIMITED' : 'MODEL_PROVIDER_ERROR');
+    try {
+      const parsed = responseSchema.parse(await response.json());
+      return {
+        content: parsed.choices[0]!.message.content,
+        usage: {
+          inputTokens: parsed.usage.prompt_tokens,
+          outputTokens: parsed.usage.completion_tokens,
+        },
+      };
+    } catch {
+      throw providerError('MODEL_PROVIDER_ERROR');
+    }
   }
 }
 

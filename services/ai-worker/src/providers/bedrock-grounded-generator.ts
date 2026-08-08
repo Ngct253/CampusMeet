@@ -1,11 +1,5 @@
-import type {
-  GroundedAnswer,
-  GroupProgressAnalysis,
-  MinutesDraft,
-  TaskProposal,
-} from '@campusmeet/shared';
 import { z } from 'zod';
-import type { GroundedGenerator, SourceChunk } from '../domain/ports';
+import type { Generated, GroundedGenerator, ModelUsage, SourceChunk } from '../domain/ports';
 
 const answerOutputSchema = z.object({
   answer: z.string().min(1).max(20_000),
@@ -55,87 +49,103 @@ const sourceContext = (chunks: SourceChunk[]) =>
     .join('\n');
 
 export interface GroundedModelClient {
-  generate(system: string, prompt: string): Promise<string>;
+  generate(system: string, prompt: string): Promise<{ content: string; usage: ModelUsage }>;
 }
 
 export class BedrockGroundedGenerator implements GroundedGenerator {
   constructor(private readonly client: GroundedModelClient) {}
 
-  async answer(input: Parameters<GroundedGenerator['answer']>[0]): Promise<GroundedAnswer> {
-    const output = answerOutputSchema.parse(
-      await this.generate(
-        `Câu hỏi: ${input.question.slice(0, 4_000)}\nPhạm vi: ${input.scope}\nLate join: ${input.lateJoin}\n` +
-          `Nguồn:\n${sourceContext(input.chunks)}\n` +
-          'JSON: {"answer":string,"citationIds":string[],"insufficientContext":boolean}',
-      ),
+  async answer(
+    input: Parameters<GroundedGenerator['answer']>[0],
+  ): ReturnType<GroundedGenerator['answer']> {
+    const generated = await this.generate(
+      `Câu hỏi: ${input.question.slice(0, 4_000)}\nPhạm vi: ${input.scope}\nLate join: ${input.lateJoin}\n` +
+        `Nguồn:\n${sourceContext(input.chunks)}\n` +
+        'JSON: {"answer":string,"citationIds":string[],"insufficientContext":boolean}',
+      answerOutputSchema,
     );
+    const output = generated.value;
     return {
-      answer: output.answer,
-      citations: this.citations(output.citationIds, input.chunks),
-      scope: input.scope,
-      insufficientContext: output.insufficientContext,
+      value: {
+        answer: output.answer,
+        citations: this.citations(output.citationIds, input.chunks),
+        scope: input.scope,
+        insufficientContext: output.insufficientContext,
+      },
+      usage: generated.usage,
     };
   }
 
-  async minutes(input: Parameters<GroundedGenerator['minutes']>[0]): Promise<MinutesDraft> {
-    const output = minutesOutputSchema.parse(
-      await this.generate(
-        `Chỉ ghi diễn biến, chủ đề, quyết định và action item thực sự đã được nêu.\nNguồn:\n${sourceContext(input.chunks)}\n` +
-          'JSON: {"summary":string,"topics":[{"content":string,"citationIds":string[]}],"decisions":[],"actionItems":[],"citationIds":string[]}',
-      ),
+  async minutes(
+    input: Parameters<GroundedGenerator['minutes']>[0],
+  ): ReturnType<GroundedGenerator['minutes']> {
+    const generated = await this.generate(
+      `Chỉ ghi diễn biến, chủ đề, quyết định và action item thực sự đã được nêu.\nNguồn:\n${sourceContext(input.chunks)}\n` +
+        'JSON: {"summary":string,"topics":[{"content":string,"citationIds":string[]}],"decisions":[],"actionItems":[],"citationIds":string[]}',
+      minutesOutputSchema,
     );
+    const output = generated.value;
     const statements = (items: z.infer<typeof statementSchema>[]) =>
       items.map((item) => ({
         content: item.content,
         citations: this.citations(item.citationIds, input.chunks),
       }));
     return {
-      meetingId: input.meetingId,
-      summary: output.summary,
-      topics: statements(output.topics),
-      decisions: statements(output.decisions),
-      actionItems: statements(output.actionItems),
-      citations: this.citations(output.citationIds, input.chunks),
+      value: {
+        meetingId: input.meetingId,
+        summary: output.summary,
+        topics: statements(output.topics),
+        decisions: statements(output.decisions),
+        actionItems: statements(output.actionItems),
+        citations: this.citations(output.citationIds, input.chunks),
+      },
+      usage: generated.usage,
     };
   }
 
   async taskProposals(
     input: Parameters<GroundedGenerator['taskProposals']>[0],
-  ): Promise<TaskProposal[]> {
-    const output = proposalOutputSchema.parse(
-      await this.generate(
-        `Chỉ đề xuất task đã được nêu rõ. Không tự điền assigneeId, priority hoặc dueAt khi không có căn cứ.\nNguồn:\n${sourceContext(input.chunks)}\n` +
-          'JSON array: [{"title":string,"description"?:string,"assigneeId"?:string,"priority"?:"LOW"|"MEDIUM"|"HIGH","dueAt"?:ISO-8601,"citationIds":string[]}]',
-      ),
+  ): ReturnType<GroundedGenerator['taskProposals']> {
+    const generated = await this.generate(
+      `Chỉ đề xuất task đã được nêu rõ. Không tự điền assigneeId, priority hoặc dueAt khi không có căn cứ.\nNguồn:\n${sourceContext(input.chunks)}\n` +
+        'JSON array: [{"title":string,"description"?:string,"assigneeId"?:string,"priority"?:"LOW"|"MEDIUM"|"HIGH","dueAt"?:ISO-8601,"citationIds":string[]}]',
+      proposalOutputSchema,
     );
-    return output.map((proposal) => ({
-      proposalId: 'pending-worker-normalization',
-      groupId: input.groupId,
-      meetingId: input.meetingId,
-      title: proposal.title,
-      ...(proposal.description ? { description: proposal.description } : {}),
-      ...(proposal.assigneeId ? { assigneeId: proposal.assigneeId } : {}),
-      ...(proposal.priority ? { priority: proposal.priority } : {}),
-      ...(proposal.dueAt ? { dueAt: proposal.dueAt } : {}),
-      missingFields: [],
-      citations: this.citations(proposal.citationIds, input.chunks),
-      status: 'PENDING',
-    }));
+    const output = generated.value;
+    return {
+      value: output.map((proposal) => ({
+        proposalId: 'pending-worker-normalization',
+        groupId: input.groupId,
+        meetingId: input.meetingId,
+        title: proposal.title,
+        ...(proposal.description ? { description: proposal.description } : {}),
+        ...(proposal.assigneeId ? { assigneeId: proposal.assigneeId } : {}),
+        ...(proposal.priority ? { priority: proposal.priority } : {}),
+        ...(proposal.dueAt ? { dueAt: proposal.dueAt } : {}),
+        missingFields: [],
+        citations: this.citations(proposal.citationIds, input.chunks),
+        status: 'PENDING',
+      })),
+      usage: generated.usage,
+    };
   }
 
   async progress(
     snapshot: Parameters<GroundedGenerator['progress']>[0],
-  ): Promise<GroupProgressAnalysis> {
-    const output = progressOutputSchema.parse(
-      await this.generate(
-        `Chỉ diễn giải snapshot cấp nhóm. Không chấm điểm, xếp hạng hay suy diễn thái độ cá nhân.\nSnapshot:\n${JSON.stringify(snapshot)}\n` +
-          'JSON: {"summary":string,"observations":string[],"risks":string[]}',
-      ),
+  ): ReturnType<GroundedGenerator['progress']> {
+    const generated = await this.generate(
+      `Chỉ diễn giải snapshot cấp nhóm. Không chấm điểm, xếp hạng hay suy diễn thái độ cá nhân.\nSnapshot:\n${JSON.stringify(snapshot)}\n` +
+        'JSON: {"summary":string,"observations":string[],"risks":string[]}',
+      progressOutputSchema,
     );
+    const output = generated.value;
     return {
-      groupId: snapshot.groupId,
-      ...output,
-      generatedAt: new Date().toISOString(),
+      value: {
+        groupId: snapshot.groupId,
+        ...output,
+        generatedAt: new Date().toISOString(),
+      },
+      usage: generated.usage,
     };
   }
 
@@ -148,13 +158,26 @@ export class BedrockGroundedGenerator implements GroundedGenerator {
     });
   }
 
-  private async generate(prompt: string): Promise<unknown> {
-    const text = await this.client.generate(systemPrompt, prompt);
-    if (!text) throw new Error('EMPTY_MODEL_RESPONSE');
-    try {
-      return JSON.parse(text) as unknown;
-    } catch {
-      throw new Error('INVALID_MODEL_OUTPUT');
+  private async generate<T>(prompt: string, schema: z.ZodType<T>): Promise<Generated<T>> {
+    const usage: ModelUsage = { inputTokens: 0, outputTokens: 0 };
+    let errorCode = 'INVALID_MODEL_OUTPUT';
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await this.client.generate(systemPrompt, prompt);
+      usage.inputTokens += response.usage.inputTokens;
+      usage.outputTokens += response.usage.outputTokens;
+      if (!response.content) {
+        errorCode = 'EMPTY_MODEL_RESPONSE';
+        continue;
+      }
+      try {
+        const parsed = schema.safeParse(JSON.parse(response.content));
+        if (parsed.success) return { value: parsed.data, usage };
+        errorCode = 'INVALID_MODEL_OUTPUT';
+      } catch {
+        errorCode = 'INVALID_MODEL_OUTPUT';
+        // Retry once for malformed JSON; provider and rate-limit errors are not swallowed here.
+      }
     }
+    throw new Error(errorCode);
   }
 }

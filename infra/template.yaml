@@ -461,6 +461,10 @@ Resources:
       DataType: float32
       Dimension: !Ref BedrockEmbeddingDimensions
       DistanceMetric: cosine
+      MetadataConfiguration:
+        NonFilterableMetadataKeys:
+          - AMAZON_BEDROCK_METADATA
+          - AMAZON_BEDROCK_TEXT
       Tags:
         - { Key: Project, Value: CampusMeet }
         - { Key: Environment, Value: !Ref Environment }
@@ -530,7 +534,7 @@ Resources:
   CampusMeetKnowledgeBase:
     Type: AWS::Bedrock::KnowledgeBase
     Properties:
-      Name: !Sub 'campusmeet-${Environment}-knowledge'
+      Name: !Sub 'campusmeet-${Environment}-knowledge-v2'
       Description: Group-scoped CampusMeet sources with filterable authorization metadata.
       RoleArn: !GetAtt KnowledgeBaseRole.Arn
       KnowledgeBaseConfiguration:

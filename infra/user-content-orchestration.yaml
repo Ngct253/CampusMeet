@@ -126,13 +126,51 @@ Resources:
                   "action": "EXECUTE"
                 }
               },
+              "ResultPath": "$.worker",
+              "Retry": [{
+                "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "AI_RATE_LIMITED"],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }],
+              "Next": "IngestionPending"
+            },
+            "IngestionPending": {
+              "Type": "Choice",
+              "Choices": [{
+                "Variable": "$.worker.Payload.pending",
+                "BooleanEquals": true,
+                "Next": "WaitForIngestion"
+              }],
+              "Default": "AIJobComplete"
+            },
+            "WaitForIngestion": {
+              "Type": "Wait",
+              "Seconds": 15,
+              "Next": "CheckIngestion"
+            },
+            "CheckIngestion": {
+              "Type": "Task",
+              "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${AIWorkerFunctionArn}",
+                "Payload": {
+                  "aiJobId.$": "$.aiJobId",
+                  "action": "CHECK_INGESTION",
+                  "ingestionJobId.$": "$.worker.Payload.ingestionJobId"
+                }
+              },
+              "ResultPath": "$.worker",
               "Retry": [{
                 "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
                 "IntervalSeconds": 2,
                 "MaxAttempts": 3,
                 "BackoffRate": 2
               }],
-              "End": true
+              "Next": "IngestionPending"
+            },
+            "AIJobComplete": {
+              "Type": "Succeed"
             }
           }
         }

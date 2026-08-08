@@ -169,6 +169,9 @@ for (const marker of [
   'InclusionPrefixes: [kb/]',
   'MaxTokens: 300',
   'OverlapPercentage: 20',
+  'NonFilterableMetadataKeys:',
+  'AMAZON_BEDROCK_METADATA',
+  'AMAZON_BEDROCK_TEXT',
   's3vectors:PutVectors',
   's3vectors:GetVectors',
   's3vectors:DeleteVectors',
@@ -192,6 +195,12 @@ for (const marker of [
 ]) {
   assert.equal(appTemplate.includes(marker), true, `Application template is missing ${marker}.`);
 }
+
+assert.equal(
+  m4Template.includes('"AI_RATE_LIMITED"'),
+  true,
+  'M4 orchestration must retry the safe Mantle rate-limit error.',
+);
 
 const knowledgeBase = appTemplate.slice(
   appTemplate.indexOf('  CampusMeetKnowledgeBase:'),
@@ -292,6 +301,21 @@ assert.equal(
   true,
   'The Lambda optimized integration must define JSONPath Parameters.',
 );
+
+for (const marker of [
+  '"Next": "IngestionPending"',
+  '"Variable": "$.worker.Payload.pending"',
+  '"Next": "WaitForIngestion"',
+  '"action": "CHECK_INGESTION"',
+  '"ingestionJobId.$": "$.worker.Payload.ingestionJobId"',
+  '"ResultPath": "$.worker"',
+]) {
+  assert.equal(
+    m4Template.includes(marker),
+    true,
+    `M4 orchestration is missing ingestion polling marker ${marker}.`,
+  );
+}
 
 for (const marker of [
   '  ReminderFunction:',

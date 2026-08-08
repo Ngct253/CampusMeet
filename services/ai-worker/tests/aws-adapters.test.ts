@@ -1,8 +1,12 @@
 import type { BedrockAgentRuntimeClient } from '@aws-sdk/client-bedrock-agent-runtime';
 import type { S3Client } from '@aws-sdk/client-s3';
+import type { BedrockAgentClient } from '@aws-sdk/client-bedrock-agent';
 import { describe, expect, it, vi } from 'vitest';
 import { BedrockGroundedGenerator } from '../src/providers/bedrock-grounded-generator';
-import { BedrockKnowledgeRetriever } from '../src/providers/bedrock-knowledge-base';
+import {
+  BedrockKnowledgeBaseIngestionGateway,
+  BedrockKnowledgeRetriever,
+} from '../src/providers/bedrock-knowledge-base';
 import { S3SourceObjectStore } from '../src/providers/s3-source-object-store';
 import type { SourceChunk } from '../src/domain/ports';
 
@@ -109,14 +113,30 @@ describe('AWS Phase 3 adapters', () => {
     );
   });
 
+  it('normalizes the AI job id into a valid Bedrock ingestion client token', async () => {
+    const send = vi.fn().mockResolvedValue({ ingestionJob: { ingestionJobId: 'ingestion-1' } });
+    const ingestion = new BedrockKnowledgeBaseIngestionGateway(
+      { send } as unknown as BedrockAgentClient,
+      'kb-1',
+      'source-1',
+    );
+
+    await ingestion.start('aij_1234_5678');
+
+    const clientToken = send.mock.calls[0]![0].input.clientToken;
+    expect(clientToken).toMatch(/^[a-zA-Z0-9-]{33,256}$/);
+    expect(clientToken).toMatch(/^aij-1234-5678-/);
+  });
+
   it('maps only model citation ids back to canonical citations', async () => {
-    const generate = vi.fn().mockResolvedValue(
-      JSON.stringify({
+    const generate = vi.fn().mockResolvedValue({
+      content: JSON.stringify({
         answer: 'Nhóm đã thống nhất.',
         citationIds: ['citation-1'],
         insufficientContext: false,
       }),
-    );
+      usage: { inputTokens: 100, outputTokens: 20 },
+    });
     const generator = new BedrockGroundedGenerator({ generate });
 
     const answer = await generator.answer({
@@ -126,18 +146,20 @@ describe('AWS Phase 3 adapters', () => {
       lateJoin: false,
     });
 
-    expect(answer.citations).toEqual([chunk.citation]);
+    expect(answer.value.citations).toEqual([chunk.citation]);
+    expect(answer.usage).toEqual({ inputTokens: 100, outputTokens: 20 });
     expect(generate).toHaveBeenCalledOnce();
   });
 
   it('rejects fabricated citation ids from the model', async () => {
-    const generate = vi.fn().mockResolvedValue(
-      JSON.stringify({
+    const generate = vi.fn().mockResolvedValue({
+      content: JSON.stringify({
         answer: 'Không có căn cứ.',
         citationIds: ['fabricated'],
         insufficientContext: false,
       }),
-    );
+      usage: { inputTokens: 100, outputTokens: 20 },
+    });
     const generator = new BedrockGroundedGenerator({ generate });
 
     await expect(
@@ -148,5 +170,59 @@ describe('AWS Phase 3 adapters', () => {
         lateJoin: false,
       }),
     ).rejects.toThrow('UNGROUNDED_MODEL_OUTPUT');
+  });
+
+  it('retries one malformed structured response and records usage from both attempts', async () => {
+    const generate = vi
+      .fn()
+      .mockResolvedValueOnce({
+        content: JSON.stringify({ summary: 'Thiếu observations và risks.' }),
+        usage: { inputTokens: 80, outputTokens: 10 },
+      })
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          summary: 'Tiến độ ổn định.',
+          observations: ['Ba công việc đã hoàn thành.'],
+          risks: [],
+        }),
+        usage: { inputTokens: 90, outputTokens: 20 },
+      });
+    const generator = new BedrockGroundedGenerator({ generate });
+
+    const result = await generator.progress({
+      groupId: 'group-1',
+      version: 1,
+      generatedAt: '2026-08-08T08:00:00.000Z',
+      taskCounts: { total: 3, todo: 0, doing: 0, done: 3, overdue: 0 },
+      meetingCounts: { completed: 1, upcoming: 0 },
+    });
+
+    expect(result.value).toMatchObject({
+      groupId: 'group-1',
+      summary: 'Tiến độ ổn định.',
+      observations: ['Ba công việc đã hoàn thành.'],
+      risks: [],
+    });
+    expect(result.usage).toEqual({ inputTokens: 170, outputTokens: 30 });
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails after two invalid structured responses', async () => {
+    const generate = vi.fn().mockResolvedValue({
+      content: '{not-json',
+      usage: { inputTokens: 50, outputTokens: 5 },
+    });
+    const generator = new BedrockGroundedGenerator({ generate });
+
+    await expect(
+      generator.progress({
+        groupId: 'group-1',
+        version: 1,
+        generatedAt: '2026-08-08T08:00:00.000Z',
+        taskCounts: { total: 0, todo: 0, doing: 0, done: 0, overdue: 0 },
+        meetingCounts: { completed: 0, upcoming: 0 },
+      }),
+    ).rejects.toThrow('INVALID_MODEL_OUTPUT');
+    expect(generate).toHaveBeenCalledTimes(2);
   });
 });

@@ -110,11 +110,18 @@ export class AIExecutionService {
       if (record.payload.operation === 'INGEST_SOURCE') {
         return await this.prepareKnowledgeSource(aiJobId, record.payload);
       }
-      const result = await this.generate(record.payload);
-      await this.dependencies.jobs.markCompleted(aiJobId, result);
-      return result;
+      const generated = await this.generate(record.payload);
+      await this.dependencies.jobs.markCompleted(
+        aiJobId,
+        generated.value,
+        ...(generated.usage ? [generated.usage] : []),
+      );
+      return generated.value;
     } catch (error) {
-      await this.dependencies.jobs.markFailed(aiJobId, safeErrorCode(error));
+      const errorCode = safeErrorCode(error);
+      if (errorCode !== 'AI_RATE_LIMITED' || record.job.attempt >= 3) {
+        await this.dependencies.jobs.markFailed(aiJobId, errorCode);
+      }
       throw error;
     }
   }
@@ -170,19 +177,22 @@ export class AIExecutionService {
           meetingIds: [payload.meetingId],
         });
         const chunks = [...indexedChunks, ...liveChunks];
-        const answer = chunks.length
+        const generated = chunks.length
           ? await this.dependencies.generator.answer({
               question: payload.request.question,
               scope: 'CURRENT_MEETING',
               chunks,
               lateJoin,
             })
-          : ({
-              answer: 'Không có đủ nguồn trong cuộc họp để trả lời câu hỏi này.',
-              citations: [],
-              scope: 'CURRENT_MEETING',
-              insufficientContext: true,
-            } satisfies GroundedAnswer);
+          : {
+              value: {
+                answer: 'Không có đủ nguồn trong cuộc họp để trả lời câu hỏi này.',
+                citations: [],
+                scope: 'CURRENT_MEETING',
+                insufficientContext: true,
+              } satisfies GroundedAnswer,
+            };
+        const answer = generated.value;
         answer.scope = 'CURRENT_MEETING';
         answer.citations = canonicalizeCitations(answer.citations, chunks);
         if (!answer.insufficientContext && answer.citations.length === 0) {
@@ -190,7 +200,7 @@ export class AIExecutionService {
         }
         const validated = groundedAnswerSchema.parse(answer);
         await this.saveConversation(payload, validated);
-        return validated;
+        return { value: validated, usage: generated.usage };
       }
       case 'GROUP_SEARCH': {
         const retrievalRequest = {
@@ -207,19 +217,22 @@ export class AIExecutionService {
           groupId: payload.groupId,
           ...(payload.request.meetingIds ? { meetingIds: payload.request.meetingIds } : {}),
         });
-        const answer = chunks.length
+        const generated = chunks.length
           ? await this.dependencies.generator.answer({
               question: payload.request.question,
               scope: payload.request.scope,
               chunks,
               lateJoin: false,
             })
-          : ({
-              answer: 'Không có đủ nguồn đã duyệt trong nhóm để trả lời câu hỏi này.',
-              citations: [],
-              scope: payload.request.scope,
-              insufficientContext: true,
-            } satisfies GroundedAnswer);
+          : {
+              value: {
+                answer: 'Không có đủ nguồn đã duyệt trong nhóm để trả lời câu hỏi này.',
+                citations: [],
+                scope: payload.request.scope,
+                insufficientContext: true,
+              } satisfies GroundedAnswer,
+            };
+        const answer = generated.value;
         answer.scope = payload.request.scope;
         answer.citations = canonicalizeCitations(answer.citations, chunks);
         if (!answer.insufficientContext && answer.citations.length === 0) {
@@ -227,7 +240,7 @@ export class AIExecutionService {
         }
         const validated = groundedAnswerSchema.parse(answer);
         await this.saveConversation(payload, validated);
-        return validated;
+        return { value: validated, usage: generated.usage };
       }
       case 'MINUTES_DRAFT': {
         const retrievalRequest = {
@@ -245,16 +258,17 @@ export class AIExecutionService {
           meetingIds: [payload.meetingId],
         });
         requireSources(chunks);
-        const draft = await this.dependencies.generator.minutes({
+        const generated = await this.dependencies.generator.minutes({
           meetingId: payload.meetingId,
           chunks,
         });
+        const draft = generated.value;
         draft.meetingId = payload.meetingId;
         draft.citations = canonicalizeCitations(draft.citations, chunks);
         for (const statement of [...draft.topics, ...draft.decisions, ...draft.actionItems]) {
           statement.citations = canonicalizeCitations(statement.citations, chunks);
         }
-        return minutesDraftSchema.parse(draft);
+        return { value: minutesDraftSchema.parse(draft), usage: generated.usage };
       }
       case 'TASK_PROPOSALS': {
         const retrievalRequest = {
@@ -272,11 +286,12 @@ export class AIExecutionService {
           meetingIds: [payload.meetingId],
         });
         requireSources(chunks);
-        const proposals = await this.dependencies.generator.taskProposals({
+        const generated = await this.dependencies.generator.taskProposals({
           groupId: payload.groupId,
           meetingId: payload.meetingId,
           chunks,
         });
+        const proposals = generated.value;
         const normalized = proposals.map((proposal): TaskProposal => {
           const missingFields: TaskProposal['missingFields'] = [];
           if (!proposal.assigneeId) missingFields.push('assigneeId');
@@ -292,7 +307,7 @@ export class AIExecutionService {
           });
         });
         await this.dependencies.proposals.save(normalized, payload.actorId);
-        return normalized;
+        return { value: normalized, usage: generated.usage };
       }
       case 'PROGRESS_ANALYSIS': {
         if (payload.request.snapshotVersion === undefined) {
@@ -303,12 +318,15 @@ export class AIExecutionService {
           payload.request.snapshotVersion,
         );
         if (snapshot.groupId !== payload.groupId) throw new Error('CROSS_GROUP_SNAPSHOT');
-        const analysis = await this.dependencies.generator.progress(snapshot);
-        return groupProgressAnalysisSchema.parse({
-          ...analysis,
-          groupId: payload.groupId,
-          generatedAt: new Date().toISOString(),
-        });
+        const generated = await this.dependencies.generator.progress(snapshot);
+        return {
+          value: groupProgressAnalysisSchema.parse({
+            ...generated.value,
+            groupId: payload.groupId,
+            generatedAt: new Date().toISOString(),
+          }),
+          usage: generated.usage,
+        };
       }
     }
   }
