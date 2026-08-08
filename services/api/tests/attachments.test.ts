@@ -60,6 +60,7 @@ describe('DynamoDbAttachmentRepository.completeUpload', () => {
       }),
     };
     const jobs = {
+      prepareJob: vi.fn(),
       enqueue: vi.fn().mockResolvedValue(queuedJob),
       ensureStarted: vi.fn().mockResolvedValue(queuedJob),
     };
@@ -95,7 +96,7 @@ describe('DynamoDbAttachmentRepository.completeUpload', () => {
         checksum: 'different',
       }),
     };
-    const jobs = { enqueue: vi.fn(), ensureStarted: vi.fn() };
+    const jobs = { prepareJob: vi.fn(), enqueue: vi.fn(), ensureStarted: vi.fn() };
     const repository = new DynamoDbAttachmentRepository(objects, jobs);
 
     await expect(
