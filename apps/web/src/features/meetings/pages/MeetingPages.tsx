@@ -1261,7 +1261,7 @@ export function GroupMeetingsPage() {
     enabled: Boolean(groupId),
   });
   const meetingsQuery = useInfiniteQuery({
-    queryKey: ['groups', groupId, 'meetings'],
+    queryKey: ['groups', groupId, 'meetings', 'timeline'],
     queryFn: async ({ pageParam }) => {
       const page = await getMeetings(groupId, pageParam ? { cursor: pageParam } : {});
       return (Array.isArray(page) ? { items: page } : page) as MeetingTimelineResponse;

@@ -405,6 +405,13 @@ Resources:
             Path: /integrations/google/callback
             Method: GET
             Auth: { Authorizer: NONE }
+        Preflight:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: '/{proxy+}'
+            Method: OPTIONS
+            Auth: { Authorizer: NONE }
         Proxy:
           Type: HttpApi
           Properties:
