@@ -33,10 +33,30 @@ const statusActions: Record<TaskStatus, Array<{ label: string; status: TaskStatu
   ],
   [TaskStatus.DOING]: [
     { label: 'Hoàn thành', status: TaskStatus.DONE },
-    { label: 'Đưa về TODO', status: TaskStatus.TODO },
+    { label: 'Chuyển về Chưa làm', status: TaskStatus.TODO },
   ],
   [TaskStatus.DONE]: [{ label: 'Mở lại', status: TaskStatus.DOING }],
 };
+
+const statusLabels: Record<TaskStatus, string> = {
+  [TaskStatus.TODO]: 'Chưa làm',
+  [TaskStatus.DOING]: 'Đang làm',
+  [TaskStatus.DONE]: 'Hoàn thành',
+};
+
+const priorityLabels: Record<Priority, string> = {
+  [Priority.LOW]: 'Thấp',
+  [Priority.MEDIUM]: 'Vừa',
+  [Priority.HIGH]: 'Cao',
+};
+
+const formatDueAtPreview = (value: string) =>
+  new Intl.DateTimeFormat('vi-VN', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(`${value}T00:00:00`));
 
 export const TasksPage = () => {
   const queryClient = useQueryClient();
@@ -192,7 +212,7 @@ export const TasksPage = () => {
       title: normalizedTitle,
       assigneeId: normalizedAssigneeId,
       priority,
-      ...(dueAt ? { dueAt: new Date(dueAt).toISOString() } : {}),
+      ...(dueAt ? { dueAt: new Date(`${dueAt}T23:59:59`).toISOString() } : {}),
       ...(sourceMeetingId.trim() ? { sourceMeetingId: sourceMeetingId.trim() } : {}),
     };
     const currentAttempt = attemptRef.current;
@@ -210,9 +230,14 @@ export const TasksPage = () => {
   return (
     <FeaturePage title="Công việc" description="Theo dõi công việc được giao và tiến độ cá nhân.">
       <div className="task-page-layout">
-        <section className="app-panel create-task-panel">
-          <span className="section-kicker">Phân công</span>
-          <h2>Tạo công việc</h2>
+        <details className="app-panel create-task-panel">
+          <summary>
+            <span>
+              <small className="section-kicker">Phân công</small>
+              <strong>Tạo công việc</strong>
+            </span>
+            <span aria-hidden="true">＋</span>
+          </summary>
           {groupsQuery.isPending ? (
             <p role="status">Đang tải nhóm quản trị…</p>
           ) : groupsQuery.isError ? (
@@ -273,46 +298,52 @@ export const TasksPage = () => {
                   value={priority}
                   onChange={(event) => setPriority(event.target.value as Priority)}
                 >
-                  <option value={Priority.LOW}>LOW</option>
-                  <option value={Priority.MEDIUM}>MEDIUM</option>
-                  <option value={Priority.HIGH}>HIGH</option>
+                  {Object.values(Priority).map((value) => (
+                    <option key={value} value={value}>
+                      {priorityLabels[value]}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>
                 Hạn hoàn thành <span>(không bắt buộc)</span>
                 <input
-                  type="datetime-local"
+                  type="date"
                   value={dueAt}
                   onChange={(event) => setDueAt(event.target.value)}
                 />
+                {dueAt && <small>Hoàn thành trước cuối ngày {formatDueAtPreview(dueAt)}</small>}
               </label>
-              <label>
-                Cuộc họp nguồn <span>(không bắt buộc)</span>
-                <select
-                  value={sourceMeetingId}
-                  onChange={(event) => {
-                    setSourceMeetingId(event.target.value);
-                    setMeetingError('');
-                  }}
-                  onFocus={() => setMeetingError('')}
-                  onPointerDown={() => setMeetingError('')}
-                  disabled={meetingsQuery.isPending || meetingsQuery.isError}
-                >
-                  <option value="">
-                    {meetingsQuery.isError ? 'Không tải được cuộc họp' : 'Không liên kết cuộc họp'}
-                  </option>
-                  {meetingsQuery.data?.map((meeting) => (
-                    <option key={meeting.id} value={meeting.id}>
-                      {meeting.title}
+              <details className="task-form-optional">
+                <summary>Liên kết với cuộc họp</summary>
+                <label>
+                  Cuộc họp
+                  <select
+                    value={sourceMeetingId}
+                    onChange={(event) => {
+                      setSourceMeetingId(event.target.value);
+                      setMeetingError('');
+                    }}
+                    onFocus={() => setMeetingError('')}
+                    onPointerDown={() => setMeetingError('')}
+                    disabled={meetingsQuery.isPending || meetingsQuery.isError}
+                  >
+                    <option value="">
+                      {meetingsQuery.isError ? 'Không tải được cuộc họp' : 'Không liên kết cuộc họp'}
                     </option>
-                  ))}
-                </select>
-              </label>
-              {meetingsQuery.isError && (
-                <p className="task-field-note">
-                  Bạn vẫn có thể tạo công việc không liên kết cuộc họp.
-                </p>
-              )}
+                    {meetingsQuery.data?.map((meeting) => (
+                      <option key={meeting.id} value={meeting.id}>
+                        {meeting.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {meetingsQuery.isError && (
+                  <p className="task-field-note">
+                    Bạn vẫn có thể tạo công việc không liên kết cuộc họp.
+                  </p>
+                )}
+              </details>
               {meetingError && (
                 <p className="error" role="alert">
                   {meetingError}
@@ -336,7 +367,7 @@ export const TasksPage = () => {
               </button>
             </form>
           )}
-        </section>
+        </details>
 
         <section className="app-panel assigned-task-panel">
           <span className="section-kicker">Cá nhân</span>
@@ -368,8 +399,9 @@ export const TasksPage = () => {
                   statusMutation.isPending && statusMutation.variables?.task.id === task.id;
                 return (
                   <article key={task.id}>
-                    <strong>{task.title}</strong> <StatusBadge>{task.status}</StatusBadge>
-                    <p>Ưu tiên: {task.priority}</p>
+                    <strong>{task.title}</strong>{' '}
+                    <StatusBadge>{statusLabels[task.status]}</StatusBadge>
+                    <p>Ưu tiên: {priorityLabels[task.priority]}</p>
                     <div className="task-status-actions">
                       {statusActions[task.status].map((action) => (
                         <button

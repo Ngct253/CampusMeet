@@ -20,7 +20,7 @@ export function EmptyState({
   return (
     <div className="state">
       <strong>{title}</strong>
-      <p>{children ?? 'Dữ liệu sẽ xuất hiện tại đây sau khi module được triển khai.'}</p>
+      <p>{children ?? 'Dữ liệu mới sẽ xuất hiện tại đây.'}</p>
     </div>
   );
 }
@@ -40,9 +40,6 @@ export function ErrorState() {
 }
 export function StatusBadge({ children }: { children: ReactNode }) {
   return <span className="status-badge">{children}</span>;
-}
-export function ConfirmDialog() {
-  return <div className="state">Hộp thoại xác nhận — placeholder</div>;
 }
 export function AccessDenied() {
   return <div className="state error">Bạn không có quyền truy cập nội dung này.</div>;

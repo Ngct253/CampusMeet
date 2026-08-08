@@ -182,7 +182,7 @@ Resources:
       CorsConfiguration:
         AllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
         AllowHeaders: [authorization, content-type, x-request-id, idempotency-key]
-        AllowOrigins: ['*'] # TODO(M5): replace with the deployed CloudFront domain.
+        AllowOrigins: [!Ref FrontendOrigin]
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:

@@ -7,6 +7,10 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+  FrontendOrigin:
+    Type: String
+    AllowedPattern: '^https?://[^/]+$'
+    Description: Exact browser origin allowed to upload directly to the private content bucket.
   DataTablePrefix:
     Type: String
     Default: campusmeet-dev
@@ -63,7 +67,7 @@ Resources:
         CorsRules:
           - AllowedHeaders: ['content-type', 'x-amz-meta-checksum']
             AllowedMethods: [PUT]
-            AllowedOrigins: ['*']
+            AllowedOrigins: [!Ref FrontendOrigin]
             ExposedHeaders: [ETag]
             MaxAge: 300
       LifecycleConfiguration:

@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClientError } from '../../../lib/api-client';
 import { GroupMeetingsPage, MeetingDetailPage } from './MeetingPages';
 
+vi.mock('../../../config/environment', () => ({
+  environment: { capabilities: { ai: true, documentUpload: true } },
+}));
+
 const services = vi.hoisted(() => ({
   getGroup: vi.fn(),
   getMeetings: vi.fn(),
@@ -242,6 +246,29 @@ it('validate form và submit create thành công', async () => {
   fireEvent.change(screen.getByLabelText(/tiêu đề/i), { target: { value: 'Planning' } });
   fireEvent.click(button);
   await waitFor(() => expect(services.createMeeting).toHaveBeenCalledTimes(1));
+});
+
+it('áp dụng agenda preset và xác nhận trước khi ghi đè nội dung hiện có', async () => {
+  services.getGroup.mockResolvedValue({
+    group: { id: 'group-1', name: 'Nhóm A', role: 'GROUP_ADMIN' },
+    members: [],
+  });
+  renderPage();
+
+  const preset = (await screen.findByLabelText('Mẫu chương trình họp')) as HTMLSelectElement;
+  expect(preset).toHaveValue('weekly-progress');
+  fireEvent.click(screen.getByRole('button', { name: 'Áp dụng mẫu' }));
+  expect(screen.getByDisplayValue('Kết quả công việc tuần qua')).toBeInTheDocument();
+  expect(screen.getAllByText(/^Mục chương trình \d+$/)).toHaveLength(5);
+
+  fireEvent.change(preset, { target: { value: 'kickoff' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Áp dụng mẫu' }));
+  expect(screen.getByText('Áp dụng mẫu mới sẽ thay thế chương trình hiện tại.')).toBeInTheDocument();
+  expect(screen.getByDisplayValue('Kết quả công việc tuần qua')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Áp dụng và thay thế' }));
+  expect(screen.getByDisplayValue('Mục tiêu và phạm vi dự án')).toBeInTheDocument();
+  expect(screen.queryByDisplayValue('Kết quả công việc tuần qua')).not.toBeInTheDocument();
 });
 
 it('render detail, submit edit và xác nhận cancel', async () => {
@@ -606,14 +633,14 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     renderDetail('MEMBER');
 
     expect(await screen.findByText(/Đã chuyển thành công việc/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Tạo Task' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Tạo công việc' })).not.toBeInTheDocument();
   });
 
   it('shows Create Task for an unconverted persisted Action Item to GROUP_ADMIN', async () => {
     services.getMeetingMinutes.mockResolvedValue(unconvertedMinutes());
     renderDetail('GROUP_ADMIN');
 
-    expect(await screen.findByRole('button', { name: 'Tạo Task' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Tạo công việc' })).toBeInTheDocument();
     expect(screen.queryByText('Đã chuyển thành công việc')).not.toBeInTheDocument();
   });
 
@@ -623,10 +650,10 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.convertActionItemToTask.mockResolvedValue(convertedResponse(source));
     renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
     expect(screen.getByLabelText('Mức ưu tiên cho Việc A')).toHaveValue('MEDIUM');
-    expect(screen.queryByLabelText('Người phụ trách Task cho Việc A')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    expect(screen.queryByLabelText('Người phụ trách công việc Việc A')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
 
     await waitFor(() => expect(services.convertActionItemToTask).toHaveBeenCalledTimes(1));
     expect(services.convertActionItemToTask).toHaveBeenCalledWith('meeting-1', 'action-1', {
@@ -651,18 +678,18 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.convertActionItemToTask.mockResolvedValue(convertedResponse(source, 'admin-1'));
     renderDetail();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
     const priority = screen.getByLabelText('Mức ưu tiên cho Việc A');
     expect(priority).toHaveValue('MEDIUM');
-    expect(screen.getByRole('option', { name: 'LOW' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'MEDIUM' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'HIGH' })).toBeInTheDocument();
-    const assigneeSelect = screen.getByLabelText('Người phụ trách Task cho Việc A');
+    expect(screen.getByRole('option', { name: 'Thấp' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Vừa' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Cao' })).toBeInTheDocument();
+    const assigneeSelect = screen.getByLabelText('Người phụ trách công việc Việc A');
     expect(
       within(assigneeSelect).queryByRole('option', { name: 'Không hoạt động' }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
     expect(
       await screen.findByText('Vui lòng chọn người phụ trách đang hoạt động.'),
     ).toBeInTheDocument();
@@ -672,10 +699,10 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
       target: { value: 'admin-1' },
     });
     fireEvent.change(priority, { target: { value: 'HIGH' } });
-    fireEvent.change(screen.getByLabelText('Tiêu đề Task cho Việc A'), {
+    fireEvent.change(screen.getByLabelText('Tiêu đề công việc Việc A'), {
       target: { value: ' Task tùy chỉnh ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
 
     await waitFor(() => expect(services.convertActionItemToTask).toHaveBeenCalledTimes(1));
     expect(services.convertActionItemToTask).toHaveBeenCalledWith('meeting-1', 'action-1', {
@@ -693,17 +720,17 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.convertActionItemToTask.mockResolvedValue(convertedResponse(source));
     renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
     expect(
-      await screen.findByText('Nội dung nguồn vượt quá 200 ký tự; cần nhập tiêu đề Task.'),
+      await screen.findByText('Nội dung vượt quá 200 ký tự; vui lòng nhập tiêu đề ngắn gọn.'),
     ).toBeInTheDocument();
     expect(services.convertActionItemToTask).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByLabelText(`Tiêu đề Task cho ${longContent}`), {
+    fireEvent.change(screen.getByLabelText(`Tiêu đề công việc ${longContent}`), {
       target: { value: 'Tiêu đề hợp lệ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
     await waitFor(() => expect(services.convertActionItemToTask).toHaveBeenCalledTimes(1));
     expect(services.convertActionItemToTask.mock.calls[0]?.[2]).toEqual(
       expect.objectContaining({ title: 'Tiêu đề hợp lệ' }),
@@ -714,11 +741,11 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.getMeetingMinutes.mockResolvedValue(unconvertedMinutes());
     renderDetail('GROUP_ADMIN');
 
-    const create = await screen.findByRole('button', { name: 'Tạo Task' });
+    const create = await screen.findByRole('button', { name: 'Tạo công việc' });
     expect(create).toBeEnabled();
     fireEvent.change(screen.getByLabelText('Tóm tắt'), { target: { value: 'Draft chưa lưu' } });
     expect(create).toBeDisabled();
-    expect(screen.getByText('Hãy lưu thay đổi biên bản trước khi tạo Task.')).toBeInTheDocument();
+    expect(screen.getByText('Hãy lưu biên bản trước khi tạo công việc.')).toBeInTheDocument();
   });
 
   it('prevents double submit, avoids optimistic taskId, and consumes authoritative Minutes', async () => {
@@ -733,8 +760,8 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     const { client, invalidate } = renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
-    const submit = screen.getByRole('button', { name: 'Xác nhận tạo Task' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+    const submit = screen.getByRole('button', { name: 'Xác nhận tạo công việc' });
     fireEvent.click(submit);
     fireEvent.click(submit);
     await waitFor(() => expect(services.convertActionItemToTask).toHaveBeenCalledTimes(1));
@@ -759,8 +786,8 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.convertActionItemToTask.mockResolvedValue(convertedResponse(source, 'admin-1'));
     const { invalidate } = renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
     expect(await screen.findByText('Đã chuyển thành công việc')).toBeInTheDocument();
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['tasks'] });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['dashboard'] });
@@ -773,17 +800,17 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     const { invalidate } = renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
     expect(
-      await screen.findByText('Bạn không còn quyền Quản trị viên để tạo Task.'),
+      await screen.findByText('Bạn không còn quyền Quản trị viên để tạo công việc.'),
     ).toBeInTheDocument();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['groups', 'group-1'] });
   });
 
   it.each([
     [404, 'Việc cần thực hiện không còn trong phiên bản biên bản mới nhất.'],
-    [409, 'Biên bản đã thay đổi hoặc việc này vừa được chuyển thành Task ở nơi khác.'],
+    [409, 'Biên bản đã thay đổi hoặc mục này vừa được chuyển thành công việc ở nơi khác.'],
   ])(
     'refetches latest Minutes on conversion error %s and retains valid input',
     async (status, message) => {
@@ -793,11 +820,11 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
       );
       const { invalidate } = renderDetail('GROUP_ADMIN');
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
-      fireEvent.change(screen.getByLabelText('Tiêu đề Task cho Việc A'), {
+      fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+      fireEvent.change(screen.getByLabelText('Tiêu đề công việc Việc A'), {
         target: { value: 'Giữ input này' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
 
       expect(await screen.findByText(message)).toBeInTheDocument();
       expect(screen.getByDisplayValue('Giữ input này')).toBeInTheDocument();
@@ -817,15 +844,15 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
-    fireEvent.change(screen.getByLabelText('Tiêu đề Task cho Việc A'), {
+    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+    fireEvent.change(screen.getByLabelText('Tiêu đề công việc Việc A'), {
       target: { value: 'Input sẽ bị bỏ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
 
     await waitFor(() => expect(services.getMeetingMinutes).toHaveBeenCalledTimes(2));
     expect(screen.queryByDisplayValue('Input sẽ bị bỏ')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Tạo Task' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Tạo công việc' })).not.toBeInTheDocument();
   });
 
   it('keeps input on 422 and permits retry after a network/server failure', async () => {
@@ -837,19 +864,19 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
       .mockResolvedValueOnce(convertedResponse(source));
     renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo Task' }));
-    fireEvent.change(screen.getByLabelText('Tiêu đề Task cho Việc A'), {
+    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+    fireEvent.change(screen.getByLabelText('Tiêu đề công việc Việc A'), {
       target: { value: 'Không được mất' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
     expect(await screen.findByText('Quy tắc nghiệp vụ')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Không được mất')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
     expect(await screen.findByText('Mất kết nối')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Không được mất')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo Task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
     expect(await screen.findByText('Đã chuyển thành công việc')).toBeInTheDocument();
     expect(services.convertActionItemToTask).toHaveBeenCalledTimes(3);
   });
