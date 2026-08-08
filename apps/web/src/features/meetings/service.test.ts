@@ -27,7 +27,7 @@ describe('meeting minutes service', () => {
     const input: UpdateMeetingMinutesRequest = {
       summary: 'Tóm tắt',
       discussion: '',
-      decisions: [{ content: 'Quyết định' }],
+      decisions: [{ id: 'decision-1', content: 'Quyết định' }],
       actionItems: [{ content: 'Hành động', assigneeId: 'user-1' }],
       expectedVersion: 2,
     };

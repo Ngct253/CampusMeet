@@ -181,7 +181,6 @@ beforeEach(() => {
 });
 
 function renderPage(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
-
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/app/groups/group-1/meetings']}>
@@ -453,6 +452,42 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
       },
     ]);
     expect(sent.actionItems[0]).not.toHaveProperty('taskId');
+  });
+
+  it('keeps persisted Decision ids through edit/delete and leaves new Decisions unassigned', async () => {
+    services.getMeetingMinutes.mockResolvedValue({
+      ...minutes,
+      decisions: [
+        { id: 'decision-1', content: 'Một' },
+        { id: 'decision-2', content: 'Hai' },
+      ],
+    });
+    services.updateMeetingMinutes.mockResolvedValue({
+      ...minutes,
+      decisions: [
+        { id: 'decision-2', content: 'Hai cập nhật' },
+        { id: 'decision-3', content: 'Mới' },
+      ],
+      version: 3,
+    });
+    renderDetail('GROUP_ADMIN');
+
+    await screen.findByDisplayValue('Một');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Xóa' })[0]!);
+    fireEvent.change(screen.getByLabelText('Quyết định 1'), {
+      target: { value: 'Hai cập nhật' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Thêm quyết định' }));
+    fireEvent.change(screen.getByLabelText('Quyết định 2'), { target: { value: 'Mới' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
+
+    await waitFor(() => expect(services.updateMeetingMinutes).toHaveBeenCalledTimes(1));
+    expect(services.updateMeetingMinutes.mock.calls[0]?.[1].decisions).toEqual([
+      { id: 'decision-2', content: 'Hai cập nhật' },
+      { content: 'Mới' },
+    ]);
+    expect(await screen.findByDisplayValue('Hai cập nhật')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Mới')).toBeInTheDocument();
   });
 
   it('keeps the remaining action item id after deleting another item', async () => {

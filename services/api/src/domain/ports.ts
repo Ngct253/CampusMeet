@@ -1,5 +1,6 @@
 import type {
   ActionItem,
+  Decision,
   ConvertActionItemToTaskResponse,
   CreateTaskRequest,
   Group,
@@ -16,7 +17,11 @@ import type {
   UpdateMeetingMinutesRequest,
 } from '@campusmeet/shared';
 
-export type ResolvedMeetingMinutesInput = Omit<UpdateMeetingMinutesRequest, 'actionItems'> & {
+export type ResolvedMeetingMinutesInput = Omit<
+  UpdateMeetingMinutesRequest,
+  'decisions' | 'actionItems'
+> & {
+  decisions: Decision[];
   actionItems: ActionItem[];
 };
 

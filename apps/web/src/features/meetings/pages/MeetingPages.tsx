@@ -121,7 +121,7 @@ type MinutesDraft = Omit<UpdateMeetingMinutesRequest, 'expectedVersion'>;
 const minutesDraft = (minutes?: MeetingMinutes): MinutesDraft => ({
   summary: minutes?.summary ?? '',
   discussion: minutes?.discussion ?? '',
-  decisions: minutes?.decisions.map(({ content }) => ({ content })) ?? [],
+  decisions: minutes?.decisions.map(({ id, content }) => ({ id, content })) ?? [],
   actionItems:
     minutes?.actionItems.map(({ id, content, assigneeId, dueAt }) => ({
       id,
@@ -524,7 +524,7 @@ function MinutesEditor({
         <fieldset>
           <legend>Quyết định</legend>
           {draft.decisions.map((decision, index) => (
-            <div className="minutes-row" key={`decision-${index}`}>
+            <div className="minutes-row" key={decision.id ?? `decision-new-${index}`}>
               <input
                 aria-label={`Quyết định ${index + 1}`}
                 value={decision.content}
@@ -532,7 +532,7 @@ function MinutesEditor({
                   changeDraft({
                     ...draft,
                     decisions: draft.decisions.map((item, itemIndex) =>
-                      itemIndex === index ? { content: event.target.value } : item,
+                      itemIndex === index ? { ...item, content: event.target.value } : item,
                     ),
                   })
                 }
