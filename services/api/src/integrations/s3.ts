@@ -7,7 +7,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ServiceConfigurationError } from '../utils/errors';
 
-const client = new S3Client({
+const defaultClient = new S3Client({
   region: process.env.AWS_REGION ?? 'ap-southeast-1',
   requestChecksumCalculation: 'WHEN_REQUIRED',
 });
@@ -33,13 +33,15 @@ export interface AttachmentObjectStore {
 }
 
 export class S3AttachmentObjectStore implements AttachmentObjectStore {
+  constructor(private readonly client = defaultClient) {}
+
   async createUploadUrl(input: {
     objectKey: string;
     contentType: string;
     checksum: string;
   }): Promise<string> {
     return getSignedUrl(
-      client,
+      this.client,
       new PutObjectCommand({
         Bucket: bucketName(),
         Key: input.objectKey,
@@ -54,13 +56,15 @@ export class S3AttachmentObjectStore implements AttachmentObjectStore {
   }
 
   async createDownloadUrl(objectKey: string): Promise<string> {
-    return getSignedUrl(client, new GetObjectCommand({ Bucket: bucketName(), Key: objectKey }), {
-      expiresIn: 900,
-    });
+    return getSignedUrl(
+      this.client,
+      new GetObjectCommand({ Bucket: bucketName(), Key: objectKey }),
+      { expiresIn: 900 },
+    );
   }
 
   async head(objectKey: string) {
-    const result = await client.send(
+    const result = await this.client.send(
       new HeadObjectCommand({ Bucket: bucketName(), Key: objectKey }),
     );
     return {

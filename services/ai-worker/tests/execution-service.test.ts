@@ -83,12 +83,12 @@ const setup = (payload: AIRequestPayload, chunks: SourceChunk[] = []) => {
     getFinalLiveSegments: vi.fn().mockResolvedValue([]),
   };
   const generator: GroundedGenerator = {
-    answer: vi
-      .fn()
-      .mockImplementation(({ chunks: answerChunks, scope }) => defaultAnswer(answerChunks, scope)),
-    minutes: vi.fn().mockResolvedValue({} as MinutesDraft),
-    taskProposals: vi.fn().mockResolvedValue([] as TaskProposal[]),
-    progress: vi.fn().mockResolvedValue({} as GroupProgressAnalysis),
+    answer: vi.fn().mockImplementation(({ chunks: answerChunks, scope }) => ({
+      value: defaultAnswer(answerChunks, scope),
+    })),
+    minutes: vi.fn().mockResolvedValue({ value: {} as MinutesDraft }),
+    taskProposals: vi.fn().mockResolvedValue({ value: [] as TaskProposal[] }),
+    progress: vi.fn().mockResolvedValue({ value: {} as GroupProgressAnalysis }),
   };
   const conversations: ConversationRepository = {
     saveExchange: vi.fn().mockResolvedValue(undefined),
@@ -144,17 +144,19 @@ describe('AIExecutionService grounding rules', () => {
     };
     const chunk = indexedChunk();
     const { generator, proposals, service } = setup(payload, [chunk]);
-    vi.mocked(generator.taskProposals).mockResolvedValue([
-      {
-        proposalId: 'model-id-is-replaced',
-        groupId: 'group-1',
-        meetingId: 'meeting-1',
-        title: 'Hoàn thiện báo cáo',
-        missingFields: ['assigneeId', 'priority'],
-        citations: [chunk.citation],
-        status: 'PENDING',
-      },
-    ]);
+    vi.mocked(generator.taskProposals).mockResolvedValue({
+      value: [
+        {
+          proposalId: 'model-id-is-replaced',
+          groupId: 'group-1',
+          meetingId: 'meeting-1',
+          title: 'Hoàn thiện báo cáo',
+          missingFields: ['assigneeId', 'priority'],
+          citations: [chunk.citation],
+          status: 'PENDING',
+        },
+      ],
+    });
 
     const result = (await service.execute('job-1')) as TaskProposal[];
 
@@ -186,6 +188,61 @@ describe('AIExecutionService grounding rules', () => {
     expect(jobs.markCompleted).toHaveBeenCalledWith('job-1', result);
   });
 
+  it('persists model token usage with the completed job', async () => {
+    const payload: AIRequestPayload = {
+      operation: 'GROUP_SEARCH',
+      actorId: 'user-1',
+      groupId: 'group-1',
+      request: { question: 'Quyết định gì?', scope: 'WHOLE_GROUP' },
+    };
+    const chunk = indexedChunk();
+    const { generator, jobs, service } = setup(payload, [chunk]);
+    vi.mocked(generator.answer).mockResolvedValue({
+      value: defaultAnswer([chunk], 'WHOLE_GROUP'),
+      usage: { inputTokens: 120, outputTokens: 30 },
+    });
+
+    const result = await service.execute('job-1');
+
+    expect(jobs.markCompleted).toHaveBeenCalledWith('job-1', result, {
+      inputTokens: 120,
+      outputTokens: 30,
+    });
+  });
+
+  it('keeps a rate-limited job retryable before the bounded attempt limit', async () => {
+    const payload: AIRequestPayload = {
+      operation: 'GROUP_SEARCH',
+      actorId: 'user-1',
+      groupId: 'group-1',
+      request: { question: 'Quyết định gì?', scope: 'WHOLE_GROUP' },
+    };
+    const { generator, jobs, service } = setup(payload, [indexedChunk()]);
+    vi.mocked(generator.answer).mockRejectedValue(
+      Object.assign(new Error('AI_RATE_LIMITED'), { name: 'AI_RATE_LIMITED' }),
+    );
+
+    await expect(service.execute('job-1')).rejects.toThrow('AI_RATE_LIMITED');
+    expect(jobs.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('marks a rate-limited job failed after the bounded attempt limit', async () => {
+    const payload: AIRequestPayload = {
+      operation: 'GROUP_SEARCH',
+      actorId: 'user-1',
+      groupId: 'group-1',
+      request: { question: 'Quyết định gì?', scope: 'WHOLE_GROUP' },
+    };
+    const { generator, jobs, service } = setup(payload, [indexedChunk()]);
+    vi.mocked(jobs.get).mockResolvedValue({ job: { ...job(payload), attempt: 3 }, payload });
+    vi.mocked(generator.answer).mockRejectedValue(
+      Object.assign(new Error('AI_RATE_LIMITED'), { name: 'AI_RATE_LIMITED' }),
+    );
+
+    await expect(service.execute('job-1')).rejects.toThrow('AI_RATE_LIMITED');
+    expect(jobs.markFailed).toHaveBeenCalledWith('job-1', 'AI_RATE_LIMITED');
+  });
+
   it('builds selected-meeting filters before retrieval and ignores instructions inside source text', async () => {
     const payload: AIRequestPayload = {
       operation: 'GROUP_SEARCH',
@@ -209,10 +266,12 @@ describe('AIExecutionService grounding rules', () => {
     ];
     const { generator, retriever, proposals, service } = setup(payload, chunks);
     vi.mocked(generator.answer).mockResolvedValue({
-      answer: 'Nhóm đã thống nhất hoàn thành báo cáo.',
-      citations: [chunks[0]!.citation],
-      scope: 'WHOLE_GROUP',
-      insufficientContext: false,
+      value: {
+        answer: 'Nhóm đã thống nhất hoàn thành báo cáo.',
+        citations: [chunks[0]!.citation],
+        scope: 'WHOLE_GROUP',
+        insufficientContext: false,
+      },
     });
 
     const result = (await service.execute('job-1')) as GroundedAnswer;
@@ -273,10 +332,12 @@ describe('AIExecutionService grounding rules', () => {
     const chunk = indexedChunk();
     const { generator, service } = setup(payload, [chunk]);
     vi.mocked(generator.answer).mockResolvedValue({
-      answer: 'Đã có quyết định.',
-      citations: [citation({ excerpt: 'Dữ liệu do model tự thêm.' })],
-      scope: 'WHOLE_GROUP',
-      insufficientContext: false,
+      value: {
+        answer: 'Đã có quyết định.',
+        citations: [citation({ excerpt: 'Dữ liệu do model tự thêm.' })],
+        scope: 'WHOLE_GROUP',
+        insufficientContext: false,
+      },
     });
 
     const result = (await service.execute('job-1')) as GroundedAnswer;
@@ -293,10 +354,12 @@ describe('AIExecutionService grounding rules', () => {
     };
     const { generator, jobs, service } = setup(payload, [indexedChunk()]);
     vi.mocked(generator.answer).mockResolvedValue({
-      answer: 'Đã có quyết định.',
-      citations: [citation({ citationId: 'fabricated-citation' })],
-      scope: 'WHOLE_GROUP',
-      insufficientContext: false,
+      value: {
+        answer: 'Đã có quyết định.',
+        citations: [citation({ citationId: 'fabricated-citation' })],
+        scope: 'WHOLE_GROUP',
+        insufficientContext: false,
+      },
     });
 
     await expect(service.execute('job-1')).rejects.toThrow('UNGROUNDED_MODEL_OUTPUT');
@@ -365,11 +428,13 @@ describe('AIExecutionService grounding rules', () => {
     };
     vi.mocked(progressSnapshots.get).mockResolvedValue(progressSnapshot);
     vi.mocked(generator.progress).mockResolvedValue({
-      groupId: 'group-1',
-      summary: 'Tiến độ ổn định.',
-      observations: [],
-      risks: [],
-      generatedAt: '2026-08-08T10:01:00.000Z',
+      value: {
+        groupId: 'group-1',
+        summary: 'Tiến độ ổn định.',
+        observations: [],
+        risks: [],
+        generatedAt: '2026-08-08T10:01:00.000Z',
+      },
     });
 
     await service.execute('job-1');

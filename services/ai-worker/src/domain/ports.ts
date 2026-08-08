@@ -23,7 +23,7 @@ export interface AIJobRecord {
 
 export interface AIJobUpdater {
   markProcessing(aiJobId: string): Promise<void>;
-  markCompleted(aiJobId: string, result: unknown): Promise<void>;
+  markCompleted(aiJobId: string, result: unknown, usage?: ModelUsage): Promise<void>;
   markFailed(aiJobId: string, errorCode: string): Promise<void>;
 }
 
@@ -66,20 +66,30 @@ export interface ApprovedSourceReader {
   getFinalLiveSegments(meetingId: string, groupId: string): Promise<SourceChunk[]>;
 }
 
+export interface ModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface Generated<T> {
+  value: T;
+  usage?: ModelUsage;
+}
+
 export interface GroundedGenerator {
   answer(input: {
     question: string;
     scope: KnowledgeScope;
     chunks: SourceChunk[];
     lateJoin: boolean;
-  }): Promise<GroundedAnswer>;
-  minutes(input: { meetingId: string; chunks: SourceChunk[] }): Promise<MinutesDraft>;
+  }): Promise<Generated<GroundedAnswer>>;
+  minutes(input: { meetingId: string; chunks: SourceChunk[] }): Promise<Generated<MinutesDraft>>;
   taskProposals(input: {
     groupId: string;
     meetingId: string;
     chunks: SourceChunk[];
-  }): Promise<TaskProposal[]>;
-  progress(snapshot: GroupProgressSnapshot): Promise<GroupProgressAnalysis>;
+  }): Promise<Generated<TaskProposal[]>>;
+  progress(snapshot: GroupProgressSnapshot): Promise<Generated<GroupProgressAnalysis>>;
 }
 
 export interface ConversationRepository {

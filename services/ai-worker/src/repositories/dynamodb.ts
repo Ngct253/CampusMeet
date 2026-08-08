@@ -24,6 +24,7 @@ import type {
   GroupProgressSnapshotReader,
   KnowledgeSourceRepository,
   TaskProposalGateway,
+  ModelUsage,
 } from '../domain/ports';
 
 const versionKey = (version: number) => `VERSION#${String(version).padStart(10, '0')}`;
@@ -81,8 +82,8 @@ export class DynamoAIJobRepository implements AIJobRepository {
     );
   }
 
-  async markCompleted(aiJobId: string, result: unknown): Promise<void> {
-    await this.finish(aiJobId, 'COMPLETED', { result });
+  async markCompleted(aiJobId: string, result: unknown, usage?: ModelUsage): Promise<void> {
+    await this.finish(aiJobId, 'COMPLETED', { result, usage });
   }
 
   async markFailed(aiJobId: string, errorCode: string): Promise<void> {
@@ -92,7 +93,7 @@ export class DynamoAIJobRepository implements AIJobRepository {
   private async finish(
     aiJobId: string,
     status: 'COMPLETED' | 'FAILED',
-    value: { result: unknown } | { errorCode: string },
+    value: { result: unknown; usage?: ModelUsage } | { errorCode: string },
   ) {
     const now = new Date().toISOString();
     const isCompleted = 'result' in value;
@@ -100,7 +101,7 @@ export class DynamoAIJobRepository implements AIJobRepository {
       new UpdateCommand({
         TableName: this.tableName,
         Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
-        UpdateExpression: `SET #status = :status, updatedAt = :now, GSI2PK = :gsi, GSI2SK = :gsiSort, ${isCompleted ? '#result = :value' : 'errorCode = :value'}`,
+        UpdateExpression: `SET #status = :status, updatedAt = :now, GSI2PK = :gsi, GSI2SK = :gsiSort, ${isCompleted ? '#result = :value' : 'errorCode = :value'}${isCompleted && value.usage ? ', inputTokens = :inputTokens, outputTokens = :outputTokens' : ''}`,
         ConditionExpression: '#status <> :cancelled',
         ExpressionAttributeNames: {
           '#status': 'status',
@@ -113,6 +114,12 @@ export class DynamoAIJobRepository implements AIJobRepository {
           ':gsi': `AIJOB_STATUS#${status}`,
           ':gsiSort': `${now}#${aiJobId}`,
           ':value': isCompleted ? value.result : value.errorCode,
+          ...(isCompleted && value.usage
+            ? {
+                ':inputTokens': value.usage.inputTokens,
+                ':outputTokens': value.usage.outputTokens,
+              }
+            : {}),
         },
       }),
     );

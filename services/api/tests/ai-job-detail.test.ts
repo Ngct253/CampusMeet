@@ -83,6 +83,8 @@ describe('GET /ai/jobs/:aiJobId', () => {
       Item: {
         ...queuedJob,
         status: 'COMPLETED',
+        inputTokens: 120,
+        outputTokens: 30,
         result: {
           answer: 'Không có đủ nguồn để trả lời.',
           citations: [],
@@ -99,6 +101,8 @@ describe('GET /ai/jobs/:aiJobId', () => {
       success: true,
       data: {
         status: 'COMPLETED',
+        inputTokens: 120,
+        outputTokens: 30,
         result: { scope: 'CURRENT_MEETING', insufficientContext: true },
       },
     });

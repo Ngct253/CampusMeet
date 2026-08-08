@@ -2,6 +2,7 @@ import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import type { KnowledgeSource } from '@campusmeet/shared';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  DynamoAIJobRepository,
   DynamoGroupProgressSnapshotReader,
   DynamoKnowledgeSourceRepository,
 } from '../src/repositories/dynamodb';
@@ -18,6 +19,33 @@ const source: KnowledgeSource = {
   createdAt: '2026-08-01T00:00:00.000Z',
   updatedAt: '2026-08-01T00:00:00.000Z',
 };
+
+describe('DynamoAIJobRepository', () => {
+  it('stores input and output token usage when completing a generation job', async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const repository = new DynamoAIJobRepository(
+      { send } as unknown as DynamoDBDocumentClient,
+      'ai-work',
+    );
+
+    await repository.markCompleted(
+      'job-1',
+      { answer: 'ok' },
+      {
+        inputTokens: 120,
+        outputTokens: 30,
+      },
+    );
+
+    expect(send.mock.calls[0]![0].input).toMatchObject({
+      UpdateExpression: expect.stringContaining('inputTokens = :inputTokens'),
+      ExpressionAttributeValues: expect.objectContaining({
+        ':inputTokens': 120,
+        ':outputTokens': 30,
+      }),
+    });
+  });
+});
 
 describe('DynamoKnowledgeSourceRepository', () => {
   it('stores the documented source/version key and group index', async () => {

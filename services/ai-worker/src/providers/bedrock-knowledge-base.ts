@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   BedrockAgentClient,
   GetIngestionJobCommand,
@@ -99,11 +100,20 @@ export class BedrockKnowledgeBaseIngestionGateway implements KnowledgeBaseIngest
   ) {}
 
   async start(clientToken: string): Promise<string> {
+    const normalizedClientToken =
+      clientToken.replace(/[^a-zA-Z0-9-]/g, '-').replace(/^-+|-+$/g, '') || 'job';
+    const bedrockClientToken =
+      normalizedClientToken.length >= 33
+        ? normalizedClientToken.slice(0, 256)
+        : `${normalizedClientToken}-${createHash('sha256').update(clientToken).digest('hex')}`.slice(
+            0,
+            33,
+          );
     const response = await this.client.send(
       new StartIngestionJobCommand({
         knowledgeBaseId: this.knowledgeBaseId,
         dataSourceId: this.dataSourceId,
-        clientToken,
+        clientToken: bedrockClientToken,
       }),
     );
     const id = response.ingestionJob?.ingestionJobId;

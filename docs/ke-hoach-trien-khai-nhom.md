@@ -28,8 +28,8 @@ Nhiều repository có thể dùng cùng một bảng nhưng vẫn tách theo do
 | ---------- | -------------------------------------------------------------------------------------- | ----: | ------------------------------------------------------------------ |
 | M1         | Identity, group, membership, invitation, authorization và notification inbox           |   20% | Membership lookup, authorization helper và notification repository |
 | M2         | Meeting, agenda, attendee, consent, live Amazon STT, recording và final transcript     |   20% | Meeting boundary, live session/gap metadata và final segment       |
-| M3         | Transcript edit/approval, minutes, task, dashboard và xác nhận proposal                |   20% | Approved transcript, Task/Minutes API và `GroupProgressSnapshot`   |
-| M4         | Google/Meet Add-on; upload, AIJob orchestration, reminder và email                     |   20% | Add-on dùng chung API; Attachment `READY`, AIJob và external refs  |
+| M3         | Transcript edit/approval, minutes, task, dashboard và xác nhận proposal                |   20% | Approved transcript, Task/Minutes API và`GroupProgressSnapshot`    |
+| M4         | Google/Meet Add-on; upload, AIJob orchestration, reminder và email                     |   20% | Add-on dùng chung API; Attachment`READY`, AIJob và external refs   |
 | M5         | Contract AI, KnowledgeSource, Bedrock RAG, citation, late summary và AI draft/analysis |   20% | Grounded answer/draft/analysis và nghiệm thu AI đầu-cuối           |
 
 Người phụ trách chịu trách nhiệm kết quả, không độc quyền tệp. Dữ liệu dùng chung, router, IAM và IaC luôn cần review chéo.
@@ -398,7 +398,7 @@ M2/M4/M5 có thể dùng fake đúng port khi dependency chưa xong; deployment 
 | AI source         | consent/upload/live segment/reconnect/transcript approval/AIJob            |
 | AI grounded       | KnowledgeSource + current/selected/whole-group RAG + late summary/citation |
 | Proposal          | minutes/task draft + missing fields + preview/confirm/idempotency          |
-| Progress AI       | M3 snapshot → M5 analysis; Admin được phép, Member nhận `403`              |
+| Progress AI       | M3 snapshot → M5 analysis; Admin được phép, Member nhận`403`               |
 | Release candidate | Cross-group tests, logs/alarms, budget, retention và cleanup rehearsal đạt |
 
 ## 13. Điều kiện hoàn thành cho mỗi chức năng
