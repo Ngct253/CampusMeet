@@ -51,13 +51,15 @@ const minutesItem = {
   summary: 'Tóm tắt',
   discussion: '',
   decisions: [{ id: 'decision-1', content: 'Quyết định' }],
-  actionItems: [{
-    id: 'action-1',
-    content: 'Hành động',
-    assigneeId: 'user-1',
-    dueAt: '2026-08-10T03:30:00.000Z',
-    taskId: 'task-1',
-  }],
+  actionItems: [
+    {
+      id: 'action-1',
+      content: 'Hành động',
+      assigneeId: 'user-1',
+      dueAt: '2026-08-10T03:30:00.000Z',
+      taskId: 'task-1',
+    },
+  ],
   version: 1,
   createdBy: 'admin-1',
   createdAt: '2026-08-04T03:00:00.000Z',
@@ -85,13 +87,15 @@ describe('DynamoDbMinutesRepository', () => {
     await expect(new DynamoDbMinutesRepository().getLatest('meeting-1')).resolves.toMatchObject({
       id: 'minutes-1',
       version: 1,
-      actionItems: [{
-        id: 'action-1',
-        content: 'Hành động',
-        assigneeId: 'user-1',
-        dueAt: '2026-08-10T03:30:00.000Z',
-        taskId: 'task-1',
-      }],
+      actionItems: [
+        {
+          id: 'action-1',
+          content: 'Hành động',
+          assigneeId: 'user-1',
+          dueAt: '2026-08-10T03:30:00.000Z',
+          taskId: 'task-1',
+        },
+      ],
     });
     const command = send.mock.calls[0]?.[0] as {
       constructor: { name: string };
@@ -133,6 +137,7 @@ describe('DynamoDbMinutesRepository', () => {
       'action item due date',
       { actionItems: [{ ...minutesItem.actionItems[0], dueAt: '2026-08-10T10:30:00' }] },
     ],
+    ['Decision identity', { decisions: [{ content: 'Missing id' }] }],
   ])('rejects a persisted item with invalid %s', async (_label, override) => {
     send.mockResolvedValueOnce({ Items: [{ ...minutesItem, ...override }] });
     await expect(new DynamoDbMinutesRepository().getLatest('meeting-1')).rejects.toThrow(
@@ -148,7 +153,10 @@ describe('DynamoDbMinutesRepository', () => {
       {
         summary: 'Tóm tắt',
         discussion: '',
-        decisions: [{ content: 'A' }, { content: 'B' }],
+        decisions: [
+          { id: 'decision-a', content: 'A' },
+          { id: 'decision-b', content: 'B' },
+        ],
         actionItems: [
           { id: 'action-c', content: 'C' },
           {
@@ -194,6 +202,10 @@ describe('DynamoDbMinutesRepository', () => {
       dueAt: '2026-08-10T03:30:00.000Z',
       taskId: 'task-1',
     });
+    expect(result.decisions).toEqual([
+      { id: 'decision-a', content: 'A' },
+      { id: 'decision-b', content: 'B' },
+    ]);
   });
 
   it('maps a conditional race to 409 only after a consistent latest query observes a new version', async () => {

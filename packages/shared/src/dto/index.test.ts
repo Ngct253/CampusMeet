@@ -11,7 +11,7 @@ import { Priority } from '../enums';
 const validInput = {
   summary: ' Tóm tắt ',
   discussion: ' Nội dung ',
-  decisions: [{ content: ' Quyết định ' }],
+  decisions: [{ id: ' decision-1 ', content: ' Quyết định ' }],
   actionItems: [
     {
       id: ' action-1 ',
@@ -57,7 +57,7 @@ describe('meetingMinutesInputSchema', () => {
     expect(meetingMinutesInputSchema.parse(validInput)).toEqual({
       summary: 'Tóm tắt',
       discussion: 'Nội dung',
-      decisions: [{ content: 'Quyết định' }],
+      decisions: [{ id: 'decision-1', content: 'Quyết định' }],
       actionItems: [
         {
           id: 'action-1',
@@ -74,7 +74,7 @@ describe('meetingMinutesInputSchema', () => {
     expect(
       meetingMinutesInputSchema.safeParse({
         ...validInput,
-        decisions: [{ content: 'Decision', id: 'client-id' }],
+        decisions: [{ content: 'Decision', id: 'decision-1', taskId: 'task-forged' }],
       }).success,
     ).toBe(false);
     expect(
@@ -94,6 +94,7 @@ describe('meetingMinutesInputSchema', () => {
       { ...validInput, decisions: Array.from({ length: 51 }, () => ({ content: 'x' })) },
     ],
     ['empty decision', { ...validInput, decisions: [{ content: ' ' }] }],
+    ['empty decision id', { ...validInput, decisions: [{ id: ' ', content: 'Decision' }] }],
     [
       'too many actions',
       { ...validInput, actionItems: Array.from({ length: 101 }, () => ({ content: 'x' })) },

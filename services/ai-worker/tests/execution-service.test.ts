@@ -347,4 +347,54 @@ describe('AIExecutionService grounding rules', () => {
     expect(generator.answer).not.toHaveBeenCalled();
     expect(jobs.markFailed).toHaveBeenCalledWith('job-1', 'PARTIAL_TRANSCRIPT_SEGMENT');
   });
+
+  it('loads and interprets only the exact snapshot version carried by the job', async () => {
+    const payload: AIRequestPayload = {
+      operation: 'PROGRESS_ANALYSIS',
+      actorId: 'admin-1',
+      groupId: 'group-1',
+      request: { snapshotVersion: 4 },
+    };
+    const { generator, progressSnapshots, service } = setup(payload);
+    const progressSnapshot = {
+      groupId: 'group-1',
+      version: 4,
+      generatedAt: '2026-08-08T10:00:00.000Z',
+      taskCounts: { total: 3, todo: 1, doing: 1, done: 1, overdue: 1 },
+      meetingCounts: { completed: 2, upcoming: 1 },
+    };
+    vi.mocked(progressSnapshots.get).mockResolvedValue(progressSnapshot);
+    vi.mocked(generator.progress).mockResolvedValue({
+      groupId: 'group-1',
+      summary: 'Tiến độ ổn định.',
+      observations: [],
+      risks: [],
+      generatedAt: '2026-08-08T10:01:00.000Z',
+    });
+
+    await service.execute('job-1');
+
+    expect(progressSnapshots.get).toHaveBeenCalledWith('group-1', 4);
+    expect(generator.progress).toHaveBeenCalledWith(progressSnapshot);
+  });
+
+  it('rejects a legacy progress job without an exact snapshot version', async () => {
+    const payload: AIRequestPayload = {
+      operation: 'PROGRESS_ANALYSIS',
+      actorId: 'admin-1',
+      groupId: 'group-1',
+      request: {},
+    };
+    const { generator, jobs, progressSnapshots, service } = setup(payload);
+
+    await expect(service.execute('job-1')).rejects.toThrow(
+      'GROUP_PROGRESS_SNAPSHOT_VERSION_REQUIRED',
+    );
+    expect(progressSnapshots.get).not.toHaveBeenCalled();
+    expect(generator.progress).not.toHaveBeenCalled();
+    expect(jobs.markFailed).toHaveBeenCalledWith(
+      'job-1',
+      'GROUP_PROGRESS_SNAPSHOT_VERSION_REQUIRED',
+    );
+  });
 });

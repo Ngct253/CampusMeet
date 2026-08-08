@@ -113,6 +113,7 @@ for (const parameter of [
   'BedrockEmbeddingModelId',
   'BedrockEmbeddingDimensions',
   'BedrockGenerationModelArn',
+  'ExistingKnowledgeVectorIndexArn',
 ]) {
   assert.equal(
     appTemplate.includes(`  ${parameter}:`),
@@ -149,6 +150,8 @@ for (const marker of [
   'Type: AWS::S3Vectors::VectorBucket',
   'KnowledgeVectorIndex:',
   'Type: AWS::S3Vectors::Index',
+  'UseExistingKnowledgeVectorIndexArn:',
+  '!Ref ExistingKnowledgeVectorIndexArn',
   'Dimension: !Ref BedrockEmbeddingDimensions',
   'DistanceMetric: cosine',
   'KnowledgeBaseRole:',
@@ -183,6 +186,21 @@ for (const marker of [
 ]) {
   assert.equal(appTemplate.includes(marker), true, `Application template is missing ${marker}.`);
 }
+
+const knowledgeBase = appTemplate.slice(
+  appTemplate.indexOf('  CampusMeetKnowledgeBase:'),
+  appTemplate.indexOf('  CampusMeetKnowledgeDataSource:'),
+);
+assert.equal(
+  knowledgeBase.includes('UseExistingKnowledgeVectorIndexArn'),
+  true,
+  'Knowledge Base must use the stable existing vector index ARN during stack updates.',
+);
+assert.equal(
+  knowledgeBase.includes('IndexArn: !GetAtt KnowledgeVectorIndex.IndexArn'),
+  false,
+  'Knowledge Base must not directly depend on a replacement-sensitive unresolved IndexArn.',
+);
 
 const googleSyncSchedulerRole = appTemplate.slice(
   appTemplate.indexOf('  GoogleSyncSchedulerRole:'),

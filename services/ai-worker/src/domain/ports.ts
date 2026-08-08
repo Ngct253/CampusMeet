@@ -95,7 +95,7 @@ export interface TaskProposalGateway {
 }
 
 export interface GroupProgressSnapshotReader {
-  get(groupId: string, version?: number): Promise<GroupProgressSnapshot>;
+  get(groupId: string, version: number): Promise<GroupProgressSnapshot>;
 }
 
 export interface SourceObjectStore {

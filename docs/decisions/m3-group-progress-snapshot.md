@@ -2,7 +2,7 @@
 
 ## Status
 
-PROPOSED — PENDING TEAM/MAINTAINER APPROVAL; RUNTIME PRODUCER NOT IMPLEMENTED
+PROPOSED — PENDING TEAM/MAINTAINER APPROVAL; RUNTIME IMPLEMENTED LOCALLY, NOT DEPLOYED
 
 ## Proposed date
 
@@ -10,7 +10,7 @@ PROPOSED — PENDING TEAM/MAINTAINER APPROVAL; RUNTIME PRODUCER NOT IMPLEMENTED
 
 ## Scope
 
-This decision defines the shared domain schema, aggregation semantics, persistence keys, lifecycle, and M3/M5 ownership boundary for `GroupProgressSnapshot`. It does not implement a producer, repository, service, mutation hook, public endpoint, infrastructure change, or frontend.
+This decision defines the shared domain schema, aggregation semantics, persistence keys, lifecycle, and M3/M5 ownership boundary for `GroupProgressSnapshot`. The follow-up runtime source now implements the on-demand provider and exact-version integration locally; it does not add a mutation hook, public snapshot endpoint, infrastructure change, scheduler, or frontend.
 
 ## Domain contract
 
@@ -104,11 +104,11 @@ M5 consumes an exact immutable version. It must not silently fall back from a re
 
 The current public error vocabulary does not define a stable error code for a missing or corrupt requested snapshot. That code remains a follow-up decision; implementations must use the common error envelope and must not invent a public code in this contract-only change.
 
-## Idempotency contract gap
+## Idempotency boundary and remaining gap
 
-The current AI request idempotency key is scoped by actor, group, operation, and key and recovers the previously created `AIJob`. It neither hashes the request payload nor persists a resolved snapshot version in the idempotency result. Therefore it is not yet sufficient to guarantee that retrying an accepted request resolves the same snapshot version when fresh generation occurs before enqueue.
+The runtime reuses the existing AI request idempotency record scoped by actor, group, operation, and key; it does not add a snapshot-specific idempotency item. Progress analysis performs a strongly consistent replay lookup before snapshot generation. An existing record is accepted only when its persisted `AIJob` payload contains an exact `snapshotVersion`, so a sequential retry returns the same job/version without generating again. During a concurrent first request, more than one snapshot may be generated, but only the job that wins the existing atomic AIJob/idempotency write is accepted; no existing job payload is repointed.
 
-The implementation PR must close this gap at the existing AI request idempotency boundary before enabling omitted-version generation. This decision intentionally does not add a new idempotency item shape.
+The existing idempotency record still does not hash the original request payload. Reusing one key with a different explicit `snapshotVersion` retains the current project behavior of returning the original accepted job rather than defining a new conflict policy. Whether that misuse should become a public `409` remains a follow-up contract decision. This implementation intentionally does not add a new item shape or error code.
 
 ## Ownership boundary
 
@@ -119,7 +119,7 @@ The implementation PR must close this gap at the existing AI request idempotency
 ## Deferred decisions and blockers
 
 - retention or cleanup policy for immutable snapshot versions;
-- the exact change to AI request idempotency needed to bind retries to one resolved version;
+- whether reusing an AI idempotency key with a different request payload should return the original job or a public conflict;
 - stable public error codes for missing or corrupt snapshots;
 - maximum supported group size and generation latency budget;
 - the runtime path that moves Meetings to `COMPLETED`, if that lifecycle mutation is still absent.

@@ -71,6 +71,14 @@ Parameters:
     Type: String
     AllowedPattern: '^arn:[^:]+:bedrock:[^:]+:[^:]*:(foundation-model|inference-profile|application-inference-profile)/.+$'
     Description: Model or inference-profile ARN passed to Converse and scoped in the worker policy.
+  ExistingKnowledgeVectorIndexArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:[^:]+:s3vectors:[^:]+:[0-9]{12}:bucket/.+/index/.+$'
+    Description: Existing S3 Vectors index ARN for stack updates; leave empty when creating a fresh stack.
+
+Conditions:
+  UseExistingKnowledgeVectorIndexArn: !Not [!Equals [!Ref ExistingKnowledgeVectorIndexArn, '']]
 
 Rules:
   RequireResolvedAIInfrastructure:
@@ -521,7 +529,10 @@ Resources:
       StorageConfiguration:
         Type: S3_VECTORS
         S3VectorsConfiguration:
-          IndexArn: !GetAtt KnowledgeVectorIndex.IndexArn
+          IndexArn: !If
+            - UseExistingKnowledgeVectorIndexArn
+            - !Ref ExistingKnowledgeVectorIndexArn
+            - !GetAtt KnowledgeVectorIndex.IndexArn
       Tags:
         Project: CampusMeet
         Environment: !Ref Environment

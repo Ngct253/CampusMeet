@@ -1,11 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import type {
-  ActionItem,
-  Decision,
-  Meeting,
-  MeetingMinutes,
-} from '@campusmeet/shared';
+import type { ActionItem, Decision, Meeting, MeetingMinutes } from '@campusmeet/shared';
 import type { MinutesRepository, ResolvedMeetingMinutesInput } from '../domain/ports';
 import { ConflictError } from '../utils/errors';
 import { documentClient, stringValue, tableName, type DynamoItem } from './client';
@@ -22,8 +17,18 @@ const numberValue = (item: DynamoItem, key: string) =>
 const isIsoDateTime = (value: string) => {
   const match = ISO_DATE_TIME_PATTERN.exec(value);
   if (!match) return false;
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText, zone, offsetHourText, offsetMinuteText] =
-    match;
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    zone,
+    offsetHourText,
+    offsetMinuteText,
+  ] = match;
   const year = Number(yearText);
   const month = Number(monthText);
   const day = Number(dayText);
@@ -41,10 +46,7 @@ const isIsoDateTime = (value: string) => {
   ) {
     return false;
   }
-  if (
-    zone !== 'Z' &&
-    (Number(offsetHourText) > 23 || Number(offsetMinuteText) > 59)
-  ) {
+  if (zone !== 'Z' && (Number(offsetHourText) > 23 || Number(offsetMinuteText) > 59)) {
     return false;
   }
   return !Number.isNaN(Date.parse(value));
@@ -74,13 +76,15 @@ const actionItemsValue = (value: unknown): ActionItem[] | undefined => {
     const dueAt = stringValue(item, 'dueAt');
     const taskId = stringValue(item, 'taskId');
     if (item.dueAt !== undefined && (!dueAt || !isIsoDateTime(dueAt))) return [];
-    return [{
-      id,
-      content,
-      ...(assigneeId ? { assigneeId } : {}),
-      ...(dueAt ? { dueAt } : {}),
-      ...(taskId ? { taskId } : {}),
-    }];
+    return [
+      {
+        id,
+        content,
+        ...(assigneeId ? { assigneeId } : {}),
+        ...(dueAt ? { dueAt } : {}),
+        ...(taskId ? { taskId } : {}),
+      },
+    ];
   });
   return actionItems.length === value.length ? actionItems : undefined;
 };
@@ -174,7 +178,7 @@ export class DynamoDbMinutesRepository implements MinutesRepository {
       groupId: meeting.groupId,
       summary: input.summary,
       discussion: input.discussion,
-      decisions: input.decisions.map(({ content }) => ({ id: randomUUID(), content })),
+      decisions: input.decisions.map(({ id, content }) => ({ id, content })),
       actionItems: input.actionItems,
       version: nextVersion,
       createdBy: actorId,

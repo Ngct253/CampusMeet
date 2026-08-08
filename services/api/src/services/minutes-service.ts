@@ -77,6 +77,28 @@ export class MinutesService {
       throw new UnprocessableEntityError('Biên bản đã đạt giới hạn phiên bản.');
     }
 
+    const currentDecisions = new Map(
+      current?.decisions.map((decision) => [decision.id, decision]) ?? [],
+    );
+    const usedDecisionIds = new Set<string>();
+    const decisions = input.decisions.map((decision) => {
+      if (decision.id) {
+        if (usedDecisionIds.has(decision.id)) {
+          throw new UnprocessableEntityError('Decision ID không được trùng lặp.');
+        }
+        if (!currentDecisions.has(decision.id)) {
+          throw new UnprocessableEntityError('Decision không thuộc phiên bản biên bản mới nhất.');
+        }
+        usedDecisionIds.add(decision.id);
+        return { id: decision.id, content: decision.content };
+      }
+
+      let id = randomUUID();
+      while (usedDecisionIds.has(id) || currentDecisions.has(id)) id = randomUUID();
+      usedDecisionIds.add(id);
+      return { id, content: decision.content };
+    });
+
     const currentActionItems = new Map(current?.actionItems.map((item) => [item.id, item]) ?? []);
     const usedActionItemIds = new Set<string>();
     const actionItems = input.actionItems.map((item) => {
@@ -86,7 +108,9 @@ export class MinutesService {
         }
         const persisted = currentActionItems.get(item.id);
         if (!persisted) {
-          throw new UnprocessableEntityError('Action item không thuộc phiên bản biên bản mới nhất.');
+          throw new UnprocessableEntityError(
+            'Action item không thuộc phiên bản biên bản mới nhất.',
+          );
         }
         usedActionItemIds.add(item.id);
         return {
@@ -108,7 +132,7 @@ export class MinutesService {
         ...(item.dueAt ? { dueAt: item.dueAt } : {}),
       };
     });
-    const resolvedInput: ResolvedMeetingMinutesInput = { ...input, actionItems };
+    const resolvedInput: ResolvedMeetingMinutesInput = { ...input, decisions, actionItems };
     return this.minutes.createVersion(
       meeting,
       actorId,
