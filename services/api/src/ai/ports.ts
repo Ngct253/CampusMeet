@@ -23,6 +23,10 @@ export interface AIJobOrchestrator {
   }): Promise<AIJob>;
 }
 
+export interface PersistedAIJobStarter {
+  startPersisted(aiJobId: string): Promise<AIJob>;
+}
+
 export interface AIJobIdempotencyReader {
   findExisting(input: {
     actorId: string;

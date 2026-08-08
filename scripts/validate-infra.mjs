@@ -133,7 +133,7 @@ for (const marker of [
   'GOOGLE_SYNC_SCHEDULER_ROLE_ARN:',
   'Stream: !Ref MeetingDataStreamArn',
   'GoogleMeetingSyncRecord',
-  'Path: \'/{proxy+}\'',
+  "Path: '/{proxy+}'",
   'Method: OPTIONS',
   'Auth: { Authorizer: NONE }',
   'MaximumRetryAttempts: 3',
@@ -185,6 +185,19 @@ for (const marker of [
   'KnowledgeVectorIndexArn:',
 ]) {
   assert.equal(appTemplate.includes(marker), true, `Application template is missing ${marker}.`);
+}
+
+for (const marker of [
+  '${UserContentBucketName}/immutable/*',
+  'states:StartExecution',
+  'states:DescribeExecution',
+  ':execution:${StateMachineName}:*',
+]) {
+  assert.equal(
+    appTemplate.includes(marker),
+    true,
+    `Application template is missing reusable M4 prerequisite ${marker}.`,
+  );
 }
 
 const knowledgeBase = appTemplate.slice(

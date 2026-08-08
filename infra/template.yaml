@@ -258,11 +258,21 @@ Resources:
                 Action:
                   - s3:GetObject
                   - s3:PutObject
-                Resource: !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/uploads/*'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/uploads/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${UserContentBucketName}/immutable/*'
               - Sid: StartM4AIOrchestration
                 Effect: Allow
-                Action: states:StartExecution
-                Resource: !Ref AIStateMachineArn
+                Action:
+                  - states:StartExecution
+                  - states:DescribeExecution
+                Resource:
+                  - !Ref AIStateMachineArn
+                  - !Sub
+                    - '${ArnPrefix}:execution:${StateMachineName}:*'
+                    - ArnPrefix: !Select [0, !Split [':stateMachine:', !Ref AIStateMachineArn]]
+                      StateMachineName:
+                        !Select [1, !Split [':stateMachine:', !Ref AIStateMachineArn]]
       Tags: *ResourceTags
 
   GoogleSyncSchedulerRole:

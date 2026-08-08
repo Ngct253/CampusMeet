@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+import { DescribeExecutionCommand, SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -21,6 +21,7 @@ import type {
   AIJobOrchestrator,
   MeetingScopeReader,
   MembershipAuthorizer,
+  PersistedAIJobStarter,
 } from './ports';
 
 const requireValue = (value: string | undefined, name: string): string => {
@@ -74,7 +75,9 @@ export class DynamoAiAccessAdapter implements MembershipAuthorizer, MeetingScope
   }
 }
 
-export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobIdempotencyReader {
+export class StepFunctionsAIJobOrchestrator
+  implements AIJobOrchestrator, AIJobIdempotencyReader, PersistedAIJobStarter
+{
   constructor(
     private readonly database: DynamoDBDocumentClient,
     private readonly stateMachines: SFNClient,
@@ -196,36 +199,70 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobI
       ) {
         throw new Error('AI_IDEMPOTENCY_DATA_INTEGRITY');
       }
-      return recoveredJob;
+      return this.startJob(existingJob.Item);
+    }
+
+    return this.startJob({
+      PK: `AIJOB#${aiJobId}`,
+      SK: 'META',
+      entityType: 'AIJob',
+      ...job,
+      payload: input.payload,
+    });
+  }
+
+  async startPersisted(aiJobId: string): Promise<AIJob> {
+    return this.startJob(await this.getPersistedJob(aiJobId));
+  }
+
+  private async startJob(item: Record<string, unknown>): Promise<AIJob> {
+    const aiJobId = String(item.aiJobId);
+    const job = this.toJob(item);
+    if (job.status === 'PROCESSING' || job.status === 'COMPLETED' || job.status === 'CANCELLED') {
+      return job;
+    }
+    if (job.status === 'FAILED' && job.errorCode !== 'ORCHESTRATION_START_FAILED') {
+      throw new Error('AI_JOB_NOT_RECOVERABLE');
     }
 
     try {
-      await this.stateMachines.send(
-        new StartExecutionCommand({
-          stateMachineArn: this.stateMachineArn,
-          name: aiJobId.replace(/[^A-Za-z0-9-_]/g, '-'),
-          input: JSON.stringify({ aiJobId }),
-        }),
-      );
+      await this.ensureExecution(aiJobId);
     } catch (error) {
-      await this.database.send(
+      await this.markOrchestrationStartFailed(aiJobId);
+      throw error;
+    }
+
+    if (job.status !== 'FAILED') return job;
+    const now = new Date().toISOString();
+    try {
+      const recovered = await this.database.send(
         new UpdateCommand({
           TableName: this.tableName,
           Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
           UpdateExpression:
-            'SET #status = :failed, errorCode = :code, updatedAt = :now, GSI2PK = :gsi',
+            'SET #status = :queued, updatedAt = :now, GSI2PK = :gsi REMOVE errorCode',
+          ConditionExpression: '#status = :failed AND errorCode = :code',
           ExpressionAttributeNames: { '#status': 'status' },
           ExpressionAttributeValues: {
+            ':queued': 'QUEUED',
             ':failed': 'FAILED',
             ':code': 'ORCHESTRATION_START_FAILED',
-            ':now': new Date().toISOString(),
-            ':gsi': 'AIJOB_STATUS#FAILED',
+            ':now': now,
+            ':gsi': 'AIJOB_STATUS#QUEUED',
           },
+          ReturnValues: 'ALL_NEW',
         }),
       );
-      throw error;
+      return this.toJob(
+        (recovered.Attributes ?? { ...item, status: 'QUEUED', updatedAt: now }) as Record<
+          string,
+          unknown
+        >,
+      );
+    } catch (error) {
+      if (!this.isConditionalFailure(error)) throw error;
+      return this.toJob(await this.getPersistedJob(aiJobId));
     }
-    return job;
   }
 
   private toJob(item: Record<string, unknown>): AIJob {
@@ -233,14 +270,101 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobI
       aiJobId: String(item.aiJobId),
       groupId: String(item.groupId),
       ...(item.meetingId ? { meetingId: String(item.meetingId) } : {}),
+      ...(item.sourceId ? { sourceId: String(item.sourceId) } : {}),
       type: item.type as AIJob['type'],
       status: item.status as AIJob['status'],
       attempt: Number(item.attempt),
       requestId: String(item.requestId),
       provider: 'BEDROCK',
+      ...(item.errorCode ? { errorCode: String(item.errorCode) } : {}),
       createdAt: String(item.createdAt),
       updatedAt: String(item.updatedAt),
     };
+  }
+
+  private async getPersistedJob(aiJobId: string): Promise<Record<string, unknown>> {
+    const result = await this.database.send(
+      new GetCommand({
+        TableName: this.tableName,
+        Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
+        ConsistentRead: true,
+      }),
+    );
+    if (!result.Item) throw new Error('AI_JOB_NOT_FOUND');
+    if (result.Item.aiJobId !== aiJobId || result.Item.entityType !== 'AIJob') {
+      throw new Error('AI_JOB_DATA_INTEGRITY');
+    }
+    this.parseRecoveredPayload(result.Item);
+    return result.Item;
+  }
+
+  private async ensureExecution(aiJobId: string): Promise<void> {
+    const name = aiJobId.replace(/[^A-Za-z0-9-_]/g, '-');
+    const input = JSON.stringify({ aiJobId });
+    const start = () =>
+      this.stateMachines.send(
+        new StartExecutionCommand({ stateMachineArn: this.stateMachineArn, name, input }),
+      );
+    try {
+      await start();
+      return;
+    } catch (firstError) {
+      if (await this.reconcileExecution(name, input)) return;
+      try {
+        await start();
+        return;
+      } catch (retryError) {
+        if (await this.reconcileExecution(name, input)) return;
+        throw retryError ?? firstError;
+      }
+    }
+  }
+
+  private async reconcileExecution(name: string, expectedInput: string): Promise<boolean> {
+    try {
+      const execution = await this.stateMachines.send(
+        new DescribeExecutionCommand({ executionArn: this.executionArn(name) }),
+      );
+      if (execution.stateMachineArn !== this.stateMachineArn || execution.input !== expectedInput) {
+        throw new Error('AI_ORCHESTRATION_DATA_INTEGRITY');
+      }
+      return true;
+    } catch (error) {
+      if ((error as { name?: string })?.name === 'ExecutionDoesNotExist') return false;
+      throw error;
+    }
+  }
+
+  private executionArn(name: string): string {
+    const marker = ':stateMachine:';
+    const index = this.stateMachineArn.indexOf(marker);
+    if (index < 0) throw new Error('AI_STATE_MACHINE_ARN_INVALID');
+    return `${this.stateMachineArn.slice(0, index)}:execution:${this.stateMachineArn.slice(index + marker.length)}:${name}`;
+  }
+
+  private async markOrchestrationStartFailed(aiJobId: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.database.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
+        UpdateExpression:
+          'SET #status = :failed, errorCode = :code, updatedAt = :now, GSI2PK = :gsi',
+        ConditionExpression: '#status = :queued OR (#status = :failed AND errorCode = :code)',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: {
+          ':queued': 'QUEUED',
+          ':failed': 'FAILED',
+          ':code': 'ORCHESTRATION_START_FAILED',
+          ':now': now,
+          ':gsi': 'AIJOB_STATUS#FAILED',
+        },
+      }),
+    );
+  }
+
+  private isConditionalFailure(error: unknown): boolean {
+    return (error as { name?: string })?.name === 'ConditionalCheckFailedException';
   }
 
   private parseRecoveredPayload(item: Record<string, unknown>) {
@@ -298,7 +422,7 @@ export const createProductionAIRequestServiceAdapters = () => {
   return { access, meetings: access, jobs, snapshots, jobReplays: jobs };
 };
 
-export const createProductionAIJobOrchestrator = (): AIJobOrchestrator => {
+export const createProductionAIJobOrchestrator = (): StepFunctionsAIJobOrchestrator => {
   const aiWorkTable = requireValue(process.env.AI_WORK_TABLE, 'AI_WORK_TABLE');
   const stateMachineArn = requireValue(process.env.AI_STATE_MACHINE_ARN, 'AI_STATE_MACHINE_ARN');
   const database = DynamoDBDocumentClient.from(new DynamoDBClient({}));

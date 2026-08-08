@@ -245,7 +245,7 @@ describe('StepFunctionsAIJobOrchestrator enqueue recovery', () => {
       groupId: 'group-1',
       type: 'PROGRESS_ANALYSIS',
     });
-    expect(stateMachines.send).not.toHaveBeenCalled();
+    expect(stateMachines.send).toHaveBeenCalledOnce();
   });
 
   it('rejects concurrent recovery with a different progress snapshot version', async () => {
@@ -298,6 +298,146 @@ describe('StepFunctionsAIJobOrchestrator enqueue recovery', () => {
         payload,
       }),
     ).resolves.toMatchObject({ aiJobId: 'aij-existing', type: 'GENERATE_ANSWER' });
+    expect(stateMachines.send).toHaveBeenCalledOnce();
+  });
+});
+
+describe('StepFunctionsAIJobOrchestrator persisted start recovery', () => {
+  const stateMachineArn =
+    'arn:aws:states:ap-southeast-1:123456789012:stateMachine:campusmeet-dev-ai-jobs';
+  const payload = {
+    operation: 'GROUP_SEARCH' as const,
+    actorId: 'member-1',
+    groupId: 'group-1',
+    request: { question: 'What changed?', scope: 'WHOLE_GROUP' as const },
+  };
+  const item = (override: Record<string, unknown> = {}) => ({
+    PK: 'AIJOB#aij-existing',
+    SK: 'META',
+    entityType: 'AIJob',
+    aiJobId: 'aij-existing',
+    groupId: 'group-1',
+    type: 'GENERATE_ANSWER',
+    status: 'QUEUED',
+    attempt: 0,
+    requestId: 'request-original',
+    createdAt: '2026-08-08T10:00:00.000Z',
+    updatedAt: '2026-08-08T10:00:00.000Z',
+    payload,
+    ...override,
+  });
+
+  it('starts an already persisted failed job and heals ORCHESTRATION_START_FAILED', async () => {
+    const failed = item({ status: 'FAILED', errorCode: 'ORCHESTRATION_START_FAILED' });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Item: failed })
+      .mockResolvedValueOnce({ Attributes: { ...failed, status: 'QUEUED', errorCode: undefined } });
+    const stateMachines = { send: vi.fn().mockResolvedValue({ executionArn: 'execution-arn' }) };
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      stateMachines as unknown as SFNClient,
+      'ai-work',
+      stateMachineArn,
+    );
+
+    await expect(orchestrator.startPersisted('aij-existing')).resolves.toMatchObject({
+      aiJobId: 'aij-existing',
+      status: 'QUEUED',
+    });
+    expect(stateMachines.send).toHaveBeenCalledOnce();
+    expect(stateMachines.send.mock.calls[0]![0].input).toEqual({
+      stateMachineArn,
+      name: 'aij-existing',
+      input: JSON.stringify({ aiJobId: 'aij-existing' }),
+    });
+    expect(send.mock.calls[1]![0].input).toMatchObject({
+      ConditionExpression: '#status = :failed AND errorCode = :code',
+      ExpressionAttributeValues: expect.objectContaining({
+        ':code': 'ORCHESTRATION_START_FAILED',
+      }),
+    });
+  });
+
+  it('reconciles an ambiguous StartExecution outcome to the same deterministic execution', async () => {
+    const send = vi.fn().mockResolvedValue({ Item: item() });
+    const stateMachines = {
+      send: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('network timeout'))
+        .mockResolvedValueOnce({
+          stateMachineArn,
+          input: JSON.stringify({ aiJobId: 'aij-existing' }),
+          status: 'RUNNING',
+        }),
+    };
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      stateMachines as unknown as SFNClient,
+      'ai-work',
+      stateMachineArn,
+    );
+
+    await expect(orchestrator.startPersisted('aij-existing')).resolves.toMatchObject({
+      aiJobId: 'aij-existing',
+      status: 'QUEUED',
+    });
+    expect(stateMachines.send).toHaveBeenCalledTimes(2);
+    expect(stateMachines.send.mock.calls[1]![0].input.executionArn).toBe(
+      'arn:aws:states:ap-southeast-1:123456789012:execution:campusmeet-dev-ai-jobs:aij-existing',
+    );
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('is idempotent when recovery is repeated after the job has started or completed', async () => {
+    const database = {
+      send: vi
+        .fn()
+        .mockResolvedValueOnce({ Item: item({ status: 'PROCESSING' }) })
+        .mockResolvedValueOnce({ Item: item({ status: 'COMPLETED' }) }),
+    };
+    const stateMachines = { send: vi.fn() };
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      database as unknown as DynamoDBDocumentClient,
+      stateMachines as unknown as SFNClient,
+      'ai-work',
+      stateMachineArn,
+    );
+
+    await expect(orchestrator.startPersisted('aij-existing')).resolves.toMatchObject({
+      status: 'PROCESSING',
+    });
+    await expect(orchestrator.startPersisted('aij-existing')).resolves.toMatchObject({
+      status: 'COMPLETED',
+    });
     expect(stateMachines.send).not.toHaveBeenCalled();
+  });
+
+  it('marks only the same persisted job failed when both start attempts are unreconciled', async () => {
+    const send = vi.fn().mockResolvedValueOnce({ Item: item() }).mockResolvedValueOnce({});
+    const missing = Object.assign(new Error('missing'), { name: 'ExecutionDoesNotExist' });
+    const stateMachines = {
+      send: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('timeout-1'))
+        .mockRejectedValueOnce(missing)
+        .mockRejectedValueOnce(new Error('timeout-2'))
+        .mockRejectedValueOnce(missing),
+    };
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      stateMachines as unknown as SFNClient,
+      'ai-work',
+      stateMachineArn,
+    );
+
+    await expect(orchestrator.startPersisted('aij-existing')).rejects.toThrow('timeout-2');
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]![0].input).toMatchObject({
+      Key: { PK: 'AIJOB#aij-existing', SK: 'META' },
+      ExpressionAttributeValues: expect.objectContaining({
+        ':code': 'ORCHESTRATION_START_FAILED',
+      }),
+    });
   });
 });
