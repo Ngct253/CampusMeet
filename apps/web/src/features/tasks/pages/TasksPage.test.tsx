@@ -156,7 +156,8 @@ describe('TasksPage', () => {
     ]);
     renderPage();
     expect(await screen.findByText('Hoàn thiện báo cáo')).toBeInTheDocument();
-    expect(screen.getByText('Ưu tiên: HIGH')).toBeInTheDocument();
+    expect(screen.getByText('Ưu tiên: Cao')).toBeInTheDocument();
+    expect(screen.getByText('Chưa làm')).toBeInTheDocument();
   });
 
   it('shows status actions allowed for TODO, DOING, and DONE', async () => {
@@ -193,7 +194,7 @@ describe('TasksPage', () => {
 
     expect(await screen.findByRole('button', { name: 'Bắt đầu' })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Hoàn thành' })).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Đưa về TODO' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chuyển về Chưa làm' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mở lại' })).toBeInTheDocument();
   });
 
@@ -265,7 +266,7 @@ describe('TasksPage', () => {
       ),
     ).toBeInTheDocument();
     await waitFor(() => expect(services.getTasks.mock.calls.length).toBeGreaterThan(1));
-    expect(screen.getByText('TODO')).toBeInTheDocument();
+    expect(screen.getByText('Chưa làm')).toBeInTheDocument();
   });
 
   it.each([
@@ -290,8 +291,8 @@ describe('TasksPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Hoàn thành' }));
     expect(await screen.findByText(message)).toBeInTheDocument();
-    expect(screen.getByText('TODO')).toBeInTheDocument();
-    expect(screen.queryByText('DONE')).not.toBeInTheDocument();
+    expect(screen.getByText('Chưa làm')).toBeInTheDocument();
+    expect(screen.queryByText('Đang làm')).not.toBeInTheDocument();
   });
 
   it('only offers GROUP_ADMIN groups and hides the form without one', async () => {
@@ -327,12 +328,12 @@ describe('TasksPage', () => {
     fireEvent.change(await screen.findByLabelText('Người phụ trách'), {
       target: { value: 'user-2' },
     });
-    fireEvent.change(screen.getByLabelText('Cuộc họp nguồn (không bắt buộc)'), {
+    fireEvent.change(screen.getByLabelText('Cuộc họp'), {
       target: { value: 'meeting-1' },
     });
     fireEvent.change(screen.getByLabelText('Nhóm'), { target: { value: 'group-3' } });
     expect(screen.getByLabelText('Người phụ trách')).toHaveValue('');
-    expect(screen.getByLabelText('Cuộc họp nguồn (không bắt buộc)')).toHaveValue('');
+    expect(screen.getByLabelText('Cuộc họp')).toHaveValue('');
   });
 
   it('validates title before sending', async () => {
@@ -374,7 +375,7 @@ describe('TasksPage', () => {
     expect(services.createTask.mock.calls[0]?.[1]).toBe('00000000-0000-4000-8000-000000000001');
   });
 
-  it('converts datetime-local to UTC ISO and sends an optional meeting', async () => {
+  it('uses the end of the selected due date and sends an optional meeting', async () => {
     enableCreateForm();
     services.createTask.mockResolvedValue({
       id: 'task-1',
@@ -389,16 +390,16 @@ describe('TasksPage', () => {
     await fillRequiredFields();
     fireEvent.change(screen.getByLabelText('Mức ưu tiên'), { target: { value: Priority.HIGH } });
     fireEvent.change(screen.getByLabelText('Hạn hoàn thành (không bắt buộc)'), {
-      target: { value: '2026-08-10T17:30' },
+      target: { value: '2026-08-10' },
     });
-    fireEvent.change(await screen.findByLabelText('Cuộc họp nguồn (không bắt buộc)'), {
+    fireEvent.change(await screen.findByLabelText('Cuộc họp'), {
       target: { value: 'meeting-1' },
     });
     submitForm();
     await waitFor(() => expect(services.createTask).toHaveBeenCalled());
     expect(services.createTask.mock.calls[0]?.[0]).toMatchObject({
       priority: Priority.HIGH,
-      dueAt: new Date('2026-08-10T17:30').toISOString(),
+      dueAt: new Date('2026-08-10T23:59:59').toISOString(),
       sourceMeetingId: 'meeting-1',
     });
   });
@@ -529,7 +530,7 @@ describe('TasksPage', () => {
     );
     renderPage();
     await fillRequiredFields();
-    const meetingSelect = await screen.findByLabelText('Cuộc họp nguồn (không bắt buộc)');
+    const meetingSelect = await screen.findByLabelText('Cuộc họp');
     fireEvent.change(meetingSelect, { target: { value: 'meeting-1' } });
     submitForm();
 
@@ -561,7 +562,7 @@ describe('TasksPage', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries');
     await fillRequiredFields();
     if (status === 404) {
-      fireEvent.change(await screen.findByLabelText('Cuộc họp nguồn (không bắt buộc)'), {
+      fireEvent.change(await screen.findByLabelText('Cuộc họp'), {
         target: { value: 'meeting-1' },
       });
     }
@@ -569,7 +570,7 @@ describe('TasksPage', () => {
     expect(await screen.findByText(message)).toBeInTheDocument();
     if (status === 403) expect(invalidate).toHaveBeenCalledWith({ queryKey: ['groups'] });
     if (status === 404) {
-      expect(screen.getByLabelText('Cuộc họp nguồn (không bắt buộc)')).toHaveValue('');
+      expect(screen.getByLabelText('Cuộc họp')).toHaveValue('');
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['groups', 'group-1', 'meetings'] });
     }
     if (status === 422) {

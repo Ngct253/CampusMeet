@@ -1,40 +1,42 @@
 import type { APIGatewayProxyHandlerV2 } from 'aws-lambda';
-import { confirmTaskProposalRequestSchema } from '@campusmeet/shared';
+import { confirmTaskProposalInputSchema } from '@campusmeet/shared';
 import { authenticate } from '../middleware/authentication';
 import { handleError } from '../middleware/error-handler';
+import { DynamoDbCollaborationRepository } from '../repositories/collaboration';
+import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
 import { DynamoDbTaskProposalConfirmationRepository } from '../repositories/task-proposals';
 import { TaskProposalConfirmationService } from '../services/task-proposal-confirmation-service';
-import { taskRepository, taskService } from './tasks';
-import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
+import { getPathParameter, getRequestId, parseBody } from '../utils/request';
 import { failure, ok } from '../utils/response';
 
-const confirmationService = new TaskProposalConfirmationService(
+type ConfirmationService = Pick<TaskProposalConfirmationService, 'confirm'>;
+
+export const createTaskProposalConfirmationHandler =
+  (service: ConfirmationService): APIGatewayProxyHandlerV2 =>
+  async (event) => {
+    const requestId = getRequestId(event);
+    try {
+      const { userId } = authenticate(event);
+      if (event.requestContext.http.method !== 'POST') {
+        return failure(requestId, 'Phương thức chưa được hỗ trợ.', 405, 'METHOD_NOT_ALLOWED');
+      }
+      return ok(
+        await service.confirm(
+          userId,
+          getPathParameter(event, 'proposalId'),
+          parseBody(event, confirmTaskProposalInputSchema),
+        ),
+        requestId,
+      );
+    } catch (error) {
+      return handleError(error, requestId);
+    }
+  };
+
+const service = new TaskProposalConfirmationService(
   new DynamoDbTaskProposalConfirmationRepository(),
-  taskService,
-  taskRepository,
+  new DynamoDbMeetingRepository(),
+  new DynamoDbCollaborationRepository(),
 );
 
-export const createConfirmTaskProposalHandler = (
-  service: Pick<TaskProposalConfirmationService, 'confirm'>,
-): APIGatewayProxyHandlerV2 => async (event) => {
-  const requestId = getRequestId(event);
-  try {
-    if (event.requestContext.http.method !== 'POST') {
-      return failure(requestId, 'Phương thức chưa được hỗ trợ.', 405, 'METHOD_NOT_ALLOWED');
-    }
-    const { userId } = authenticate(event);
-    return ok(
-      await service.confirm(
-        userId,
-        getPathParameter(event, 'proposalId'),
-        parseBody(event, confirmTaskProposalRequestSchema),
-        requireIdempotencyKey(event),
-      ),
-      requestId,
-    );
-  } catch (error) {
-    return handleError(error, requestId);
-  }
-};
-
-export const confirmTaskProposalHandler = createConfirmTaskProposalHandler(confirmationService);
+export const taskProposalConfirmationHandler = createTaskProposalConfirmationHandler(service);

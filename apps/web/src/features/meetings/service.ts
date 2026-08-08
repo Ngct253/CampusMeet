@@ -1,10 +1,13 @@
 import type {
   ApiSuccessResponse,
   CancelMeetingRequest,
+  ConvertActionItemToTaskRequest,
+  ConvertActionItemToTaskResponse,
   CreateMeetingRequest,
   Meeting,
   MeetingMinutes,
   MeetingTimelineResponse,
+  GoogleMeetingSyncSummary,
   UpdateMeetingMinutesRequest,
   UpdateMeetingRequest,
 } from '@campusmeet/shared';
@@ -66,6 +69,19 @@ export async function updateMeetingMinutes(
   ).data;
 }
 
+export async function convertActionItemToTask(
+  meetingId: string,
+  actionItemId: string,
+  input: ConvertActionItemToTaskRequest,
+): Promise<ConvertActionItemToTaskResponse> {
+  return (
+    await apiClient.request<ApiSuccessResponse<ConvertActionItemToTaskResponse>>(
+      `/meetings/${encodeURIComponent(meetingId)}/minutes/action-items/${encodeURIComponent(actionItemId)}/task`,
+      { method: 'POST', body: JSON.stringify(input) },
+    )
+  ).data;
+}
+
 export async function createMeeting(
   groupId: string,
   input: CreateMeetingRequest,
@@ -101,5 +117,14 @@ export async function cancelMeeting(
       method: 'POST',
       body: JSON.stringify(input),
     })
+  ).data;
+}
+
+export async function retryGoogleMeetingSync(meetingId: string): Promise<GoogleMeetingSyncSummary> {
+  return (
+    await apiClient.request<ApiSuccessResponse<GoogleMeetingSyncSummary>>(
+      `/meetings/${encodeURIComponent(meetingId)}/google-sync/retry`,
+      { method: 'POST', body: '{}' },
+    )
   ).data;
 }

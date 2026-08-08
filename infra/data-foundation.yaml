@@ -115,6 +115,7 @@
         "TableName": {"Fn::Sub": "${TablePrefix}-meeting-data"},
         "BillingMode": "PAY_PER_REQUEST",
         "SSESpecification": {"SSEEnabled": true},
+        "StreamSpecification": {"StreamViewType": "NEW_AND_OLD_IMAGES"},
         "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": {"Fn::If": ["EnablePitr", true, false]}},
         "DeletionProtectionEnabled": {"Fn::If": ["DeletionProtectionEnabledCondition", true, false]},
         "AttributeDefinitions": [
@@ -249,6 +250,7 @@
     "CollaborationTableArn": {"Value": {"Fn::GetAtt": ["CollaborationTable", "Arn"]}},
     "MeetingDataTableName": {"Value": {"Ref": "MeetingDataTable"}},
     "MeetingDataTableArn": {"Value": {"Fn::GetAtt": ["MeetingDataTable", "Arn"]}},
+    "MeetingDataTableStreamArn": {"Value": {"Fn::GetAtt": ["MeetingDataTable", "StreamArn"]}},
     "TaskDataTableName": {"Value": {"Ref": "TaskDataTable"}},
     "TaskDataTableArn": {"Value": {"Fn::GetAtt": ["TaskDataTable", "Arn"]}},
     "AIWorkTableName": {"Value": {"Ref": "AIWorkTable"}},

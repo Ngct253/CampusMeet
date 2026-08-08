@@ -345,7 +345,7 @@ Các use Case sử dụng dưới đây mô tả các luồng nghiệp vụ quan
 
 ## 7.1 Accepted M2–M4 synchronization behavior
 
-Decision 4A runtime is **ACCEPTED** as of 2026-08-07. This is an accepted product/design requirement, not a claim that M4 runtime or AWS verification is complete.
+Decision 4A runtime is **ACCEPTED** as of 2026-08-07. Its source implementation is locally verified; this is not a claim of AWS or authenticated-browser verification.
 
 - Meeting create, relevant update, and cancel commit internal state plus a durable Google synchronization intent before any Google API call. The client receives internal success without waiting for Google.
 - Google synchronization is eventually consistent. Google failure is shown as a separate integration status and never reverts Meeting lifecycle, Meeting version, title, time, agenda, attendees, or cancellation.
@@ -355,7 +355,7 @@ Decision 4A runtime is **ACCEPTED** as of 2026-08-07. This is an accepted produc
 - Missing/revoked Google connection produces `ACTION_REQUIRED`; the organizer reconnects Google before an authorized Group Admin manual retry can continue.
 - `googleEventId`, trusted `meetUrl`, status, revision, and retry metadata are server-managed. OAuth credentials are never part of Meeting responses or logs.
 
-The complete persistence, failure classification, UX, observability, and AWS mapping contract is [M2–M4 Google Meeting synchronization runtime contract](decisions/m2-m4-synchronization.md). Runtime implementation and AWS verification remain **NOT YET COMPLETE**.
+The complete persistence, failure classification, UX, observability, and AWS mapping contract is [M2–M4 Google Meeting synchronization runtime contract](decisions/m2-m4-synchronization.md). Source/runtime and IaC are implemented with local automated verification; AWS deployment, real-provider smoke, and authenticated browser verification remain pending.
 
 # 8. User Story
 
@@ -923,4 +923,4 @@ For Meeting creation, the authenticated creator is the organizer; `organizerId` 
 
 `GET /groups/{groupId}/meetings` returns `CursorPage<Meeting>` in the success envelope. Query `limit` defaults to 20 and must be an integer from 1 through 100. `cursor` is an opaque, versioned logical cursor scoped to the group and stable `startsAt + meetingId` ordering; malformed or wrong-group cursors return `400`. `nextCursor` is omitted at the end. Clients must not decode the cursor.
 
-Google synchronization follows eventual consistency: an external failure does not roll back the internal Meeting. Runtime failure persistence and idempotent retry remain pending the M4 design prerequisites in `docs/decisions/m2-m4-synchronization.md`; they are not AWS-runtime verified.
+Google synchronization follows eventual consistency: an external failure does not roll back the internal Meeting. Runtime failure persistence and idempotent retry are implemented and locally tested according to `docs/decisions/m2-m4-synchronization.md`; they are not AWS-runtime verified.

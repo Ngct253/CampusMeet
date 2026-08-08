@@ -12,7 +12,8 @@ import { SharedMembershipAuthorizer } from '../middleware/authorization';
 import { handleError } from '../middleware/error-handler';
 import { DynamoDbCollaborationRepository } from '../repositories/collaboration';
 import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
-import { EventBridgeSchedulerAdapter, GoogleCalendarAdapter } from '../integrations/adapters';
+import { EventBridgeSchedulerAdapter } from '../integrations/adapters';
+import { DynamoDbGoogleMeetingSyncRepository } from '../repositories/google-meeting-sync';
 import { ApiError, BadRequestError } from '../utils/errors';
 import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
 import { ok } from '../utils/response';
@@ -22,8 +23,9 @@ const service = new MeetingService(
   new SharedMembershipAuthorizer(),
   undefined,
   undefined,
-  new GoogleCalendarAdapter(),
+  undefined,
   new EventBridgeSchedulerAdapter(),
+  new DynamoDbGoogleMeetingSyncRepository(),
 );
 const groups = new DynamoDbCollaborationRepository();
 
@@ -128,3 +130,13 @@ export const createCancelMeetingHandler = (meetingService: MeetingService) =>
     );
   });
 export const cancelMeetingHandler = createCancelMeetingHandler(service);
+
+export const createRetryGoogleSyncHandler = (meetingService: MeetingService) =>
+  handler(async (event) => {
+    if (event.requestContext.http.method !== 'POST') {
+      throw new ApiError('METHOD_NOT_ALLOWED', 'Phương thức chưa được hỗ trợ.', 405);
+    }
+    const auth = authenticate(event);
+    return meetingService.retryGoogleSync(getPathParameter(event, 'meetingId'), auth.userId);
+  });
+export const retryGoogleSyncHandler = createRetryGoogleSyncHandler(service);

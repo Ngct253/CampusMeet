@@ -5,14 +5,12 @@ import { EmptyState, PageHeader } from './ui';
 export function FeaturePage({
   title,
   description,
-  todo,
   backTo,
   backLabel = 'Quay lại',
   children,
 }: {
   title: string;
   description: string;
-  todo?: string;
   backTo?: string;
   backLabel?: string;
   children?: ReactNode;
@@ -28,7 +26,6 @@ export function FeaturePage({
         )}
       </div>
       {children ?? <EmptyState />}
-      {todo && <p className="todo">TODO: {todo}</p>}
     </section>
   );
 }

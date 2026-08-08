@@ -1,59 +1,73 @@
 import {
   GroupRole,
+  Priority,
   type ConfirmTaskProposalRequest,
   type ConfirmTaskProposalResponse,
 } from '@campusmeet/shared';
-import type { TaskProposalConfirmationRepository, TaskRepository } from '../domain/ports';
-import { requireGroupMembership } from '../middleware/authorization';
-import { ConflictError, ResourceNotFoundError } from '../utils/errors';
-import type { TaskService } from './task-service';
+import type {
+  MeetingRepository,
+  MembershipAuthorizer,
+  TaskProposalConfirmationRepository,
+} from '../domain/ports';
+import { ForbiddenError, ResourceNotFoundError, UnprocessableEntityError } from '../utils/errors';
+
+type MeetingReader = Pick<MeetingRepository, 'getById'>;
+type MembershipReader = Pick<MembershipAuthorizer, 'getMembership'>;
 
 export class TaskProposalConfirmationService {
   constructor(
     private readonly proposals: TaskProposalConfirmationRepository,
-    private readonly taskService: Pick<TaskService, 'createTask'>,
-    private readonly tasks: Pick<TaskRepository, 'getById'>,
+    private readonly meetings: MeetingReader,
+    private readonly groups: MembershipReader,
   ) {}
 
   async confirm(
     actorId: string,
     proposalId: string,
     input: ConfirmTaskProposalRequest,
-    idempotencyKey: string,
   ): Promise<ConfirmTaskProposalResponse> {
     const proposal = await this.proposals.getById(proposalId);
     if (!proposal) throw new ResourceNotFoundError('Không tìm thấy đề xuất công việc.');
-    await requireGroupMembership(actorId, proposal.groupId, GroupRole.GROUP_ADMIN);
 
-    if (proposal.status === 'EXECUTED') {
-      if (!proposal.taskId) throw new ConflictError('Đề xuất thiếu liên kết công việc đã tạo.');
-      const task = await this.tasks.getById(proposal.taskId);
-      if (!task) throw new ConflictError('Không tìm thấy công việc đã liên kết với đề xuất.');
-      return { proposal, task };
-    }
-    if (proposal.status !== 'PENDING' && proposal.status !== 'CONFIRMED') {
-      throw new ConflictError('Đề xuất công việc không còn có thể xác nhận.');
+    const actorMembership = await this.groups.getMembership(proposal.groupId, actorId);
+    if (!actorMembership?.active || actorMembership.role !== GroupRole.GROUP_ADMIN) {
+      throw new ForbiddenError('Chỉ Quản trị viên nhóm được xác nhận đề xuất công việc.');
     }
 
-    await this.proposals.claim(proposalId, actorId, idempotencyKey);
-    const task = await this.taskService.createTask(
+    const meeting = await this.meetings.getById(proposal.meetingId);
+    if (!meeting || meeting.groupId !== proposal.groupId) {
+      throw new Error('TASK_PROPOSAL_DATA_INTEGRITY');
+    }
+    if (proposal.status === 'CONFIRMED') return this.proposals.getConfirmed(proposal);
+    if (proposal.status !== 'PENDING') {
+      throw new UnprocessableEntityError('Đề xuất công việc không thể được xác nhận.');
+    }
+
+    const title = input.title ?? proposal.title;
+    const assigneeId = input.assigneeId ?? proposal.assigneeId;
+    const priority = input.priority ?? (proposal.priority as Priority | undefined);
+    if (!assigneeId || !priority) {
+      throw new UnprocessableEntityError(
+        'Đề xuất phải có người phụ trách và mức ưu tiên trước khi xác nhận.',
+      );
+    }
+    const assigneeMembership = await this.groups.getMembership(proposal.groupId, assigneeId);
+    if (!assigneeMembership?.active) {
+      throw new UnprocessableEntityError(
+        'Người phụ trách phải là thành viên đang hoạt động của nhóm.',
+      );
+    }
+
+    const dueAt = input.dueAt ?? proposal.dueAt;
+    return this.proposals.confirm({
       actorId,
-      {
-        groupId: proposal.groupId,
-        title: proposal.title,
-        assigneeId: input.assigneeId,
-        priority: input.priority,
-        ...(proposal.dueAt ? { dueAt: proposal.dueAt } : {}),
-        sourceMeetingId: proposal.meetingId,
+      proposal,
+      input: {
+        title,
+        assigneeId,
+        priority,
+        ...(dueAt ? { dueAt } : {}),
       },
-      `ai-task-proposal:${proposalId}`,
-    );
-    const executed = await this.proposals.markExecuted(
-      proposalId,
-      actorId,
-      idempotencyKey,
-      task.id,
-    );
-    return { proposal: executed, task };
+    });
   }
 }

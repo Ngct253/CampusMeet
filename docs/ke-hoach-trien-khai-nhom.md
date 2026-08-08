@@ -158,6 +158,7 @@ Active group member/admin
 - `languageCode` không thuộc allowlist bị từ chối; frontend mặc định `vi-VN`, không có `AUTO` hoặc Deepgram.
 - Heartbeat quá hạn chuyển session sang `FAILED`; reconnect kiểm tra lại quyền, cấp URL mới và tiếp tục từ sequence cuối.
 - Khoảng audio thiếu được lưu, không suy đoán nội dung từ agenda hoặc participant metadata.
+- M2 tạo đúng một canonical Transcript identity cho mỗi Meeting trong slice đầu, ghi final segment và sở hữu `LIVE → FINALIZING → READY|FAILED`; M2 không sở hữu edit/approval hoặc KnowledgeSource ingestion.
 
 ## 7. M3 — Transcript editor, minutes, task và dashboard
 
@@ -176,6 +177,15 @@ Meeting
 → AI draft chỉ được áp dụng sau preview + xác nhận
 ```
 
+### Contract Transcript edit/approval
+
+- Shared contract strict nằm tại `packages/shared/src/transcript/`: lifecycle chỉ `LIVE|FINALIZING|READY|APPROVED|FAILED`, current `version` 1–`9_999_999_999`, optional approval metadata và paged canonical `TranscriptWithSegments`. Multi-provider/multiple canonical transcript không thuộc slice này.
+- Active member được GET canonical Transcript. Meeting Organizer đang active hoặc active Group Admin được PATCH segment khi `READY|APPROVED` và approve khi `READY`; không có uploader permission riêng. Persisted Transcript/Meeting quyết định `groupId` và Organizer, không tin client context.
+- Edit tăng version đúng một; edit từ `APPROVED` về `READY` và giữ `approvedVersion` cũ. Approval không tăng version, đặt exact `approvedVersion`, actor/time server-side và cần `Idempotency-Key`. Condition khóa identity/context + expected version + lifecycle; stale nhận `409`, lifecycle sai nhận `422`.
+- M3 ghi edit/approval audit metadata nhưng không đưa full transcript vào META/event. Approval phải freeze đúng content version N thành immutable artifact và tạo/recover một logical `INGEST_SOURCE` job; retry sau handoff failure không tạo Transcript version/job trùng.
+- M5 chỉ normalize/ingest/retrieve frozen approved artifact theo exact `sourceVersion`; không đọc mutable current segment rồi gắn nhãn approved. `expectedTranscriptVersion`, khi có, là exact approved/frozen version; enforcement là M5 runtime follow-up.
+- Shared runtime ingestion status `PENDING|PROCESSING|READY|FAILED|STALE` vẫn authoritative; bộ tên conceptual cũ chưa được dùng để đổi runtime.
+
 ### Tệp và việc cần làm
 
 - Shared: Transcript edit/approval, Minutes, Decision, ActionItem, Task, Dashboard, `GroupProgressSnapshot` và Proposal confirmation DTO trong `packages/shared/src/`.
@@ -185,7 +195,8 @@ Meeting
   - transcript version/edit history trong `meeting-data`;
   - minutes trong `meeting-data`;
   - tasks trong `task-data`;
-  - proposal state/execution reference trong `ai-work`.
+  - immutable `GroupProgressSnapshot` VERSION + full LATEST trong `task-data` (contract PROPOSED; writer local verified, chưa deploy);
+  - Task Proposal `PENDING → CONFIRMED` và `confirmedTaskId` trong `ai-work`; Task được tạo atomically trong `task-data`.
 
 ### Cách truy vấn
 
@@ -194,7 +205,7 @@ Meeting
 - Group dashboard: task GSI1 group/status/due.
 - Personal dashboard: task GSI2 assignee/due.
 - Tasks from meeting: task GSI3.
-- Proposal: `PROPOSAL#id / META|EXECUTION`; confirm phải kiểm tra lại quyền và version.
+- Task Proposal: `PROPOSAL#id / META`; confirm kiểm tra lại quyền/group/meeting/assignee, rồi transaction tạo deterministic Task và ghi `confirmedTaskId` đúng một lần.
 
 ### Kiểm thử tối thiểu
 
@@ -204,9 +215,13 @@ Meeting
 - Dashboard không Scan.
 - Transcript update bằng version cũ trả `409`.
 - Transcript approval bằng version cũ trả `409`; retry không tạo ingestion job trùng.
+- Concurrent edit/edit và edit/approve trên cùng version chỉ một mutation thắng; audit chỉ ứng với mutation thắng.
+- GET no-transcript trả `{ transcript: null, segments: [] }`; cursor segment opaque, scoped đúng Meeting/Transcript và không lộ raw DynamoDB key.
+- Edit sau approval không làm mất approved artifact cũ; ingestion exact version không fallback sang current mutable content.
 - Proposal retry chỉ thực thi Task/Minutes API một lần.
 - Group khác không đọc minutes/task.
 - `GroupProgressSnapshot` chỉ chứa dữ liệu xác định của một group; không chấm điểm/xếp hạng cá nhân.
+- Snapshot contract/schema và key model vẫn là proposal chờ team/maintainer duyệt tại [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md). Runtime producer, atomic persistence và exact-version integration đã có source/test local nhưng chưa deploy; M3 sở hữu aggregate/validation/version allocation, còn M5 chỉ diễn giải exact immutable version và không fallback sang latest.
 
 M5 không ghi task hoặc minutes chính thức trực tiếp. M5 tạo draft có citation; M3 sở hữu preview, xác nhận và gọi API nghiệp vụ chuẩn.
 
@@ -215,8 +230,9 @@ M5 không ghi task hoặc minutes chính thức trực tiếp. M5 tạo draft c�
 ### Trạng thái M2–M4
 
 - M2–M4 runtime design 4A: **ACCEPTED** ngày 2026-08-07; chi tiết tại [runtime contract](decisions/m2-m4-synchronization.md).
-- M4 Google synchronization runtime: **NOT YET COMPLETE**.
+- M4 Google synchronization source/runtime: **IMPLEMENTED / LOCAL VERIFIED**.
 - M4 Google synchronization AWS verification: **NOT YET COMPLETE**.
+- M4 Google synchronization browser verification: **HUMAN VERIFICATION PENDING**.
 - Implementation phải dùng sync record riêng trong `meeting-data`, DynamoDB Stream cho initial attempt và EventBridge Scheduler one-shot cho tối đa năm retry; không thêm physical table.
 
 ### Kết quả phải bàn giao

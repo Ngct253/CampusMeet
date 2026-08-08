@@ -19,7 +19,7 @@ LIVE | FINALIZING | READY | APPROVED | FAILED
 LiveTranscriptionSessionStatus:
 STARTING | ACTIVE | RECONNECTING | STOPPED | FAILED
 
-IngestionStatus:
+IngestionStatus (tên conceptual cũ, không phải enum runtime hiện hành):
 NOT_REQUESTED | QUEUED | SYNCING | INDEXED | FAILED | STALE
 
 KnowledgeScope:
@@ -36,8 +36,8 @@ PENDING | CONFIRMED | EXECUTED | REJECTED | EXPIRED | FAILED
 - `Consent`: actor, thời điểm, nguồn capture, nội dung đồng ý và thời hạn lưu.
 - `LiveTranscriptionSession`: meeting, trạng thái `STARTING/ACTIVE/RECONNECTING/STOPPED/FAILED`, nguồn capture, sequence cuối đã xác nhận và thời điểm heartbeat.
 - `AIJob`: loại job, resource nguồn, trạng thái, attempt, provider, requestId, cost metadata và lỗi an toàn.
-- `Transcript`: provider, language, trạng thái live/final, version và source recording.
-- `TranscriptSegment`: sequence, start/end, text, confidence, `languageCode`, `speakerLabel` dạng `Speaker N`, `isFinal`, version và audit; không có ánh xạ speaker sang danh tính thành viên.
+- `Transcript`: stable `transcriptId`, `meetingId`, `groupId`, lifecycle, current version, optional approved-version metadata và timestamps. Provider/source metadata do M2 sở hữu và chưa đưa vào shared M3 contract khi chưa có producer contract ổn định.
+- `TranscriptSegment`: stable ID/transcript ID, sequence, start/end, text, confidence, `languageCode`, `speakerLabel` dạng `Speaker N`, `isFinal=true`, version và optional audit metadata; không có ánh xạ speaker sang danh tính thành viên.
 - `KnowledgeSource`: source type/id/version, `groupId`, `meetingId`, ingestion status và normalized S3 key.
 - `Citation`: meeting/source/segment, timestamp hoặc page/chunk, tiêu đề hiển thị và URI nội bộ.
 - `GroundedAnswer`: answer, citations, scope, `insufficientContext` và conversation ID.
@@ -47,31 +47,46 @@ PENDING | CONFIRMED | EXECUTED | REJECTED | EXPIRED | FAILED
 
 ### 1.3 Endpoint mục tiêu
 
-| Method | Endpoint                                                                | Kết quả                                                                        |
-| ------ | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| POST   | `/meetings/{meetingId}/attachments/upload-url`                          | Tạo attachment và presigned upload URL.                                        |
-| POST   | `/meetings/{meetingId}/attachments/{attachmentId}/complete`             | Xác minh object; trả `202` cùng `aiJobId` khi tạo job.                         |
-| GET    | `/meetings/{meetingId}/attachments`                                     | Liệt kê attachment và trạng thái xử lý.                                        |
-| POST   | `/attachments/{attachmentId}/download-url`                              | Cấp URL tải ngắn hạn sau khi kiểm tra lại quyền nguồn.                         |
-| POST   | `/meetings/{meetingId}/transcriptions`                                  | Tạo transcription job idempotent.                                              |
-| GET    | `/meetings/{meetingId}/transcripts`                                     | Lấy transcript và segment theo trang.                                          |
-| PATCH  | `/transcripts/{transcriptId}/segments/{segmentId}`                      | Sửa text/language/`Speaker N` với `expectedVersion`; version cũ trả `409`.     |
-| POST   | `/transcripts/{transcriptId}/approve`                                  | Duyệt đúng version và tạo ingestion job idempotent.                            |
-| POST   | `/meetings/{meetingId}/live-transcription`                              | Sau consent, tạo phiên streaming idempotent và trả thông tin kết nối ngắn hạn. |
-| GET    | `/meetings/{meetingId}/live-transcription/{sessionId}`                  | Đọc trạng thái, heartbeat và sequence cuối của phiên.                          |
-| POST   | `/meetings/{meetingId}/live-transcription/{sessionId}/segments`         | Ghi một batch final segment theo sequence; gửi lại không tạo trùng.            |
-| POST   | `/meetings/{meetingId}/live-transcription/{sessionId}/heartbeat`        | Gia hạn phiên; heartbeat quá hạn chuyển session sang `FAILED`.                |
-| POST   | `/meetings/{meetingId}/live-transcription/{sessionId}/reconnect`        | Cấp kết nối Transcribe mới và tiếp tục từ sequence cuối đã xác nhận.           |
-| POST   | `/meetings/{meetingId}/live-transcription/{sessionId}/stop`             | Kết thúc stream, chốt sequence cuối và kích hoạt bước chuẩn hóa sau họp.       |
-| POST   | `/meetings/{meetingId}/ai/chat`                                         | Hỏi trong một meeting, trả`202`/job hoặc response theo contract đã chốt.       |
-| POST   | `/groups/{groupId}/ai/search`                                           | RAG trên nhiều meeting cùng nhóm; nhận`meetingIds?`.                           |
-| POST   | `/meetings/{meetingId}/ai/minutes-draft`                                | Sinh minutes/action-item draft có citation.                                    |
-| POST   | `/meetings/{meetingId}/ai/task-proposals`                               | Sinh TaskProposal có citation, chưa tạo Task.                                  |
-| POST   | `/ai/task-proposals/{proposalId}/confirm`                               | M3 kiểm tra lại quyền/idempotency và gọi Task API chuẩn một lần.               |
-| POST   | `/groups/{groupId}/ai/progress-analysis`                                | M5 diễn giải `GroupProgressSnapshot` do M3 tính.                               |
-| GET    | `/ai/jobs/{aiJobId}`                                                    | Đọc trạng thái/progress/lỗi an toàn.                                           |
+| Method | Endpoint                                                         | Kết quả                                                                        |
+| ------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| POST   | `/meetings/{meetingId}/attachments/upload-url`                   | Tạo attachment và presigned upload URL.                                        |
+| POST   | `/meetings/{meetingId}/attachments/{attachmentId}/complete`      | Xác minh object; trả `202` cùng `aiJobId` khi tạo job.                         |
+| GET    | `/meetings/{meetingId}/attachments`                              | Liệt kê attachment và trạng thái xử lý.                                        |
+| POST   | `/attachments/{attachmentId}/download-url`                       | Cấp URL tải ngắn hạn sau khi kiểm tra lại quyền nguồn.                         |
+| POST   | `/meetings/{meetingId}/transcriptions`                           | Tạo transcription job idempotent.                                              |
+| GET    | `/meetings/{meetingId}/transcripts`                              | Lấy một canonical `TranscriptWithSegments` theo trang.                         |
+| PATCH  | `/transcripts/{transcriptId}/segments/{segmentId}`               | Sửa text/language/`Speaker N` với `expectedVersion`; version cũ trả `409`.     |
+| POST   | `/transcripts/{transcriptId}/approve`                            | Duyệt đúng version và tạo ingestion job idempotent.                            |
+| POST   | `/meetings/{meetingId}/live-transcription`                       | Sau consent, tạo phiên streaming idempotent và trả thông tin kết nối ngắn hạn. |
+| GET    | `/meetings/{meetingId}/live-transcription/{sessionId}`           | Đọc trạng thái, heartbeat và sequence cuối của phiên.                          |
+| POST   | `/meetings/{meetingId}/live-transcription/{sessionId}/segments`  | Ghi một batch final segment theo sequence; gửi lại không tạo trùng.            |
+| POST   | `/meetings/{meetingId}/live-transcription/{sessionId}/heartbeat` | Gia hạn phiên; heartbeat quá hạn chuyển session sang `FAILED`.                 |
+| POST   | `/meetings/{meetingId}/live-transcription/{sessionId}/reconnect` | Cấp kết nối Transcribe mới và tiếp tục từ sequence cuối đã xác nhận.           |
+| POST   | `/meetings/{meetingId}/live-transcription/{sessionId}/stop`      | Kết thúc stream, chốt sequence cuối và kích hoạt bước chuẩn hóa sau họp.       |
+| POST   | `/meetings/{meetingId}/ai/chat`                                  | Hỏi trong một meeting, trả`202`/job hoặc response theo contract đã chốt.       |
+| POST   | `/groups/{groupId}/ai/search`                                    | RAG trên nhiều meeting cùng nhóm; nhận`meetingIds?`.                           |
+| POST   | `/meetings/{meetingId}/ai/minutes-draft`                         | Sinh minutes/action-item draft có citation.                                    |
+| POST   | `/meetings/{meetingId}/ai/task-proposals`                        | Sinh TaskProposal có citation, chưa tạo Task.                                  |
+| POST   | `/ai/task-proposals/{proposalId}/confirm`                        | M3 kiểm tra lại quyền/idempotency và gọi Task API chuẩn một lần.               |
+| POST   | `/groups/{groupId}/ai/progress-analysis`                         | M5 diễn giải `GroupProgressSnapshot` do M3 tính.                               |
+| GET    | `/ai/jobs/{aiJobId}`                                             | Đọc trạng thái/progress/lỗi an toàn.                                           |
 
-### 1.4 Quyết định kiến trúc streaming MVP
+### 1.4 Contract canonical Transcript edit/approval
+
+- Một Meeting có tối đa một canonical Transcript trong slice này. M2 tạo initial identity/final segments và producer state; M3 không tạo transcription job/STT behavior. Multi-provider/multiple canonical transcript nằm ngoài phạm vi.
+- Lifecycle chỉ `LIVE|FINALIZING|READY|APPROVED|FAILED`. M3 không edit/approve ở `LIVE|FINALIZING|FAILED`; `READY` cho edit/approve; `APPROVED` chỉ cho edit. Edit thành công tăng `version` đúng một; edit từ `APPROVED` về `READY` và giữ `approvedVersion` cũ. Approval chỉ từ `READY`, không tăng version, đặt `approvedVersion=version`, `approvedBy` từ JWT và `approvedAt` UTC server-side.
+- `version`/`approvedVersion` là integer 1–`9_999_999_999`. Meeting reference pad 10 chữ số để sort; segment sequence là integer 0–`9_999_999_999` và pad 10 chữ số.
+- Shared schemas đều strict. PATCH body chỉ có `expectedVersion` cùng ít nhất một `text?`, `speakerLabel?`, `languageCode?`; approve body chỉ có `expectedVersion` và header `Idempotency-Key`. ID/context, lifecycle, approval/audit metadata, actor, AIJob ID và S3 key đều server-owned.
+- GET dành cho active member và trả `{ transcript: Transcript|null, segments: TranscriptSegment[], nextCursor? }`; chưa có Transcript trả null/empty. Cursor segment opaque base64url, scoped persisted Meeting/canonical Transcript và không expose raw DynamoDB key.
+- PATCH/approve dành cho Organizer đồng thời active member hoặc active Group Admin. Uploader không có permission riêng. `groupId`/Meeting/Organizer resolve từ persisted data; cross-group inconsistency là data-integrity failure.
+- Edit và approval condition trên persisted identity/context, exact expected version và allowed state. Concurrent edit/edit hoặc edit/approve cùng version chỉ một mutation thắng; stale trả `409`, lifecycle sai trả `422`; chỉ mutation thắng ghi immutable audit event.
+- Approval version N freeze chính xác content N thành immutable artifact, conceptual key `uploads/<groupId>/<meetingId>/transcripts/<transcriptId>/v<N>/content.txt`. `KnowledgeIngestionPayload` handoff dùng `sourceType=TRANSCRIPT`, exact IDs, `sourceVersion=N`, `approved=true` và immutable `inputObjectKey`; M5 không đọc mutable current segment thay cho approved N.
+- Same Idempotency-Key + same Transcript/version là cùng approval intent; cùng key khác intent trả `409`; concurrent approval tạo tối đa một logical ingestion job. Nếu approval durable nhưng enqueue/start lỗi, retry heal handoff mà không tạo version hoặc logical job mới.
+- `expectedTranscriptVersion` trong downstream generation là exact approved/frozen source version; không fallback latest/current. Shared field đã có nhưng enforcement còn là M5 runtime follow-up.
+
+Runtime shared enum `PENDING|PROCESSING|READY|FAILED|STALE` là authoritative cho code hiện tại. Bộ tên conceptual `NOT_REQUESTED|QUEUED|SYNCING|INDEXED|FAILED|STALE` ở phần đầu chưa được dùng để rename runtime; compatibility/normalization là quyết định riêng.
+
+### 1.5 Quyết định kiến trúc streaming MVP
 
 ```text
 Browser getDisplayMedia/tab audio
@@ -109,7 +124,7 @@ Các file text phải giải mã được theo MIME đã khai báo; JSON/NDJSON 
 ### 3.1 Ranh giới quyền
 
 - Thành viên active của group: upload, đọc nguồn được phép và chat/RAG.
-- Organizer của meeting hoặc Group Admin: start/stop recording/live STT, sửa/duyệt transcript và yêu cầu minutes draft.
+- Organizer của meeting đang là active member hoặc active Group Admin: start/stop recording/live STT, sửa/duyệt transcript và yêu cầu minutes draft.
 - Chỉ Group Admin: confirm TaskProposal và gọi progress analysis.
 - API kiểm tra quyền trước khi tạo AIJob và kiểm tra lại ngay trước mọi mutation; frontend check chỉ cải thiện UX.
 
@@ -181,7 +196,7 @@ Quy tắc:
 
 ### 4.1 Chuẩn hóa và ingestion
 
-Mỗi source đã duyệt tạo:
+Mỗi source đã duyệt tạo từ immutable input artifact của exact version:
 
 ```text
 kb/{groupId}/{meetingId}/{sourceId}/v{version}/content.txt
@@ -202,6 +217,8 @@ Metadata filterable tối thiểu:
 ```
 
 `groupId`, `meetingId` và `approved` phải là metadata filterable. Nội dung chunk lớn không đưa vào metadata filterable. Worker lưu mapping source/version/ingestion job trong DynamoDB để biết vector nào đang current hoặc stale.
+
+Với Transcript, source version phải bằng `approvedVersion` đã freeze. Worker không được query current mutable segment sau approval để tái tạo version cũ. `expectedTranscriptVersion`, nếu request generation cung cấp, phải resolve đúng frozen approved source đó; enforcement exact-version chưa có trong worker hiện tại và là M5 runtime follow-up.
 
 ### 4.2 Retrieval
 
@@ -324,6 +341,8 @@ Upload/live/transcript:
 - Stream `FAILED` khóa các chức năng AI phụ thuộc nội dung và không suy đoán từ agenda/participant metadata.
 - Transcript update version cũ trả `409`; người không quyền sửa nhận `403`.
 - Approve transcript version cũ trả `409`; retry approval không tạo AIJob hoặc KnowledgeSource trùng.
+- Edit/edit và edit/approve đồng thời trên cùng expected version chỉ một request thành công và chỉ request đó ghi audit event.
+- Approval durable nhưng enqueue/start lỗi có thể retry để recover cùng logical ingestion job; immutable artifact vẫn là exact approved version.
 
 Job/RAG/generation:
 
@@ -365,7 +384,7 @@ PR chỉ được merge khi các lệnh liên quan pass hoặc có issue/blocker
 3. Nói nội dung khác nhau; xác nhận partial thay đổi nhưng chỉ final segment được lưu.
 4. Ngắt mạng ngắn, reconnect và xác nhận không mất/nhân đôi sequence.
 5. Dừng meeting, chờ batch chuẩn hóa; sửa một đoạn và sửa nhãn `Speaker N`, không ánh xạ danh tính.
-6. Duyệt transcript và chờ cả hai KnowledgeSource thành `INDEXED`.
+6. Duyệt transcript và chờ cả hai KnowledgeSource đạt runtime status `READY` (tương ứng ý nghĩa conceptual `INDEXED`).
 7. Vào trễ và yêu cầu tóm tắt; xác nhận câu trả lời chỉ dùng final live segment, có `Speaker N`/timestamp và trạng thái chưa duyệt.
 8. Hỏi một câu cần bằng chứng từ cả hai meeting; mở citation đúng timestamp của từng meeting.
 9. Giới hạn scope về một meeting và xác nhận citation meeting còn lại biến mất.
@@ -387,17 +406,17 @@ Luồng AI chỉ hoàn thành khi:
 
 ## 7. Quyết định đã khóa
 
-| Nội dung                        | Quyết định                                                                                                                                    |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Trình duyệt/nguồn capture       | Chrome desktop; người dùng chủ động chọn tab Google Meet có audio và cấp microphone; không tự capture hoặc tự fallback nguồn.                |
-| STT                             | Chỉ Amazon Transcribe; `languageCode` explicit, frontend mặc định `vi-VN`, PCM 16-bit mono 16 kHz; không `AUTO` hoặc Deepgram.               |
-| Region                          | Dev mặc định `ap-southeast-1`; model generation/embedding vẫn lấy từ environment.                                                             |
-| File allowlist                  | TXT/Markdown/CSV/TSV/JSON/NDJSON/HTML/XHTML/XML/YAML/iCalendar, PDF, DOCX/PPTX/XLSX, ODT/ODP/ODS và MP3/WAV/WebM/M4A; tối đa 10 file/meeting, 50 MB/file và audio 60 phút. |
-| Retention                       | Upload chưa hoàn tất 1 ngày; raw audio 7 ngày; AIJob/conversation 30 ngày; source/vector đến khi source hoặc meeting bị xóa.                 |
-| Model config                    | Generation model, embedding model/dimension là environment config; không hard-code model version vào domain.                                 |
-| Chunking/citation               | Baseline 300 token, overlap 20%; giữ mapping segment/timestamp; citation dùng URI CampusMeet, không lộ S3 key.                                |
-| ACL                             | Filter `groupId`, authorized meeting set, source status và `approved=true` trước retrieval; current live segment được đọc trực tiếp có nhãn chưa duyệt. |
-| Cost quota                      | Giới hạn phút STT, token/query, số ingestion và ngưỡng alarm theo môi trường dev.                                                             |
+| Nội dung                  | Quyết định                                                                                                                                                                 |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Trình duyệt/nguồn capture | Chrome desktop; người dùng chủ động chọn tab Google Meet có audio và cấp microphone; không tự capture hoặc tự fallback nguồn.                                              |
+| STT                       | Chỉ Amazon Transcribe; `languageCode` explicit, frontend mặc định `vi-VN`, PCM 16-bit mono 16 kHz; không `AUTO` hoặc Deepgram.                                             |
+| Region                    | Dev mặc định `ap-southeast-1`; model generation/embedding vẫn lấy từ environment.                                                                                          |
+| File allowlist            | TXT/Markdown/CSV/TSV/JSON/NDJSON/HTML/XHTML/XML/YAML/iCalendar, PDF, DOCX/PPTX/XLSX, ODT/ODP/ODS và MP3/WAV/WebM/M4A; tối đa 10 file/meeting, 50 MB/file và audio 60 phút. |
+| Retention                 | Upload chưa hoàn tất 1 ngày; raw audio 7 ngày; AIJob/conversation 30 ngày; source/vector đến khi source hoặc meeting bị xóa.                                               |
+| Model config              | Generation model, embedding model/dimension là environment config; không hard-code model version vào domain.                                                               |
+| Chunking/citation         | Baseline 300 token, overlap 20%; giữ mapping segment/timestamp; citation dùng URI CampusMeet, không lộ S3 key.                                                             |
+| ACL                       | Filter `groupId`, authorized meeting set, source status và `approved=true` trước retrieval; current live segment được đọc trực tiếp có nhãn chưa duyệt.                    |
+| Cost quota                | Giới hạn phút STT, token/query, số ingestion và ngưỡng alarm theo môi trường dev.                                                                                          |
 
 Email SES, public Marketplace, Document PiP, reranking và tool proposal nhiều miền không phải blocker. Live transcription và RAG nhiều cuộc họp là blocker bắt buộc của nghiệm thu luồng AI.
 

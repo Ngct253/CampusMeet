@@ -11,23 +11,19 @@ import { TaskService } from '../services/task-service';
 import { getPathParameter, getRequestId, parseBody, requireIdempotencyKey } from '../utils/request';
 import { failure, ok } from '../utils/response';
 
-export const taskRepository = new DynamoDbTaskRepository();
+const tasks = new DynamoDbTaskRepository();
 const meetings = new MeetingService(
   new DynamoDbMeetingRepository(),
   new SharedMembershipAuthorizer(),
 );
-export const taskService = new TaskService(
-  taskRepository,
-  new DynamoDbCollaborationRepository(),
-  meetings,
-);
+const taskService = new TaskService(tasks, new DynamoDbCollaborationRepository(), meetings);
 
 export const tasksHandler: APIGatewayProxyHandlerV2 = async (event) => {
   const requestId = getRequestId(event);
   try {
     const { userId } = authenticate(event);
     if (event.requestContext.http.method === 'GET') {
-      return ok(await taskRepository.listByAssignee(userId), requestId);
+      return ok(await tasks.listByAssignee(userId), requestId);
     }
     if (event.requestContext.http.method === 'POST') {
       return ok(

@@ -6,8 +6,10 @@ import {
   type Meeting,
   type Membership,
 } from '@campusmeet/shared';
+import type { SFNClient } from '@aws-sdk/client-sfn';
+import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { describe, expect, it, vi } from 'vitest';
-import { DynamoAiAccessAdapter } from '../src/ai/aws-adapters';
+import { DynamoAiAccessAdapter, StepFunctionsAIJobOrchestrator } from '../src/ai/aws-adapters';
 import type { MeetingAccessBoundary } from '../src/domain/ports';
 
 const membership: Membership = {
@@ -83,5 +85,219 @@ describe('M5 AWS access adapter', () => {
     await expect(
       adapter.requireMeetingsInGroup(['meeting-a', 'meeting-b'], 'group-1'),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+});
+
+describe('StepFunctionsAIJobOrchestrator idempotency lookup', () => {
+  it('strongly recovers the existing job before snapshot regeneration', async () => {
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Item: { aiJobId: 'aij-existing' } })
+      .mockResolvedValueOnce({
+        Item: {
+          aiJobId: 'aij-existing',
+          groupId: 'group-1',
+          type: 'PROGRESS_ANALYSIS',
+          status: 'QUEUED',
+          attempt: 0,
+          requestId: 'request-original',
+          createdAt: '2026-08-08T10:00:00.000Z',
+          updatedAt: '2026-08-08T10:00:00.000Z',
+          payload: {
+            operation: 'PROGRESS_ANALYSIS',
+            actorId: 'admin-1',
+            groupId: 'group-1',
+            request: { snapshotVersion: 4 },
+          },
+        },
+      });
+    const stateMachines = { send: vi.fn() };
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      stateMachines as unknown as SFNClient,
+      'ai-work',
+      'state-machine-arn',
+    );
+
+    await expect(
+      orchestrator.findExisting({
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        operation: 'PROGRESS_ANALYSIS',
+        idempotencyKey: 'idem-1',
+      }),
+    ).resolves.toMatchObject({
+      job: { aiJobId: 'aij-existing', type: 'PROGRESS_ANALYSIS' },
+      payload: {
+        operation: 'PROGRESS_ANALYSIS',
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        request: { snapshotVersion: 4 },
+      },
+    });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0]![0].input).toMatchObject({
+      TableName: 'ai-work',
+      Key: { PK: expect.stringMatching(/^IDEMPOTENCY#AI_REQUEST#/), SK: 'RESULT' },
+      ConsistentRead: true,
+    });
+    expect(send.mock.calls[1]![0].input).toMatchObject({
+      Key: { PK: 'AIJOB#aij-existing', SK: 'META' },
+      ConsistentRead: true,
+    });
+    expect(stateMachines.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects an idempotency pointer to a job payload in another group', async () => {
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Item: { aiJobId: 'aij-corrupt' } })
+      .mockResolvedValueOnce({
+        Item: {
+          aiJobId: 'aij-corrupt',
+          groupId: 'group-2',
+          type: 'PROGRESS_ANALYSIS',
+          status: 'QUEUED',
+          attempt: 0,
+          requestId: 'request-corrupt',
+          createdAt: '2026-08-08T10:00:00.000Z',
+          updatedAt: '2026-08-08T10:00:00.000Z',
+          payload: {
+            operation: 'PROGRESS_ANALYSIS',
+            actorId: 'admin-1',
+            groupId: 'group-2',
+            request: { snapshotVersion: 4 },
+          },
+        },
+      });
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      { send: vi.fn() } as unknown as SFNClient,
+      'ai-work',
+      'state-machine-arn',
+    );
+
+    await expect(
+      orchestrator.findExisting({
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        operation: 'PROGRESS_ANALYSIS',
+        idempotencyKey: 'idem-corrupt',
+      }),
+    ).rejects.toThrow('AI_IDEMPOTENCY_DATA_INTEGRITY');
+  });
+});
+
+describe('StepFunctionsAIJobOrchestrator enqueue recovery', () => {
+  const progressPayload = {
+    operation: 'PROGRESS_ANALYSIS' as const,
+    actorId: 'admin-1',
+    groupId: 'group-1',
+    request: { snapshotVersion: 4 },
+  };
+
+  const recoveredJobItem = (payload: unknown) => ({
+    aiJobId: 'aij-existing',
+    groupId: 'group-1',
+    type: 'PROGRESS_ANALYSIS',
+    status: 'QUEUED',
+    attempt: 0,
+    requestId: 'request-original',
+    createdAt: '2026-08-08T10:00:00.000Z',
+    updatedAt: '2026-08-08T10:00:00.000Z',
+    payload,
+  });
+
+  const createRecoveryOrchestrator = (item: Record<string, unknown>) => {
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Transaction cancelled'))
+      .mockResolvedValueOnce({ Item: { aiJobId: 'aij-existing' } })
+      .mockResolvedValueOnce({ Item: item });
+    const stateMachines = { send: vi.fn() };
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      stateMachines as unknown as SFNClient,
+      'ai-work',
+      'state-machine-arn',
+    );
+    return { orchestrator, send, stateMachines };
+  };
+
+  const enqueueProgress = (orchestrator: StepFunctionsAIJobOrchestrator) =>
+    orchestrator.enqueue({
+      actorId: 'admin-1',
+      groupId: 'group-1',
+      idempotencyKey: 'idem-1',
+      requestId: 'request-racing',
+      type: 'PROGRESS_ANALYSIS',
+      payload: progressPayload,
+    });
+
+  it('returns the existing job when concurrent recovery has the same snapshot version', async () => {
+    const { orchestrator, stateMachines } = createRecoveryOrchestrator(
+      recoveredJobItem(progressPayload),
+    );
+
+    await expect(enqueueProgress(orchestrator)).resolves.toMatchObject({
+      aiJobId: 'aij-existing',
+      groupId: 'group-1',
+      type: 'PROGRESS_ANALYSIS',
+    });
+    expect(stateMachines.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects concurrent recovery with a different progress snapshot version', async () => {
+    const { orchestrator, stateMachines } = createRecoveryOrchestrator(
+      recoveredJobItem({ ...progressPayload, request: { snapshotVersion: 5 } }),
+    );
+
+    await expect(enqueueProgress(orchestrator)).rejects.toThrow('AI_IDEMPOTENCY_DATA_INTEGRITY');
+    expect(stateMachines.send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['actor', { ...progressPayload, actorId: 'admin-2' }],
+    ['group', { ...progressPayload, groupId: 'group-2' }],
+    [
+      'operation',
+      {
+        operation: 'GROUP_SEARCH' as const,
+        actorId: 'admin-1',
+        groupId: 'group-1',
+        request: { question: 'What changed?', scope: 'WHOLE_GROUP' as const },
+      },
+    ],
+  ])('rejects a recovered payload with the wrong %s', async (_field, payload) => {
+    const { orchestrator, stateMachines } = createRecoveryOrchestrator(recoveredJobItem(payload));
+
+    await expect(enqueueProgress(orchestrator)).rejects.toThrow('AI_IDEMPOTENCY_DATA_INTEGRITY');
+    expect(stateMachines.send).not.toHaveBeenCalled();
+  });
+
+  it('preserves recovery for a non-progress operation', async () => {
+    const payload = {
+      operation: 'GROUP_SEARCH' as const,
+      actorId: 'member-1',
+      groupId: 'group-1',
+      request: { question: 'What changed?', scope: 'WHOLE_GROUP' as const },
+    };
+    const { orchestrator, stateMachines } = createRecoveryOrchestrator({
+      ...recoveredJobItem(payload),
+      type: 'GENERATE_ANSWER',
+    });
+
+    await expect(
+      orchestrator.enqueue({
+        actorId: 'member-1',
+        groupId: 'group-1',
+        idempotencyKey: 'idem-search',
+        requestId: 'request-racing',
+        type: 'GENERATE_ANSWER',
+        payload,
+      }),
+    ).resolves.toMatchObject({ aiJobId: 'aij-existing', type: 'GENERATE_ANSWER' });
+    expect(stateMachines.send).not.toHaveBeenCalled();
   });
 });

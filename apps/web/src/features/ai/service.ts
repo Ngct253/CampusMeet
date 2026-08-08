@@ -5,9 +5,9 @@ import {
   confirmTaskProposalResponseSchema,
   type AIJob,
   type AIJobDetail,
+  type GenerateMeetingDraftRequest,
   type ConfirmTaskProposalRequest,
   type ConfirmTaskProposalResponse,
-  type GenerateMeetingDraftRequest,
   type GroupKnowledgeQuery,
   type GroupProgressAnalysisRequest,
   type MeetingChatRequest,
@@ -61,7 +61,6 @@ export interface AIService {
   confirmTaskProposal(
     proposalId: string,
     request: ConfirmTaskProposalRequest,
-    idempotencyKey: string,
   ): Promise<ConfirmTaskProposalResponse>;
   progressAnalysis(
     groupId: string,
@@ -131,15 +130,11 @@ export const createAIService = (options: AIServiceOptions = {}): AIService => {
       post(`/meetings/${pathId(meetingId)}/ai/minutes-draft`, body, key),
     taskProposals: (meetingId, body, key) =>
       post(`/meetings/${pathId(meetingId)}/ai/task-proposals`, body, key),
-    confirmTaskProposal: (proposalId, body, key) =>
+    confirmTaskProposal: (proposalId, body) =>
       request(
         `/ai/task-proposals/${pathId(proposalId)}/confirm`,
         confirmTaskProposalResponseSchema,
-        {
-          method: 'POST',
-          body: JSON.stringify(body),
-          headers: { 'idempotency-key': key },
-        },
+        { method: 'POST', body: JSON.stringify(body) },
       ),
     progressAnalysis: (groupId, body, key) =>
       post(`/groups/${pathId(groupId)}/ai/progress-analysis`, body, key),
@@ -150,4 +145,3 @@ export const createAIService = (options: AIServiceOptions = {}): AIService => {
 export const aiService = createAIService();
 
 export const createAIIdempotencyKey = () => `ai-${crypto.randomUUID()}`;
-export const taskProposalConfirmationKey = (proposalId: string) => `ai-confirm-${proposalId}`;

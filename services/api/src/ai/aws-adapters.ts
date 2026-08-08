@@ -7,13 +7,21 @@ import {
   TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { GroupRole, type AIJob } from '@campusmeet/shared';
+import { GroupRole, aiWorkerPayloadSchema, type AIJob } from '@campusmeet/shared';
 import { MeetingService } from '../application/meeting-service';
 import type { MeetingAccessBoundary } from '../domain/ports';
 import { requireGroupMembership, SharedMembershipAuthorizer } from '../middleware/authorization';
 import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
+import { DynamoDbGroupProgressSnapshotRepository } from '../repositories/group-progress-snapshots';
+import { DynamoDbGroupTaskReader } from '../repositories/tasks';
+import { GroupProgressSnapshotService } from '../services/group-progress-snapshot-service';
 import { ForbiddenError, ResourceNotFoundError, ServiceConfigurationError } from '../utils/errors';
-import type { AIJobOrchestrator, MeetingScopeReader, MembershipAuthorizer } from './ports';
+import type {
+  AIJobIdempotencyReader,
+  AIJobOrchestrator,
+  MeetingScopeReader,
+  MembershipAuthorizer,
+} from './ports';
 
 const requireValue = (value: string | undefined, name: string): string => {
   if (!value) throw new ServiceConfigurationError(`Thiếu cấu hình ${name}.`);
@@ -66,7 +74,7 @@ export class DynamoAiAccessAdapter implements MembershipAuthorizer, MeetingScope
   }
 }
 
-export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator {
+export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobIdempotencyReader {
   constructor(
     private readonly database: DynamoDBDocumentClient,
     private readonly stateMachines: SFNClient,
@@ -74,15 +82,43 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator {
     private readonly stateMachineArn: string,
   ) {}
 
+  async findExisting(
+    input: Parameters<AIJobIdempotencyReader['findExisting']>[0],
+  ): ReturnType<AIJobIdempotencyReader['findExisting']> {
+    const idempotencyKey = this.idempotencyKey(input);
+    const existing = await this.database.send(
+      new GetCommand({ TableName: this.tableName, Key: idempotencyKey, ConsistentRead: true }),
+    );
+    if (!existing.Item) return null;
+
+    const existingJobId = existing.Item.aiJobId as string | undefined;
+    if (!existingJobId) throw new Error('AI_IDEMPOTENCY_DATA_INTEGRITY');
+    const existingJob = await this.database.send(
+      new GetCommand({
+        TableName: this.tableName,
+        Key: { PK: `AIJOB#${existingJobId}`, SK: 'META' },
+        ConsistentRead: true,
+      }),
+    );
+    if (!existingJob.Item) throw new Error('AI_IDEMPOTENCY_DATA_INTEGRITY');
+    const job = this.toJob(existingJob.Item);
+    const payload = this.parseRecoveredPayload(existingJob.Item);
+    this.assertRecoveredPayloadScope(job, payload, input);
+    return {
+      job,
+      payload,
+    };
+  }
+
   async enqueue(input: Parameters<AIJobOrchestrator['enqueue']>[0]): Promise<AIJob> {
     const now = new Date().toISOString();
     const aiJobId = `aij_${randomUUID()}`;
-    const keyHash = createHash('sha256')
-      .update(
-        `${input.actorId}:${input.groupId}:${input.payload.operation}:${input.idempotencyKey}`,
-      )
-      .digest('hex');
-    const idempotencyKey = { PK: `IDEMPOTENCY#AI_REQUEST#${keyHash}`, SK: 'RESULT' };
+    const idempotencyKey = this.idempotencyKey({
+      actorId: input.actorId,
+      groupId: input.groupId,
+      operation: input.payload.operation,
+      idempotencyKey: input.idempotencyKey,
+    });
     const job: AIJob = {
       aiJobId,
       groupId: input.groupId,
@@ -146,7 +182,21 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator {
         }),
       );
       if (!existingJob.Item) throw error;
-      return this.toJob(existingJob.Item);
+      const recoveredJob = this.toJob(existingJob.Item);
+      const recoveredPayload = this.parseRecoveredPayload(existingJob.Item);
+      this.assertRecoveredPayloadScope(recoveredJob, recoveredPayload, {
+        actorId: input.actorId,
+        groupId: input.groupId,
+        operation: input.payload.operation,
+      });
+      if (
+        input.payload.operation === 'PROGRESS_ANALYSIS' &&
+        (recoveredPayload.operation !== 'PROGRESS_ANALYSIS' ||
+          recoveredPayload.request.snapshotVersion !== input.payload.request.snapshotVersion)
+      ) {
+        throw new Error('AI_IDEMPOTENCY_DATA_INTEGRITY');
+      }
+      return recoveredJob;
     }
 
     try {
@@ -192,17 +242,47 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator {
       updatedAt: String(item.updatedAt),
     };
   }
+
+  private parseRecoveredPayload(item: Record<string, unknown>) {
+    const parsed = aiWorkerPayloadSchema.safeParse(item.payload);
+    if (!parsed.success) throw new Error('AI_IDEMPOTENCY_DATA_INTEGRITY');
+    return parsed.data;
+  }
+
+  private assertRecoveredPayloadScope(
+    job: AIJob,
+    payload: ReturnType<StepFunctionsAIJobOrchestrator['parseRecoveredPayload']>,
+    input: Pick<
+      Parameters<AIJobIdempotencyReader['findExisting']>[0],
+      'actorId' | 'groupId' | 'operation'
+    >,
+  ) {
+    if (
+      job.groupId !== input.groupId ||
+      payload.actorId !== input.actorId ||
+      payload.groupId !== input.groupId ||
+      payload.operation !== input.operation
+    ) {
+      throw new Error('AI_IDEMPOTENCY_DATA_INTEGRITY');
+    }
+  }
+
+  private idempotencyKey(input: Parameters<AIJobIdempotencyReader['findExisting']>[0]) {
+    const keyHash = createHash('sha256')
+      .update(`${input.actorId}:${input.groupId}:${input.operation}:${input.idempotencyKey}`)
+      .digest('hex');
+    return { PK: `IDEMPOTENCY#AI_REQUEST#${keyHash}`, SK: 'RESULT' };
+  }
 }
 
 export const createProductionAIRequestServiceAdapters = () => {
   const meetingTable = requireValue(process.env.MEETING_DATA_TABLE, 'MEETING_DATA_TABLE');
+  const taskTable = requireValue(process.env.TASK_DATA_TABLE, 'TASK_DATA_TABLE');
   const aiWorkTable = requireValue(process.env.AI_WORK_TABLE, 'AI_WORK_TABLE');
   const stateMachineArn = requireValue(process.env.AI_STATE_MACHINE_ARN, 'AI_STATE_MACHINE_ARN');
   const database = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-  const meetingBoundary = new MeetingService(
-    new DynamoDbMeetingRepository(database, meetingTable),
-    new SharedMembershipAuthorizer(),
-  );
+  const meetingRepository = new DynamoDbMeetingRepository(database, meetingTable);
+  const meetingBoundary = new MeetingService(meetingRepository, new SharedMembershipAuthorizer());
   const access = new DynamoAiAccessAdapter(meetingBoundary);
   const jobs = new StepFunctionsAIJobOrchestrator(
     database,
@@ -210,7 +290,12 @@ export const createProductionAIRequestServiceAdapters = () => {
     aiWorkTable,
     stateMachineArn,
   );
-  return { access, meetings: access, jobs };
+  const snapshots = new GroupProgressSnapshotService(
+    new DynamoDbGroupProgressSnapshotRepository(database, taskTable),
+    new DynamoDbGroupTaskReader(database, taskTable),
+    meetingRepository,
+  );
+  return { access, meetings: access, jobs, snapshots, jobReplays: jobs };
 };
 
 export const createProductionAIJobOrchestrator = (): AIJobOrchestrator => {

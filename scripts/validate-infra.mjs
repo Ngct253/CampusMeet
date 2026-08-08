@@ -73,6 +73,13 @@ for (const [logicalId, contract] of expected) {
   assert.equal(dataModel.includes(`campusmeet-dev-${contract.suffix}`), true);
 }
 
+assert.deepEqual(resources.MeetingDataTable.Properties.StreamSpecification, {
+  StreamViewType: 'NEW_AND_OLD_IMAGES',
+});
+assert.deepEqual(dataTemplate.Outputs.MeetingDataTableStreamArn, {
+  Value: { 'Fn::GetAtt': ['MeetingDataTable', 'StreamArn'] },
+});
+
 assert.equal(
   appTemplate.includes('Type: AWS::DynamoDB::Table'),
   false,
@@ -107,6 +114,7 @@ for (const parameter of [
   'BedrockEmbeddingDimensions',
   'BedrockGenerationModelArn',
   'BedrockGenerationFoundationModelId',
+  'ExistingKnowledgeVectorIndexArn',
 ]) {
   assert.equal(
     appTemplate.includes(`  ${parameter}:`),
@@ -116,6 +124,20 @@ for (const parameter of [
 }
 
 for (const marker of [
+  'MeetingDataStreamArn:',
+  'GoogleSyncWorkerRole:',
+  'GoogleSyncWorkerFunction:',
+  'Handler: services/api/src/index.googleSyncWorkerHandler',
+  'GoogleSyncSchedulerRole:',
+  'GoogleSyncSchedulerInvokePolicy:',
+  'GOOGLE_SYNC_WORKER_ARN:',
+  'GOOGLE_SYNC_SCHEDULER_ROLE_ARN:',
+  'Stream: !Ref MeetingDataStreamArn',
+  'GoogleMeetingSyncRecord',
+  "Path: '/{proxy+}'",
+  'Method: OPTIONS',
+  'Auth: { Authorizer: NONE }',
+  'MaximumRetryAttempts: 3',
   'AIWorkerRole:',
   'AIWorkerFunction:',
   'Handler: services/ai-worker/src/index.handler',
@@ -129,6 +151,8 @@ for (const marker of [
   'Type: AWS::S3Vectors::VectorBucket',
   'KnowledgeVectorIndex:',
   'Type: AWS::S3Vectors::Index',
+  'UseExistingKnowledgeVectorIndexArn:',
+  '!Ref ExistingKnowledgeVectorIndexArn',
   'Dimension: !Ref BedrockEmbeddingDimensions',
   'DistanceMetric: cosine',
   'KnowledgeBaseRole:',
@@ -167,6 +191,47 @@ for (const marker of [
   assert.equal(appTemplate.includes(marker), true, `Application template is missing ${marker}.`);
 }
 
+const knowledgeBase = appTemplate.slice(
+  appTemplate.indexOf('  CampusMeetKnowledgeBase:'),
+  appTemplate.indexOf('  CampusMeetKnowledgeDataSource:'),
+);
+assert.equal(
+  knowledgeBase.includes('UseExistingKnowledgeVectorIndexArn'),
+  true,
+  'Knowledge Base must use the stable existing vector index ARN during stack updates.',
+);
+assert.equal(
+  knowledgeBase.includes('IndexArn: !GetAtt KnowledgeVectorIndex.IndexArn'),
+  false,
+  'Knowledge Base must not directly depend on a replacement-sensitive unresolved IndexArn.',
+);
+
+const googleSyncSchedulerRole = appTemplate.slice(
+  appTemplate.indexOf('  GoogleSyncSchedulerRole:'),
+  appTemplate.indexOf('  GoogleSyncWorkerRole:'),
+);
+assert.equal(
+  googleSyncSchedulerRole.includes('GoogleSyncWorkerFunction'),
+  false,
+  'Google sync scheduler role must not depend on the worker function; keep invoke permission in the separate policy.',
+);
+
+const googleSyncSchedulerInvokePolicy = appTemplate.slice(
+  appTemplate.indexOf('  GoogleSyncSchedulerInvokePolicy:'),
+  appTemplate.indexOf('  GoogleSyncWorkerLogGroup:'),
+);
+for (const marker of [
+  'Type: AWS::IAM::Policy',
+  'Roles: [!Ref GoogleSyncSchedulerRole]',
+  'Action: lambda:InvokeFunction',
+  'Resource: !GetAtt GoogleSyncWorkerFunction.Arn',
+]) {
+  assert.equal(
+    googleSyncSchedulerInvokePolicy.includes(marker),
+    true,
+    `Google sync scheduler invoke policy is missing ${marker}.`,
+  );
+}
 assert.equal(
   appTemplate.includes('EmbeddingModelConfiguration:'),
   false,
@@ -250,5 +315,5 @@ assert.equal(
 );
 
 console.log(
-  'Infrastructure contract validation passed: data foundation, M5 AI Worker, Knowledge Base, and S3 Vectors.',
+  'Infrastructure contract validation passed: data foundation, Google sync runtime, M5 AI Worker, Knowledge Base, and S3 Vectors.',
 );

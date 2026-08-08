@@ -52,9 +52,9 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | POST      | `/attachments/:attachmentId/download-url`                      | `AttachmentDownloadTarget`                                          | M4 đã triển khai                                                        |
 | POST      | `/meetings/:meetingId/recordings`                              | `CreateRecordingRequest`, `Recording`                               | Đã chốt contract mục tiêu; chưa implement                               |
 | POST      | `/meetings/:meetingId/transcriptions`                          | `StartTranscriptionRequest`, `AIJob`                                | Đã chốt contract mục tiêu; chưa implement                               |
-| GET       | `/meetings/:meetingId/transcripts`                             | `Transcript[]`, `TranscriptSegment[]`                               | Đã chốt contract mục tiêu; chưa implement                               |
+| GET       | `/meetings/:meetingId/transcripts`                             | `TranscriptWithSegments`                                            | Contract canonical transcript đã chốt; runtime chưa implement           |
 | PATCH     | `/transcripts/:transcriptId/segments/:segmentId`               | `UpdateTranscriptSegmentRequest`, `TranscriptSegment`               | Đã chốt contract mục tiêu; chưa implement                               |
-| POST      | `/transcripts/:transcriptId/approve`                           | `ApproveTranscriptRequest`, `Transcript`, `AIJob`                   | Đã chốt contract mục tiêu; chưa implement                               |
+| POST      | `/transcripts/:transcriptId/approve`                           | `ApproveTranscriptRequest`, `ApproveTranscriptResponse`             | Đã chốt contract mục tiêu; chưa implement                               |
 | POST      | `/meetings/:meetingId/live-transcription`                      | `StartLiveTranscriptionRequest`, `LiveTranscriptionSession`         | Đã chốt contract mục tiêu; chưa implement                               |
 | GET       | `/meetings/:meetingId/live-transcription/:sessionId`           | `LiveTranscriptionSession`                                          | Đã chốt contract mục tiêu; chưa implement                               |
 | POST      | `/meetings/:meetingId/live-transcription/:sessionId/segments`  | `AppendFinalSegmentsRequest`, `TranscriptSegment[]`                 | Đã chốt contract mục tiêu; chưa implement                               |
@@ -65,15 +65,15 @@ Khi lời mời được chấp nhận hoặc từ chối, notification `invitat
 | POST      | `/groups/:groupId/ai/search`                                   | `GroupKnowledgeQuery` → `AIJob` (`202`)                             | Phase 4A handler/application đã implement                               |
 | POST      | `/meetings/:meetingId/ai/minutes-draft`                        | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                     | Phase 4A handler/application đã implement                               |
 | POST      | `/meetings/:meetingId/ai/task-proposals`                       | `GenerateMeetingDraftRequest` → `AIJob` (`202`)                     | Phase 4A handler/application đã implement                               |
-| POST      | `/ai/task-proposals/:proposalId/confirm`                       | `ConfirmTaskProposalRequest/Response`                               | Đã triển khai; Group Admin, bắt buộc `Idempotency-Key`                  |
-| POST      | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                    | Phase 4A; yêu cầu Group Admin                                           |
+| POST      | `/ai/task-proposals/:proposalId/confirm`                       | `ConfirmTaskProposalRequest/Response` (`200`)                       | Group Admin; đã implement                                               |
+| POST      | `/groups/:groupId/ai/progress-analysis`                        | `GroupProgressAnalysisRequest` → `AIJob` (`202`)                    | Snapshot contract PROPOSED; runtime local, chưa deploy                  |
 | POST      | `/groups/:groupId/ai/tool-proposals`                           | `CreateToolProposalRequest`, `ToolProposal`                         | Pha AI mở rộng; chưa implement                                          |
 | POST      | `/ai/tool-proposals/:id/confirm`                               | `ConfirmToolProposalRequest/Response`                               | Pha AI mở rộng; chưa implement                                          |
 | GET       | `/ai/jobs/:aiJobId`                                            | `AIJobDetail`                                                       | M5 đã triển khai                                                        |
 
 ## Contract đồng bộ Google của Meeting
 
-Decision 4A runtime đã **ACCEPTED** ngày 2026-08-07; runtime và AWS chưa hoàn tất. Meeting create, update và cancel thành công khi transaction nội bộ đã ghi đồng thời Meeting và synchronization intent. Các response này không chờ Google; Google failure sau đó không biến mutation nội bộ đã thành công thành `5xx` hoặc rollback Meeting.
+Decision 4A runtime đã **ACCEPTED** ngày 2026-08-07; source runtime đã implement và local verified, còn AWS/browser verification chưa hoàn tất. Meeting create, update và cancel thành công khi transaction nội bộ đã ghi đồng thời Meeting và synchronization intent. Các response này không chờ Google; Google failure sau đó không biến mutation nội bộ đã thành công thành `5xx` hoặc rollback Meeting.
 
 Meeting detail mục tiêu bổ sung summary chỉ đọc, tách khỏi lifecycle:
 
@@ -95,7 +95,7 @@ Meeting detail mục tiêu bổ sung summary chỉ đọc, tách khỏi lifecycl
 
 - Authentication: Cognito JWT.
 - Authorization: actor là active member và `GROUP_ADMIN` của group được resolve server-side từ Meeting; không tin `groupId` trong body.
-- Request body: không chứa Meeting snapshot hoặc integration fields; body rỗng được chấp nhận theo parser contract mà implementation PR chốt.
+- Request body: object rỗng; không chứa Meeting snapshot hoặc integration fields.
 - Behavior: đọc Meeting và sync record hiện tại; không đổi Meeting lifecycle; tạo revision mới ở `PENDING`, reset attempt/failure metadata, rồi xử lý bất đồng bộ.
 - Success: `200` theo envelope hiện tại, `data` là read-only `GoogleMeetingSyncSummary` ở `PENDING`. Response xác nhận intent đã durable, không xác nhận Google đã đồng bộ.
 - `400`: malformed input; `401`: thiếu/sai authentication; `403`: không phải active Group Admin; `404`: Meeting hoặc sync resource không tồn tại theo access boundary; `409`: conditional revision conflict hoặc trạng thái không thể tạo retry an toàn; `5xx`: chỉ khi không thể persist retry intent/internal dependency lỗi, không dùng để biểu diễn Google attempt bất đồng bộ thất bại.
@@ -104,6 +104,38 @@ Chi tiết state machine, retry 1m/5m/15m/1h/6h, idempotency và failure classif
 
 ## Quy ước contract cho AI và artifact
 
+### Canonical Transcript edit/approval
+
+Trong slice M3 này, mỗi Meeting có tối đa một canonical `Transcript`. M2 tạo identity ban đầu, ghi final segment và sở hữu producer transition `LIVE → FINALIZING → READY` hoặc `FAILED`; M3 chỉ đọc, sửa và duyệt dữ liệu đã persist, không tạo STT hoặc hành vi theo provider. Multi-provider và nhiều canonical transcript cho cùng Meeting nằm ngoài phạm vi.
+
+`TranscriptStatus` chỉ gồm `LIVE | FINALIZING | READY | APPROVED | FAILED`. M3 không được sửa hoặc duyệt ở `LIVE`, `FINALIZING`, `FAILED`. `READY` cho phép sửa và duyệt; `APPROVED` cho phép sửa nhưng không approve lại như một mutation mới. Edit thành công luôn tăng `version` đúng một và edit từ `APPROVED` đưa current state về `READY` trong khi giữ `approvedVersion` cũ. Approval chỉ từ `READY`, không tăng `version`, và atomically đặt `status=APPROVED`, `approvedVersion=version`, `approvedBy` từ JWT cùng `approvedAt` UTC phía server. `version`/`approvedVersion` là integer từ 1 đến `9_999_999_999`.
+
+`TranscriptSegment` persisted có `segmentId`, `transcriptId`, non-negative integer `sequence/startMs/endMs`, `endMs >= startMs`, non-blank `text`, `confidence` trong `[0,1]`, `languageCode`, `speakerLabel` đúng `Speaker N`, `isFinal=true`, positive `version` và optional `updatedBy/updatedAt`. `speakerLabel` không phải danh tính người dùng và không có `speakerUserId`.
+
+`GET /meetings/:meetingId/transcripts` yêu cầu active member của group được resolve từ persisted Meeting và trả:
+
+```ts
+interface TranscriptWithSegments {
+  transcript: Transcript | null;
+  segments: TranscriptSegment[];
+  nextCursor?: string;
+}
+```
+
+Chưa có transcript trả đúng `{ transcript: null, segments: [] }`. Segment được phân trang theo `SEGMENT#<paddedSequence>#<segmentId>`; client gửi lại opaque base64url `cursor`, server phải scope cursor theo Meeting và canonical Transcript, từ chối cursor malformed/cross-scope bằng `400`, không expose raw `LastEvaluatedKey`. Response không trả nhiều canonical Transcript trong slice này.
+
+`PATCH /transcripts/:transcriptId/segments/:segmentId` nhận strict `UpdateTranscriptSegmentRequest` gồm `expectedVersion` và ít nhất một trong `text?`, `speakerLabel?`, `languageCode?`. Path cung cấp hai ID; body không nhận ID/context, version mới, lifecycle/approval/audit metadata hoặc actor. Actor phải là Organizer đồng thời là active member, hoặc active `GROUP_ADMIN`, của persisted Meeting. Mutation condition trên identity/context persisted, exact version và allowed state; stale version trả `409`, invalid lifecycle trả `422`. Edit tạo đúng một immutable audit event; concurrent edit/edit hoặc edit/approve trên cùng version chỉ một mutation thắng.
+
+`POST /transcripts/:transcriptId/approve` nhận strict `{ expectedVersion }` và bắt buộc `Idempotency-Key`; body không nhận actor, approval metadata, AIJob ID hoặc S3 key. Response strict `ApproveTranscriptResponse` gồm authoritative `transcript` và ingestion `aiJob`. Same key + same Transcript/version là cùng intent và phải resolve cùng authoritative approval/ingestion job. Same key với Transcript/version khác trả `409`; các approval đồng thời của cùng version tạo tối đa một logical ingestion job. Nếu approval đã durable nhưng enqueue/start job lỗi, retry phải heal handoff mà không tăng Transcript version, không ghi approval logic mới và không tạo job logic trùng.
+
+Approval version N phải đóng băng chính xác nội dung version N thành immutable input artifact trước khi M5 ingest; ví dụ conceptual key `uploads/<groupId>/<meetingId>/transcripts/<transcriptId>/v<version>/content.txt`. Handoff tương thích `KnowledgeIngestionPayload`: `sourceType=TRANSCRIPT`, exact `groupId/meetingId/transcriptId`, `sourceVersion=approvedVersion`, `approved=true` và immutable `inputObjectKey`. Worker không được đọc mutable current segments rồi gắn nhãn chúng là approved version N, cũng không được tự thay bằng latest version sau edit.
+
+`GenerateMeetingDraftRequest.expectedTranscriptVersion`, khi có, chỉ exact approved/frozen source version đó. Version phải tồn tại dưới dạng approved source; downstream không fallback sang current/latest mutable Transcript. Shared field đã tồn tại nhưng worker hiện chưa enforce exact-version filter, nên đây là M5 runtime follow-up và không được hiểu là đã implement trong PR contract này.
+
+Authorization không cấp quyền riêng cho uploader. `groupId`, Meeting và Organizer luôn resolve server-side từ persisted Transcript/Meeting; Transcript trỏ tới Meeting khác group là data-integrity failure, không phải input client có thể sửa.
+
+Tên ingestion status trong shared runtime hiện hành (`PENDING | PROCESSING | READY | FAILED | STALE`) là authoritative cho code hiện tại. Bộ tên cũ trong tài liệu (`NOT_REQUESTED | QUEUED | SYNCING | INDEXED | FAILED | STALE`) chỉ mô tả lifecycle conceptual và chưa được dùng để đổi enum/runtime; mọi normalization/rename cần compatibility decision riêng.
+
 - API nghiệp vụ không nhận binary audio/tài liệu. API chỉ cấp presigned URL; Browser upload trực tiếp vào S3 user-content và gọi complete với checksum.
 - Mỗi meeting nhận tối đa 10 file. Mỗi file tối đa 50 MB; tài liệu hỗ trợ TXT/Markdown/CSV/TSV/JSON/NDJSON/HTML/XHTML/XML/YAML/iCalendar, PDF, DOCX/PPTX/XLSX và ODT/ODP/ODS; audio hỗ trợ MP3/WAV/WebM/M4A và audio tối đa 60 phút. Complete handler phải kiểm tra lại size/checksum bằng `HeadObject`; worker tiếp tục kiểm tra extension, MIME và signature/cấu trúc file khi áp dụng trước khi chuyển attachment sang `READY`.
 - Parse, STT, ingestion và generation trả `202 Accepted` cùng `aiJobId`. Client theo dõi bằng `GET /ai/jobs/:id`; không giữ request mở chờ file dài. Endpoint polling trả `AIJobDetail` gồm metadata job và `result` tùy chọn đã được kiểm tra bằng schema runtime. Khi job M5 ở trạng thái `COMPLETED`, `result` là bắt buộc và phải khớp `type`: `GENERATE_ANSWER` → `GroundedAnswer`, `GENERATE_MINUTES` → `MinutesDraft`, `GENERATE_TASK_PROPOSALS` → `TaskProposal[]`, `PROGRESS_ANALYSIS` → `GroupProgressAnalysis`, `INGEST_SOURCE` → kết quả ingestion. Record sai contract không được trả nguyên trạng cho client.
@@ -111,22 +143,56 @@ Chi tiết state machine, retry 1m/5m/15m/1h/6h, idempotency và failure classif
 - `GroupKnowledgeQuery` gồm `question`, `scope=SELECTED_MEETINGS|WHOLE_GROUP`, `meetingIds?` và `conversationId?`. `SELECTED_MEETINGS` bắt buộc có danh sách; `WHOLE_GROUP` không nhận meeting ngoài path group. Backend kiểm tra mọi meeting thuộc cùng `groupId` rồi áp filter group/meeting-set/ACL trước retrieval.
 - `GroundedAnswer` gồm `answer`, `citations[]`, `scope` và `insufficientContext`. Citation ánh xạ về group/meeting/source/segment nội bộ, không lộ raw S3 key hoặc presigned URL. Khi thiếu nguồn, API trả `insufficientContext=true`.
 - `GenerateMinutesAndTaskProposalsResponse` gồm minutes draft, quyết định/action item đã được nêu và `TaskProposal[]`; mỗi mục có citation. Assignee/deadline/priority không được model tự điền nếu transcript không nêu rõ.
-- `TaskProposal` có `status=PENDING|CONFIRMED|EXECUTED|REJECTED|EXPIRED|FAILED`, `meetingId`, title/description, `assigneeId?`, `priority?`, `dueAt?`, `missingFields[]`, `taskId?` và transcript citations. Trước confirm, `title`, `assigneeId` và `priority` phải hợp lệ theo `CreateTaskRequest`; `dueAt` vẫn tùy chọn.
-- `POST /ai/task-proposals/:proposalId/confirm` nhận `{assigneeId, priority}` và bắt buộc `Idempotency-Key`. Backend đọc proposal, kiểm tra lại quyền Group Admin theo `groupId` tin cậy, claim proposal có điều kiện rồi gọi `TaskService.createTask` với khóa ổn định theo `proposalId`. Thành công trả `{proposal, task}` với proposal `EXECUTED` và `taskId`; retry/concurrent confirm không được tạo Task thứ hai.
-- `GroupProgressAnalysisResponse` chỉ diễn giải `GroupProgressSnapshot` do backend tính từ task/meeting trong path group; không trả điểm/xếp hạng/suy diễn thái độ cá nhân và không gây mutation.
-- `TranscriptSegment` giữ `startMs`, `endMs`, `text`, `confidence`, `languageCode`, `speakerLabel` dạng `Speaker N`, `version` và audit metadata; không có `speakerUserId`.
+- `TaskProposal` có `status=PENDING|CONFIRMED|EXECUTED|REJECTED|EXPIRED|FAILED`, `meetingId`, title/description, `assigneeId?`, `priority?`, `dueAt?`, `missingFields[]`, transcript citations và `confirmedTaskId?`. `confirmedTaskId` bắt buộc khi trạng thái là `CONFIRMED` và không được có ở `PENDING`.
+- `POST /ai/task-proposals/:proposalId/confirm` chỉ cho active Group Admin. Body strict chỉ nhận override `title?`, `assigneeId?`, `priority?`, `dueAt?`; các giá trị bỏ qua được lấy từ persisted proposal. Trước khi ghi, backend kiểm tra proposal/meeting cùng group và assignee active. Một transaction xuyên `task-data` + `ai-work` tạo Task `TODO`, `version=1`, `sourceMeetingId` từ proposal và chuyển proposal `PENDING → CONFIRMED` cùng `confirmedTaskId`. `proposalId` quyết định Task ID nên concurrent confirm/retry không tạo Task thứ hai; replay trả Task và proposal authoritative. Không yêu cầu `Idempotency-Key` riêng.
+- `GroupProgressAnalysisResponse` chỉ diễn giải một immutable `GroupProgressSnapshot` version do backend tính từ task/meeting trong path group; không trả điểm/xếp hạng/suy diễn thái độ cá nhân và không gây mutation.
+- `TranscriptSegment` tuân theo strict canonical contract ở trên; chỉ final segment persisted mới đi vào editor.
 - `LiveTranscriptionSession` giữ `meetingId`, nguồn capture, consent reference, trạng thái `STARTING|ACTIVE|RECONNECTING|STOPPED|FAILED`, sequence cuối đã xác nhận và heartbeat; thông tin kết nối streaming phải ngắn hạn.
 - Endpoint segment chỉ nhận final result có giới hạn kích thước cùng `ResultId/sequence`; gửi lại cùng khóa không tạo segment trùng. Partial result chỉ hiển thị ở client và không được lưu/index.
 - Heartbeat quá hạn chuyển session sang `FAILED`. Reconnect phải kiểm tra lại quyền, cấp kết nối Amazon Transcribe mới có thời hạn ngắn và tiếp tục từ sequence cuối đã xác nhận; khoảng audio thiếu được ghi nhận, không được tự suy đoán.
 - Voice record/live transcript là nguồn duy nhất của nội dung phát biểu và phải chạy nền trong mọi phiên họp sau consent/cấp quyền. Khi session chưa `ACTIVE` hoặc chuyển `FAILED`, API biên bản/task proposal và các chức năng phụ thuộc nội dung phải trả trạng thái chưa đủ dữ liệu; không suy đoán từ agenda hoặc participant metadata.
 - `StartLiveTranscriptionRequest` chỉ nhận `languageCode`; frontend mặc định `vi-VN`, backend kiểm tra allowlist Amazon Transcribe theo môi trường. MVP không có `AUTO`, không tự dịch và không dùng Deepgram.
 - `speakerLabel` chỉ dùng để phân biệt `Speaker 1/2/...` trong session; PATCH có thể sửa label nhưng không ánh xạ danh tính.
-- Approve transcript yêu cầu Organizer hoặc Group Admin, `expectedVersion`, audit metadata và `Idempotency-Key`. Duyệt version cũ trả `409`; retry không tạo AIJob hoặc KnowledgeSource trùng.
+- Approve transcript yêu cầu Organizer đang active hoặc active Group Admin, `expectedVersion` và `Idempotency-Key`; audit metadata do server tạo. Duyệt version cũ trả `409`; retry không tạo AIJob hoặc KnowledgeSource trùng.
 - Group RAG chỉ ingest file `READY`, approved transcript và approved minutes. Current-meeting chat có thể đọc final live segment trực tiếp nhưng phải đánh dấu nguồn chưa duyệt; selected/whole-group retrieval luôn yêu cầu `approved=true`.
 - `ToolProposal` có `status=PENDING|CONFIRMED|EXECUTED|REJECTED|EXPIRED|FAILED`, input chuẩn hóa và expiry. Tạo proposal không gây mutation.
 - Confirm phải kiểm tra lại JWT, membership/role, schema, policy và idempotency ngay tại thời điểm thực thi; không tin kết quả kiểm tra cũ.
 - Nội dung tài liệu/transcript không được biến thành tool instruction. Tool name phải thuộc server-side allowlist, không nhận tên hàm tùy ý từ model.
 - Google artifact sync lưu trạng thái `POLLING|AVAILABLE|UNAVAILABLE|ACTION_REQUIRED|FAILED`; `UNAVAILABLE` là kết quả hợp lệ và phải dẫn tới fallback upload/capture.
+
+## Contract Group Progress Snapshot
+
+`GroupProgressSnapshot` là aggregate xác định cấp group do M3 sở hữu. Shared schema strict gồm:
+
+```ts
+interface GroupProgressSnapshot {
+  groupId: string;
+  version: number; // integer 1..9_999_999_999
+  generatedAt: ISODateTime;
+  taskCounts: {
+    total: number;
+    todo: number;
+    doing: number;
+    done: number;
+    overdue: number;
+  };
+  meetingCounts: {
+    completed: number;
+    upcoming: number;
+  };
+}
+```
+
+Mọi count là integer không âm; `total = todo + doing + done` và `overdue <= todo + doing`. `generatedAt` là một UTC cutoff do server tạo cho toàn bộ lần aggregate. Task overdue phải có `dueAt < generatedAt` và status khác `DONE`. Meeting completed có status `COMPLETED`; upcoming có status `SCHEDULED` và `startsAt >= generatedAt`; `DRAFT`/`CANCELLED` và Minutes không được tính. Snapshot không chứa dữ liệu hoặc đánh giá cá nhân.
+
+Với `POST /groups/:groupId/ai/progress-analysis`:
+
+- request có `snapshotVersion` phải resolve đúng immutable version đó trước khi enqueue;
+- request không có `snapshotVersion` phải tạo và persist snapshot mới trước khi enqueue, rồi cố định resolved version trong job;
+- M5 chỉ đọc exact immutable version đã resolve, không fallback sang `LATEST`;
+- snapshot thiếu hoặc sai integrity phải fail-safe trước khi gọi model.
+
+`PROGRESS_SNAPSHOT#LATEST` là full copy của lần generate thành công gần nhất, không phải dữ liệu live. Source GSI chấp nhận eventual consistency ngắn. Runtime source hiện generate on-demand, persist VERSION/LATEST atomically và cố định exact version trước khi enqueue; chưa deploy AWS. Error code public ổn định cho snapshot thiếu/corrupt vẫn là follow-up và chưa tự thêm code mới. AI idempotency tiếp tục dùng record hiện có: replay đã có job trả đúng persisted job/payload, không generate snapshot khác. Chi tiết persistence, concurrency và ownership nằm tại [M3 Group Progress Snapshot Contract](decisions/m3-group-progress-snapshot.md).
 
 ## Response format hiện có
 
@@ -136,7 +202,7 @@ Chi tiết state machine, retry 1m/5m/15m/1h/6h, idempotency và failure classif
 
 `PATCH /tasks/:taskId/status` nhận `{ status, expectedVersion }` và chỉ cho assignee hoặc active Group Admin của task cập nhật. API dùng `TODO|DOING|DONE`, cho phép `TODO→DOING|DONE`, `DOING→TODO|DONE`, `DONE→DOING`; `DONE→TODO` trả `422`. Same-status trả task hiện tại nhưng vẫn kiểm tra version, không tăng version và không ghi history. Task legacy thiếu `version` được xem là version `0`. Version cũ trả `409`; PATCH này không yêu cầu `Idempotency-Key`.
 
-`GET /meetings/:meetingId/minutes` lấy meeting từ path, kiểm tra actor là active member của `meeting.groupId` rồi trả immutable Minutes version mới nhất; meeting hoặc Minutes chưa tồn tại trả `404`. `PUT` chỉ cho active Group Admin, không nhận meeting/group/actor hoặc metadata server-managed từ body và từ chối meeting `CANCELLED` bằng `422`. Request gồm `summary`, `discussion`, `decisions`, `actionItems` và `expectedVersion`; mỗi action item nhận `id?`, `content`, `assigneeId?`, `dueAt?`, trong đó `dueAt` phải là ISO datetime có timezone. ID có trong request phải thuộc latest Minutes và không được lặp; ID lạ hoặc trùng trả `422`, còn item mới không có ID được server sinh UUID. `taskId` là metadata server-managed, client gửi sẽ trả `400`; liên kết này được giữ khi action item vẫn xuất hiện trong version mới. Assignee nếu có phải là active member cùng group. Chưa có Minutes dùng `expectedVersion=0` để tạo version `1`; version cũ trả `409`. PUT không dùng `Idempotency-Key`; retry sau success với expected version cũ trả `409` và không tạo phiên bản trùng.
+`GET /meetings/:meetingId/minutes` lấy meeting từ path, kiểm tra actor là active member của `meeting.groupId` rồi trả immutable Minutes version mới nhất; meeting hoặc Minutes chưa tồn tại trả `404`. `PUT` chỉ cho active Group Admin, không nhận meeting/group/actor hoặc metadata server-managed từ body và từ chối meeting `CANCELLED` bằng `422`. Request gồm `summary`, `discussion`, `decisions`, `actionItems` và `expectedVersion`; mỗi decision nhận `id?`, `content`, còn mỗi action item nhận `id?`, `content`, `assigneeId?`, `dueAt?`, trong đó `dueAt` phải là ISO datetime có timezone. Decision/Action Item ID có trong request phải thuộc latest Minutes và không được lặp trong loại tương ứng; ID lạ hoặc trùng trả `422`, còn item mới không có ID được server sinh UUID. Identity không được suy ra từ nội dung hoặc vị trí, nên edit/reorder giữ ID và các item có nội dung giống nhau vẫn tách biệt. `taskId` là metadata server-managed, client gửi sẽ trả `400`; liên kết này được giữ khi action item vẫn xuất hiện trong version mới. Assignee nếu có phải là active member cùng group. Chưa có Minutes dùng `expectedVersion=0` để tạo version `1`; version cũ trả `409`. PUT không dùng `Idempotency-Key`; retry sau success với expected version cũ trả `409` và không tạo phiên bản trùng.
 
 `POST /meetings/:meetingId/minutes/action-items/:actionItemId/task` chỉ cho active Group Admin chuyển một Action Item còn tồn tại trong latest Minutes thành Task. Request strict gồm `expectedMinutesVersion` (integer `1..999999`), `priority`, `assigneeId?` và `title?`; meeting/action/group/source/actor/task metadata đều lấy từ path, persisted data hoặc JWT. Persisted assignee không được override; Action Item chưa có assignee bắt buộc request bổ sung một active member cùng group. Title mặc định là persisted Action Item content, nhưng content dài hơn 200 ký tự bắt buộc có title override và không bị tự truncate. Meeting `CANCELLED` hoặc Minutes version `999999` trả `422`; Action Item không còn trong latest Minutes trả `404`.
 
@@ -213,11 +279,11 @@ Nghiệp vụ khác chưa triển khai:
 | AI job         | Chốt state transition, timeout, retry, DLQ/failure handling và token/phút/cost metadata                                                                                                                                       |
 | Grounding      | Chốt citation schema cho tài liệu/transcript/biên bản; current/selected/whole-group scope và filter `groupId`/meeting-set/ACL                                                                                                 |
 | Task proposal  | Chốt mapping ActionItem/Task DTO, missing fields, quyền confirm và liên kết citation nguồn                                                                                                                                    |
-| Group progress | Chốt `GroupProgressSnapshot` do M3 cung cấp; AI chỉ diễn giải dữ liệu cấp nhóm                                                                                                                                                |
+| Group progress | Contract `GroupProgressSnapshot` vẫn PROPOSED; runtime producer/exact-version integration đã local verified, chưa deploy                                                                                                      |
 | Tool allowlist | Chốt tool MVP, quyền, trường cần xác nhận, expiry và audit; không expose CRUD tùy ý cho model                                                                                                                                 |
 | Retention      | Upload chưa hoàn tất 1 ngày, raw audio 7 ngày, AIJob/conversation 30 ngày; source/vector tồn tại đến khi source hoặc meeting bị xóa                                                                                           |
 | Shared states  | Tách `MeetingStatus` khỏi `GoogleSyncStatus`; cập nhật `@campusmeet/shared` trước khi implement route mới                                                                                                                     |
-| Google sync    | Runtime design 4A đã ACCEPTED; implement sync record/transaction, Stream worker, Scheduler retry, manual retry và read-only detail summary; runtime/AWS chưa complete                                                         |
+| Google sync    | Runtime design 4A đã ACCEPTED; source implementation gồm sync record/transaction, Stream worker, Scheduler retry, manual retry và read-only detail summary đã local verified; AWS/browser pending                             |
 
 Không triển khai route hoặc CRUD thật chỉ để làm bảng này trông hoàn chỉnh.
 
@@ -227,4 +293,4 @@ For Meeting creation, the authenticated creator is the organizer; `organizerId` 
 
 `GET /groups/{groupId}/meetings` returns `CursorPage<Meeting>` in the success envelope. Query `limit` defaults to 20 and must be an integer from 1 through 100. `cursor` is an opaque, versioned logical cursor scoped to the group and stable `startsAt + meetingId` ordering; malformed or wrong-group cursors return `400`. `nextCursor` is omitted at the end. Clients must not decode the cursor.
 
-Google synchronization follows eventual consistency: an external failure does not roll back the internal Meeting. The complete runtime design is ACCEPTED in `docs/decisions/m2-m4-synchronization.md`. Latest main has OAuth and Calendar create code, but sync-record persistence, Stream worker, `syncRevision`, update/cancel reconciliation and bounded retry remain unimplemented and are not AWS-runtime verified.
+Google synchronization follows eventual consistency: an external failure does not roll back the internal Meeting. The complete runtime design is ACCEPTED in `docs/decisions/m2-m4-synchronization.md`. The implementation branch contains sync-record persistence, Stream worker, `syncRevision`, update/cancel reconciliation and bounded retry with local automated evidence; it is not AWS-runtime verified.

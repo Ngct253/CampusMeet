@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MeetingStatus, type Meeting } from '@campusmeet/shared';
-import { EventBridgeSchedulerAdapter } from '../src/integrations/adapters';
+import {
+  EventBridgeSchedulerAdapter,
+  GoogleSyncSchedulerAdapter,
+} from '../src/integrations/adapters';
 
 const meeting = {
   id: 'meeting-1',
@@ -94,5 +97,42 @@ describe('EventBridgeSchedulerAdapter', () => {
       }),
     } as never);
     await expect(idempotent.cancel(meeting.id)).resolves.toBeUndefined();
+  });
+});
+
+describe('GoogleSyncSchedulerAdapter', () => {
+  beforeEach(() => {
+    process.env.GOOGLE_SYNC_WORKER_ARN = 'arn:aws:lambda:ap-southeast-1:123:function:google-sync';
+    process.env.GOOGLE_SYNC_SCHEDULER_ROLE_ARN = 'arn:aws:iam::123:role/google-sync';
+  });
+  afterEach(() => {
+    delete process.env.GOOGLE_SYNC_WORKER_ARN;
+    delete process.env.GOOGLE_SYNC_SCHEDULER_ROLE_ARN;
+  });
+  it('creates an idempotent one-shot worker schedule with identity-only payload and no hidden retry', async () => {
+    const send = vi.fn(async () => ({}));
+    const adapter = new GoogleSyncSchedulerAdapter({ send } as never);
+    await adapter.schedule({
+      meetingId: 'meeting-1',
+      syncRevision: 7,
+      attemptCount: 2,
+      runAt: '2029-01-01T00:05:00.000Z',
+    });
+    const command = send.mock.calls.at(0)?.at(0) as unknown as {
+      input: {
+        Target: { Input: string };
+      } & Record<string, unknown>;
+    };
+    expect(command.input).toMatchObject({
+      Name: expect.stringMatching(/^campusmeet-google-[a-f0-9]{20}-r7-a2$/),
+      ScheduleExpression: 'at(2029-01-01T00:05:00)',
+      FlexibleTimeWindow: { Mode: 'OFF' },
+      ActionAfterCompletion: 'DELETE',
+      Target: { RetryPolicy: { MaximumRetryAttempts: 0 } },
+    });
+    expect(JSON.parse(command.input.Target.Input)).toEqual({
+      meetingId: 'meeting-1',
+      syncRevision: 7,
+    });
   });
 });

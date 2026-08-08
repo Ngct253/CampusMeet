@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
+  type DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
   QueryCommand,
@@ -9,10 +10,11 @@ import {
 import {
   Priority,
   TaskStatus,
+  taskInputSchema,
   type CreateTaskRequest,
   type Task,
 } from '@campusmeet/shared';
-import type { TaskRepository } from '../domain/ports';
+import type { GroupTaskReader, TaskRepository } from '../domain/ports';
 import { ConflictError, ResourceNotFoundError } from '../utils/errors';
 import { documentClient, stringValue, tableName, type DynamoItem } from './client';
 
@@ -99,6 +101,75 @@ const taskItem = (task: PersistedTask, idempotencyPayloadHash: string) => {
   };
 };
 
+const toGroupTask = (item: DynamoItem, expectedGroupId: string): Task => {
+  const task = toTask(item);
+  const status = stringValue(item, 'status');
+  const dueAt = stringValue(item, 'dueAt');
+  const dueSortValue = dueAt ?? NO_DUE_DATE_SORT_VALUE;
+  const input = taskInputSchema.safeParse({
+    groupId: item.groupId,
+    title: item.title,
+    assigneeId: item.assigneeId,
+    priority: item.priority,
+    ...(dueAt ? { dueAt } : {}),
+    ...(stringValue(item, 'sourceMeetingId')
+      ? { sourceMeetingId: stringValue(item, 'sourceMeetingId') }
+      : {}),
+  });
+
+  if (
+    !task ||
+    !input.success ||
+    item.entityType !== 'TASK' ||
+    item.SK !== 'META' ||
+    item.PK !== `TASK#${task.id}` ||
+    item.groupId !== expectedGroupId ||
+    item.GSI1PK !== `GROUP#${expectedGroupId}` ||
+    item.GSI1SK !== `STATUS#${status}#DUE#${dueSortValue}#TASK#${task.id}` ||
+    !Object.values(TaskStatus).includes(status as TaskStatus)
+  ) {
+    throw new Error('GROUP_PROGRESS_TASK_DATA_INTEGRITY');
+  }
+
+  return task;
+};
+
+export class DynamoDbGroupTaskReader implements GroupTaskReader {
+  constructor(
+    private readonly database: DynamoDBDocumentClient = documentClient,
+    private readonly taskTable: string = tableName('TASK_DATA_TABLE'),
+  ) {}
+
+  async listByGroup(groupId: string): Promise<Task[]> {
+    const tasks: Task[] = [];
+    let exclusiveStartKey: Record<string, unknown> | undefined;
+
+    do {
+      const page = await this.database.send(
+        new QueryCommand({
+          TableName: this.taskTable,
+          IndexName: 'GSI1',
+          KeyConditionExpression: 'GSI1PK = :group',
+          ExpressionAttributeValues: { ':group': `GROUP#${groupId}` },
+          ExclusiveStartKey: exclusiveStartKey,
+        }),
+      );
+      tasks.push(...(page.Items ?? []).map((item) => toGroupTask(item, groupId)));
+      const nextStartKey = page.LastEvaluatedKey;
+      if (
+        exclusiveStartKey !== undefined &&
+        nextStartKey !== undefined &&
+        isDeepStrictEqual(nextStartKey, exclusiveStartKey)
+      ) {
+        throw new Error('Task pagination cursor did not advance.');
+      }
+      exclusiveStartKey = nextStartKey;
+    } while (exclusiveStartKey);
+
+    return tasks;
+  }
+}
+
 export class DynamoDbTaskRepository implements TaskRepository {
   private async getItem(id: string): Promise<DynamoItem | undefined> {
     const result = await documentClient.send(
@@ -116,11 +187,7 @@ export class DynamoDbTaskRepository implements TaskRepository {
     return item ? toTask(item) : undefined;
   }
 
-  async create(
-    actorId: string,
-    input: CreateTaskRequest,
-    idempotencyKey: string,
-  ): Promise<Task> {
+  async create(actorId: string, input: CreateTaskRequest, idempotencyKey: string): Promise<Task> {
     const id = taskIdFor(actorId, idempotencyKey);
     const idempotencyPayloadHash = payloadHashFor(input);
     const createdAt = new Date().toISOString();

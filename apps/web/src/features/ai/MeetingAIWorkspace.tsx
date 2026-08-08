@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   GroupRole,
-  Priority,
   minutesDraftSchema,
   taskProposalSchema,
+  type ConfirmTaskProposalResponse,
   type GroupDetails,
 } from '@campusmeet/shared';
 import { AIJobState, MinutesDraftPreview, TaskProposalEditor } from './components';
@@ -13,7 +14,7 @@ import {
   useMinutesDraftMutation,
   useTaskProposalsMutation,
 } from './hooks';
-import { createAIIdempotencyKey, taskProposalConfirmationKey } from './service';
+import { AIServiceError, createAIIdempotencyKey } from './service';
 
 const taskProposalListSchema = taskProposalSchema.array();
 
@@ -26,28 +27,31 @@ export function MeetingAIWorkspace({
 }) {
   const [minutesJobId, setMinutesJobId] = useState<string>();
   const [taskJobId, setTaskJobId] = useState<string>();
-  const [confirmedTaskIds, setConfirmedTaskIds] = useState<Record<string, string>>({});
-  const [confirmingProposalId, setConfirmingProposalId] = useState<string>();
+  const queryClient = useQueryClient();
+  const [confirmedProposals, setConfirmedProposals] = useState<
+    Record<string, ConfirmTaskProposalResponse>
+  >({});
   const [confirmationErrors, setConfirmationErrors] = useState<Record<string, string>>({});
+  const [confirmingProposalId, setConfirmingProposalId] = useState<string>();
   const minutesMutation = useMinutesDraftMutation();
   const taskMutation = useTaskProposalsMutation();
-  const confirmMutation = useConfirmTaskProposalMutation();
+  const confirmationMutation = useConfirmTaskProposalMutation();
   const minutesJobQuery = useAIJob(minutesJobId);
   const taskJobQuery = useAIJob(taskJobId);
   const resetMinutesMutation = minutesMutation.reset;
   const resetTaskMutation = taskMutation.reset;
-  const resetConfirmMutation = confirmMutation.reset;
+  const resetConfirmationMutation = confirmationMutation.reset;
 
   useEffect(() => {
     setMinutesJobId(undefined);
     setTaskJobId(undefined);
-    setConfirmedTaskIds({});
-    setConfirmingProposalId(undefined);
+    setConfirmedProposals({});
     setConfirmationErrors({});
+    setConfirmingProposalId(undefined);
     resetMinutesMutation();
     resetTaskMutation();
-    resetConfirmMutation();
-  }, [meetingId, resetConfirmMutation, resetMinutesMutation, resetTaskMutation]);
+    resetConfirmationMutation();
+  }, [meetingId, resetMinutesMutation, resetTaskMutation, resetConfirmationMutation]);
 
   const minutesResult = minutesDraftSchema.safeParse(minutesJobQuery.data?.result);
   const minutesDraft =
@@ -136,7 +140,7 @@ export function MeetingAIWorkspace({
             onClick={() => {
               taskMutation.reset();
               setTaskJobId(undefined);
-              setConfirmedTaskIds({});
+              setConfirmedProposals({});
               setConfirmationErrors({});
               taskMutation.mutate(
                 { meetingId, request: {}, idempotencyKey: createAIIdempotencyKey() },
@@ -171,7 +175,7 @@ export function MeetingAIWorkspace({
           onRetry={() => {
             taskMutation.reset();
             setTaskJobId(undefined);
-            setConfirmedTaskIds({});
+            setConfirmedProposals({});
             setConfirmationErrors({});
           }}
         >
@@ -179,53 +183,63 @@ export function MeetingAIWorkspace({
             <div className="ai-feedback ai-feedback--empty" role="status">
               <div>
                 <strong>Chưa có công việc được nêu</strong>
-                <p>AI không tìm thấy action item có đủ căn cứ trong nguồn cuộc họp.</p>
+                <p>AI không tìm thấy việc cần làm có đủ căn cứ trong nội dung cuộc họp.</p>
               </div>
             </div>
           )}
-          {taskProposals?.map((proposal) => (
-            <div className="meeting-ai-proposal" key={`${taskJobId}-${proposal.proposalId}`}>
-              <TaskProposalEditor
-                proposal={proposal}
-                assigneeOptions={assigneeOptions}
-                canConfirm={group.group.role === GroupRole.GROUP_ADMIN}
-                isConfirming={confirmingProposalId === proposal.proposalId}
-                confirmedTaskId={confirmedTaskIds[proposal.proposalId]}
-                confirmationError={confirmationErrors[proposal.proposalId]}
-                onComplete={(fields) => {
-                  setConfirmingProposalId(fields.proposalId);
-                  setConfirmationErrors((current) => {
-                    const next = { ...current };
-                    delete next[fields.proposalId];
-                    return next;
-                  });
-                  confirmMutation.mutate(
-                    {
-                      proposalId: fields.proposalId,
-                      request: {
-                        assigneeId: fields.assigneeId,
-                        priority: Priority[fields.priority],
+          {taskProposals?.map((generatedProposal) => {
+            const proposal =
+              confirmedProposals[generatedProposal.proposalId]?.proposal ?? generatedProposal;
+            return (
+              <div className="meeting-ai-proposal" key={`${taskJobId}-${proposal.proposalId}`}>
+                <TaskProposalEditor
+                  proposal={proposal}
+                  assigneeOptions={assigneeOptions}
+                  canConfirm={group.group.role === GroupRole.GROUP_ADMIN}
+                  isPending={
+                    confirmationMutation.isPending && confirmingProposalId === proposal.proposalId
+                  }
+                  error={confirmationErrors[proposal.proposalId]}
+                  onConfirm={({ proposalId, request }) => {
+                    if (confirmationMutation.isPending) return;
+                    setConfirmingProposalId(proposalId);
+                    setConfirmationErrors((current) => ({ ...current, [proposalId]: '' }));
+                    confirmationMutation.mutate(
+                      { proposalId, request },
+                      {
+                        onSuccess: async (response) => {
+                          setConfirmedProposals((current) => ({
+                            ...current,
+                            [proposalId]: response,
+                          }));
+                          setConfirmingProposalId(undefined);
+                          await Promise.all([
+                            queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+                            queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+                          ]);
+                        },
+                        onError: async (error) => {
+                          setConfirmingProposalId(undefined);
+                          setConfirmationErrors((current) => ({
+                            ...current,
+                            [proposalId]:
+                              error instanceof AIServiceError && error.status === 422
+                                ? error.message
+                                : error instanceof AIServiceError && error.status === 403
+                                  ? 'Bạn không còn quyền xác nhận đề xuất này.'
+                                  : 'Không thể xác nhận đề xuất công việc. Vui lòng thử lại.',
+                          }));
+                          if (error instanceof AIServiceError && error.status === 409) {
+                            await taskJobQuery.refetch();
+                          }
+                        },
                       },
-                      idempotencyKey: taskProposalConfirmationKey(fields.proposalId),
-                    },
-                    {
-                      onSuccess: ({ task }) =>
-                        setConfirmedTaskIds((current) => ({
-                          ...current,
-                          [fields.proposalId]: task.id,
-                        })),
-                      onError: (error) =>
-                        setConfirmationErrors((current) => ({
-                          ...current,
-                          [fields.proposalId]: error.message,
-                        })),
-                      onSettled: () => setConfirmingProposalId(undefined),
-                    },
-                  );
-                }}
-              />
-            </div>
-          ))}
+                    );
+                  }}
+                />
+              </div>
+            );
+          })}
         </AIJobState>
       )}
     </section>

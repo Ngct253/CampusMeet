@@ -28,6 +28,14 @@ export function SettingsPage() {
     mutationFn: connectGoogleCalendar,
     onSuccess: ({ authorizationUrl }) => window.location.assign(authorizationUrl),
   });
+  const googleCallbackState = searchParams.get('google');
+  const googleState = googleMutation.isPending
+    ? 'Đang kết nối'
+    : googleMutation.isError || googleCallbackState === 'error' || googleCallbackState === 'action-required'
+      ? 'Cần kết nối lại'
+      : googleCallbackState === 'connected'
+        ? 'Đã kết nối'
+        : 'Chưa kết nối';
 
   useEffect(() => {
     if (!query.data) return;
@@ -65,7 +73,7 @@ export function SettingsPage() {
                 aria-describedby="email-help"
               />
             </label>
-            <small id="email-help">Email được xác minh và quản lý bởi Amazon Cognito.</small>
+            <small id="email-help">Địa chỉ email đã được xác minh khi tạo tài khoản.</small>
             <label>
               Tên hiển thị
               <input
@@ -75,14 +83,6 @@ export function SettingsPage() {
                 maxLength={100}
                 required
               />
-            </label>
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={emailNotificationsEnabled}
-                onChange={(event) => setEmailNotificationsEnabled(event.target.checked)}
-              />
-              Nhận email bổ sung khi hệ thống hỗ trợ gửi email
             </label>
             {mutation.isError && (
               <p className="error" role="alert">
@@ -108,18 +108,24 @@ export function SettingsPage() {
             Cho phép CampusMeet tạo sự kiện Calendar và liên kết phòng họp Google Meet thay mặt bạn.
           </p>
         </div>
-        {searchParams.get('google') === 'connected' && (
-          <p className="success" role="status">Đã kết nối tài khoản Google.</p>
-        )}
+        <p className={googleState === 'Đã kết nối' ? 'success' : undefined} role="status">
+          Trạng thái: <strong>{googleState}</strong>
+        </p>
         {googleMutation.isError && (
-          <p className="error" role="alert">{googleMutation.error.message}</p>
+          <p className="error" role="alert">
+            Chưa thể kết nối Google. Bạn có thể thử lại mà không ảnh hưởng đến lịch nội bộ.
+          </p>
         )}
         <button
           type="button"
           disabled={googleMutation.isPending}
           onClick={() => googleMutation.mutate()}
         >
-          {googleMutation.isPending ? 'Đang chuyển tới Google…' : 'Kết nối Google Calendar'}
+          {googleMutation.isPending
+            ? 'Đang chuyển tới Google…'
+            : googleState === 'Cần kết nối lại'
+              ? 'Kết nối lại Google'
+              : 'Kết nối Google Calendar'}
         </button>
       </section>
     </FeaturePage>

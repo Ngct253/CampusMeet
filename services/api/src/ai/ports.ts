@@ -22,3 +22,12 @@ export interface AIJobOrchestrator {
     payload: AIWorkerPayload;
   }): Promise<AIJob>;
 }
+
+export interface AIJobIdempotencyReader {
+  findExisting(input: {
+    actorId: string;
+    groupId: string;
+    operation: AIWorkerPayload['operation'];
+    idempotencyKey: string;
+  }): Promise<{ job: AIJob; payload: AIWorkerPayload } | null>;
+}

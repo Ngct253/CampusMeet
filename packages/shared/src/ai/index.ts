@@ -1,7 +1,6 @@
 import { z } from 'zod';
-import type { ISODateTime } from '../types';
-import { taskSchema } from '../dto';
 import { Priority } from '../enums';
+import type { ISODateTime } from '../types';
 
 export const aiJobStatusSchema = z.enum([
   'QUEUED',
@@ -136,51 +135,119 @@ export const minutesDraftSchema = z.object({
 });
 export type MinutesDraft = z.infer<typeof minutesDraftSchema>;
 
-export const taskProposalSchema = z.object({
-  proposalId: z.string().min(1),
-  groupId: z.string().min(1),
-  meetingId: z.string().min(1),
-  title: z.string().min(1).max(200),
-  description: z.string().max(5_000).optional(),
-  assigneeId: z.string().min(1).optional(),
-  priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional(),
-  dueAt: z.string().datetime({ offset: true }).optional(),
-  missingFields: z.array(z.enum(['assigneeId', 'priority'])),
-  citations: z.array(citationSchema).min(1).max(20),
-  status: proposalStatusSchema,
-  taskId: z.string().min(1).optional(),
-});
+export const taskProposalSchema = z
+  .object({
+    proposalId: z.string().min(1),
+    groupId: z.string().min(1),
+    meetingId: z.string().min(1),
+    title: z.string().min(1).max(200),
+    description: z.string().max(5_000).optional(),
+    assigneeId: z.string().min(1).optional(),
+    priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional(),
+    dueAt: z.string().datetime({ offset: true }).optional(),
+    missingFields: z.array(z.enum(['assigneeId', 'priority'])),
+    citations: z.array(citationSchema).min(1).max(20),
+    status: proposalStatusSchema,
+    confirmedTaskId: z.string().min(1).optional(),
+  })
+  .superRefine((proposal, context) => {
+    if (proposal.status === 'CONFIRMED' && !proposal.confirmedTaskId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['confirmedTaskId'],
+        message: 'confirmedTaskId is required for a confirmed proposal',
+      });
+    }
+    if (proposal.status === 'PENDING' && proposal.confirmedTaskId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['confirmedTaskId'],
+        message: 'A pending proposal cannot reference a confirmed task',
+      });
+    }
+  });
 export type TaskProposal = z.infer<typeof taskProposalSchema>;
 
-export const confirmTaskProposalRequestSchema = z
+export const confirmTaskProposalInputSchema = z
   .object({
-    assigneeId: z.string().trim().min(1),
-    priority: z.nativeEnum(Priority),
+    title: z.string().trim().min(1).max(200).optional(),
+    assigneeId: z.string().trim().min(1).optional(),
+    priority: z.nativeEnum(Priority).optional(),
+    dueAt: z.string().datetime({ offset: true }).optional(),
   })
   .strict();
-export type ConfirmTaskProposalRequest = z.infer<typeof confirmTaskProposalRequestSchema>;
+export type ConfirmTaskProposalRequest = z.infer<typeof confirmTaskProposalInputSchema>;
 
-export const confirmTaskProposalResponseSchema = z.object({
-  proposal: taskProposalSchema,
-  task: taskSchema,
-});
+const confirmedProposalTaskSchema = z
+  .object({
+    id: z.string().min(1),
+    groupId: z.string().min(1),
+    title: z.string().min(1).max(200),
+    assigneeId: z.string().min(1),
+    status: z.literal('TODO'),
+    priority: z.nativeEnum(Priority),
+    dueAt: z.string().datetime({ offset: true }).optional(),
+    sourceMeetingId: z.string().min(1),
+    createdBy: z.string().min(1),
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    version: z.literal(1),
+  })
+  .strict();
+
+export const confirmTaskProposalResponseSchema = z
+  .object({
+    task: confirmedProposalTaskSchema,
+    proposal: taskProposalSchema,
+  })
+  .strict();
 export type ConfirmTaskProposalResponse = z.infer<typeof confirmTaskProposalResponseSchema>;
 
-export const groupProgressSnapshotSchema = z.object({
-  groupId: z.string().min(1),
-  generatedAt: z.string().datetime({ offset: true }),
-  taskCounts: z.object({
-    total: z.number().int().nonnegative(),
-    todo: z.number().int().nonnegative(),
-    doing: z.number().int().nonnegative(),
-    done: z.number().int().nonnegative(),
-    overdue: z.number().int().nonnegative(),
-  }),
-  meetingCounts: z.object({
-    completed: z.number().int().nonnegative(),
-    upcoming: z.number().int().nonnegative(),
-  }),
-});
+const progressSnapshotCountSchema = z.number().int().nonnegative();
+const groupProgressSnapshotVersionSchema = z.number().int().min(1).max(9_999_999_999);
+
+export const groupProgressSnapshotSchema = z
+  .object({
+    groupId: z.string().min(1),
+    version: groupProgressSnapshotVersionSchema,
+    generatedAt: z.string().datetime({ offset: true }),
+    taskCounts: z
+      .object({
+        total: progressSnapshotCountSchema,
+        todo: progressSnapshotCountSchema,
+        doing: progressSnapshotCountSchema,
+        done: progressSnapshotCountSchema,
+        overdue: progressSnapshotCountSchema,
+      })
+      .strict(),
+    meetingCounts: z
+      .object({
+        completed: progressSnapshotCountSchema,
+        upcoming: progressSnapshotCountSchema,
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((snapshot, context) => {
+    if (
+      snapshot.taskCounts.total !==
+      snapshot.taskCounts.todo + snapshot.taskCounts.doing + snapshot.taskCounts.done
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Task total must equal todo + doing + done',
+        path: ['taskCounts', 'total'],
+      });
+    }
+
+    if (snapshot.taskCounts.overdue > snapshot.taskCounts.todo + snapshot.taskCounts.doing) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Overdue tasks cannot exceed unfinished tasks',
+        path: ['taskCounts', 'overdue'],
+      });
+    }
+  });
 export type GroupProgressSnapshot = z.infer<typeof groupProgressSnapshotSchema>;
 
 export const groupProgressAnalysisSchema = z.object({
@@ -291,7 +358,7 @@ export type GenerateMeetingDraftRequest = z.infer<typeof generateMeetingDraftReq
 
 export const groupProgressAnalysisRequestSchema = z
   .object({
-    snapshotVersion: z.number().int().positive().optional(),
+    snapshotVersion: groupProgressSnapshotVersionSchema.optional(),
   })
   .strict();
 export type GroupProgressAnalysisRequest = z.infer<typeof groupProgressAnalysisRequestSchema>;

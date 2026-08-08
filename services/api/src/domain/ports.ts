@@ -1,20 +1,30 @@
 import type {
   ActionItem,
+  ConfirmTaskProposalResponse,
+  ConfirmTaskProposalRequest,
+  Decision,
   ConvertActionItemToTaskResponse,
   CreateTaskRequest,
-  TaskProposal,
   Group,
   GroupRole,
   Meeting,
+  GoogleMeetingFailureClass,
+  GoogleMeetingSyncRecord,
+  GroupProgressSnapshot,
   MeetingMinutes,
   Notification,
   Priority,
   Task,
+  TaskProposal,
   TaskStatus,
   UpdateMeetingMinutesRequest,
 } from '@campusmeet/shared';
 
-export type ResolvedMeetingMinutesInput = Omit<UpdateMeetingMinutesRequest, 'actionItems'> & {
+export type ResolvedMeetingMinutesInput = Omit<
+  UpdateMeetingMinutesRequest,
+  'decisions' | 'actionItems'
+> & {
+  decisions: Decision[];
   actionItems: ActionItem[];
 };
 
@@ -23,17 +33,51 @@ export interface GroupRepository {
 }
 
 export interface MeetingRepository {
-  create(meeting: Meeting): Promise<Meeting>;
+  create(meeting: Meeting, sync?: GoogleMeetingSyncRecord): Promise<Meeting>;
   getById(id: string): Promise<Meeting | null>;
   resolveGroupId(id: string): Promise<string | null>;
   listByGroup(groupId: string, limit?: number, cursor?: string): Promise<MeetingPage>;
-  update(meeting: Meeting, expectedVersion: number): Promise<Meeting>;
+  update(
+    meeting: Meeting,
+    expectedVersion: number,
+    sync?: GoogleMeetingSyncRecord,
+    expectedSyncRevision?: number,
+  ): Promise<Meeting>;
   cancel(
     id: string,
     actorId: string,
     reason: string | undefined,
     expectedVersion?: number,
+    sync?: GoogleMeetingSyncRecord,
+    expectedSyncRevision?: number,
   ): Promise<Meeting>;
+}
+
+export interface GoogleMeetingSyncRepository {
+  get(meetingId: string): Promise<GoogleMeetingSyncRecord | null>;
+  createForLegacy(meeting: Meeting, now: string): Promise<GoogleMeetingSyncRecord>;
+  markSuccess(
+    meetingId: string,
+    syncRevision: number,
+    result: { googleEventId?: string; meetUrl?: string; attemptCount: number },
+  ): Promise<boolean>;
+  markFailure(
+    meetingId: string,
+    syncRevision: number,
+    failure: {
+      status: GoogleMeetingSyncRecord['syncStatus'];
+      attemptCount: number;
+      failureClass: GoogleMeetingFailureClass;
+      lastErrorCode: string;
+      lastErrorAt: string;
+      nextRetryAt?: string;
+    },
+  ): Promise<boolean>;
+  manualRetry(
+    meeting: Meeting,
+    expectedSyncRevision: number,
+    now: string,
+  ): Promise<GoogleMeetingSyncRecord>;
 }
 
 export interface MeetingPage {
@@ -96,6 +140,19 @@ export interface ActionItemTaskRepository {
   create(input: ActionItemTaskWrite): Promise<ConvertActionItemToTaskResponse>;
 }
 
+export interface TaskProposalConfirmationWrite {
+  actorId: string;
+  proposal: TaskProposal;
+  input: Required<Pick<ConfirmTaskProposalRequest, 'title' | 'assigneeId' | 'priority'>> &
+    Pick<ConfirmTaskProposalRequest, 'dueAt'>;
+}
+
+export interface TaskProposalConfirmationRepository {
+  getById(proposalId: string): Promise<TaskProposal | null>;
+  getConfirmed(proposal: TaskProposal): Promise<ConfirmTaskProposalResponse>;
+  confirm(input: TaskProposalConfirmationWrite): Promise<ConfirmTaskProposalResponse>;
+}
+
 export interface TaskRepository {
   listByAssignee(userId: string): Promise<Task[]>;
   getById(id: string): Promise<Task | undefined>;
@@ -109,15 +166,23 @@ export interface TaskRepository {
   ): Promise<Task>;
 }
 
-export interface TaskProposalConfirmationRepository {
-  getById(proposalId: string): Promise<TaskProposal | undefined>;
-  claim(proposalId: string, actorId: string, idempotencyKey: string): Promise<TaskProposal>;
-  markExecuted(
-    proposalId: string,
-    actorId: string,
-    idempotencyKey: string,
-    taskId: string,
-  ): Promise<TaskProposal>;
+export interface GroupTaskReader {
+  listByGroup(groupId: string): Promise<Task[]>;
+}
+
+export interface GroupProgressSnapshotRepository {
+  getLatest(groupId: string): Promise<GroupProgressSnapshot | null>;
+  getVersion(groupId: string, version: number): Promise<GroupProgressSnapshot | null>;
+  publish(
+    snapshot: GroupProgressSnapshot,
+    expectedPreviousVersion: number,
+    generationId: string,
+  ): Promise<void>;
+}
+
+export interface GroupProgressSnapshotProvider {
+  getVersion(groupId: string, version: number): Promise<GroupProgressSnapshot>;
+  generate(groupId: string): Promise<GroupProgressSnapshot>;
 }
 
 export interface NotificationRepository {
@@ -125,11 +190,23 @@ export interface NotificationRepository {
 }
 
 export interface GoogleCalendarGateway {
-  createEvent(meeting: Meeting): Promise<{
+  ensureScheduledMeeting(
+    meeting: Meeting,
+    current: Pick<GoogleMeetingSyncRecord, 'googleEventId' | 'meetUrl'>,
+  ): Promise<{
     eventId: string;
     meetUrl?: string;
-    googleMeetingId?: string;
   }>;
+  ensureCancelledMeeting(meeting: Meeting, googleEventId?: string): Promise<void>;
+}
+
+export interface GoogleSyncRetryScheduler {
+  schedule(input: {
+    meetingId: string;
+    syncRevision: number;
+    attemptCount: number;
+    runAt: string;
+  }): Promise<void>;
 }
 
 export interface ReminderSchedulerGateway {

@@ -107,7 +107,7 @@ Option 4A is accepted. Its complete runtime design was accepted on 2026-08-07 in
 - Users can recognize an appropriate pending/failed state under UX defined in the follow-up.
 - Retry must not create duplicate Google events.
 
-The follow-up locks the status enum, separate sync record in `meeting-data`, DynamoDB Stream initial trigger, `syncRevision`, current-state reconciliation, at-most-one active Google event, EventBridge Scheduler retry schedule, manual retry, UX, security, and observability. Runtime implementation and AWS verification remain incomplete.
+The follow-up locks the status enum, separate sync record in `meeting-data`, DynamoDB Stream initial trigger, `syncRevision`, current-state reconciliation, at-most-one active Google event, EventBridge Scheduler retry schedule, manual retry, UX, security, and observability. Source implementation is locally verified; AWS and authenticated-browser verification remain incomplete.
 
 ## Decision authority
 

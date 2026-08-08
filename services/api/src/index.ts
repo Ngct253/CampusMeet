@@ -35,14 +35,15 @@ import {
   groupMeetingsHandler,
   meetingDetailHandler,
   myMeetingsHandler,
+  retryGoogleSyncHandler,
 } from './handlers/meetings';
 import { meHandler } from './handlers/me';
 import { minutesHandler } from './handlers/minutes';
 import { actionItemTaskHandler } from './handlers/action-item-tasks';
+import { taskProposalConfirmationHandler } from './handlers/task-proposals';
 import { notificationsHandler, readNotificationHandler } from './handlers/notifications';
 import { meetContextHandler } from './handlers/meet-context';
 import { tasksHandler, taskStatusHandler } from './handlers/tasks';
-import { confirmTaskProposalHandler } from './handlers/task-proposals';
 import { getRequestId } from './utils/request';
 import { notImplemented } from './utils/response';
 import { createRouter } from './utils/router';
@@ -65,6 +66,11 @@ const findRoute = createRouter([
   { method: 'GET', path: '/meetings', handler: myMeetingsHandler },
   { method: 'ANY', path: '/meetings/:meetingId', handler: meetingDetailHandler },
   { method: 'POST', path: '/meetings/:meetingId/cancel', handler: cancelMeetingHandler },
+  {
+    method: 'POST',
+    path: '/meetings/:meetingId/google-sync/retry',
+    handler: retryGoogleSyncHandler,
+  },
   { method: 'GET', path: '/meetings/:meetingId/attachments', handler: meetingAttachmentsHandler },
   {
     method: 'POST',
@@ -117,15 +123,15 @@ const findRoute = createRouter([
   { method: 'POST', path: '/meetings/:meetingId/ai/task-proposals', handler: taskProposalsHandler },
   {
     method: 'POST',
-    path: '/ai/task-proposals/:proposalId/confirm',
-    handler: confirmTaskProposalHandler,
-  },
-  {
-    method: 'POST',
     path: '/groups/:groupId/ai/progress-analysis',
     handler: progressAnalysisHandler,
   },
   { method: 'GET', path: '/ai/jobs/:aiJobId', handler: aiJobDetailHandler },
+  {
+    method: 'POST',
+    path: '/ai/task-proposals/:proposalId/confirm',
+    handler: taskProposalConfirmationHandler,
+  },
 ]);
 
 export const handler: APIGatewayProxyHandlerV2 = async (event, context, callback) => {
@@ -147,3 +153,4 @@ export const handler: APIGatewayProxyHandlerV2 = async (event, context, callback
 };
 
 export { reminderHandler } from './handlers/reminder';
+export { googleSyncWorkerHandler } from './handlers/google-sync-worker';

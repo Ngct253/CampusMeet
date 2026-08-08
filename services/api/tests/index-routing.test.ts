@@ -11,4 +11,13 @@ describe('application API routing', () => {
 
     expect(response).toMatchObject({ statusCode: 200 });
   });
+
+  it('registers the exact POST Task Proposal confirmation route', async () => {
+    const event = apiEvent('/ai/task-proposals/proposal-1/confirm');
+    event.requestContext.http.method = 'POST';
+
+    const response = await handler(event, {} as never, () => undefined);
+
+    expect(response).toMatchObject({ statusCode: 401 });
+  });
 });

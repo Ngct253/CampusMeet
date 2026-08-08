@@ -1,27 +1,33 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type {
-  Attachment,
-  CreateMeetingRequest,
-  GroupDetails,
-  Meeting,
-  MeetingMinutes,
-  MeetingTimelineResponse,
-  UpdateMeetingMinutesRequest,
-  UploadAttachmentRequest,
+import {
+  Priority,
+  type ActionItem,
+  type Attachment,
+  type ConvertActionItemToTaskRequest,
+  type CreateMeetingRequest,
+  type GroupDetails,
+  type Meeting,
+  type MeetingMinutes,
+  type MeetingTimelineResponse,
+  type UpdateMeetingMinutesRequest,
+  type UploadAttachmentRequest,
 } from '@campusmeet/shared';
 import { useAuth } from '../../../auth/AuthProvider';
 import { FeaturePage } from '../../../components/FeaturePage';
+import { environment } from '../../../config/environment';
 import { ApiClientError } from '../../../lib/api-client';
 import { MeetingAIWorkspace } from '../../ai';
 import { getGroup } from '../../groups/service';
 import {
   cancelMeeting,
+  convertActionItemToTask,
   createMeeting,
   getMeeting,
   getMeetingMinutes,
   getMeetings,
+  retryGoogleMeetingSync,
   updateMeeting,
   updateMeetingMinutes,
 } from '../service';
@@ -34,6 +40,7 @@ import {
 import './MeetingPages.css';
 
 const statusLabel: Record<string, string> = {
+  DRAFT: 'Bản nháp',
   SCHEDULED: 'Đã lên lịch',
   READY: 'Sẵn sàng',
   CANCELLED: 'Đã hủy',
@@ -111,12 +118,48 @@ const createAgendaDraft = (item?: Meeting['agenda'][number]): AgendaDraft => ({
   description: item?.description ?? '',
 });
 
+const agendaPresets = [
+  {
+    id: 'weekly-progress',
+    label: 'Họp tiến độ tuần',
+    items: ['Mở đầu và cập nhật nhanh', 'Kết quả công việc tuần qua', 'Khó khăn cần hỗ trợ', 'Kế hoạch tuần tới', 'Kết luận và phân công'],
+  },
+  {
+    id: 'kickoff',
+    label: 'Họp khởi động dự án',
+    items: ['Mục tiêu và phạm vi dự án', 'Vai trò và trách nhiệm', 'Kế hoạch và các mốc chính', 'Rủi ro ban đầu', 'Việc cần làm tiếp theo'],
+  },
+  {
+    id: 'sprint-review',
+    label: 'Họp đánh giá chu kỳ',
+    items: ['Mục tiêu của chu kỳ', 'Kết quả đã hoàn thành', 'Trình bày kết quả', 'Ý kiến phản hồi', 'Công việc chuyển tiếp'],
+  },
+  {
+    id: 'retrospective',
+    label: 'Họp nhìn lại',
+    items: ['Điều đã làm tốt', 'Điều cần cải thiện', 'Giải pháp đề xuất', 'Hành động cho chu kỳ tới'],
+  },
+  {
+    id: 'decision',
+    label: 'Họp ra quyết định',
+    items: ['Bối cảnh', 'Các phương án', 'Tiêu chí đánh giá', 'Quyết định', 'Người phụ trách và hạn'],
+  },
+  { id: 'custom', label: 'Tạo chương trình riêng', items: [] },
+] as const;
+
+type AgendaPresetId = (typeof agendaPresets)[number]['id'];
+
+const agendaFromPreset = (presetId: AgendaPresetId) =>
+  agendaPresets
+    .find(({ id }) => id === presetId)!
+    .items.map((title) => ({ ...createAgendaDraft(), title }));
+
 type MinutesDraft = Omit<UpdateMeetingMinutesRequest, 'expectedVersion'>;
 
 const minutesDraft = (minutes?: MeetingMinutes): MinutesDraft => ({
   summary: minutes?.summary ?? '',
   discussion: minutes?.discussion ?? '',
-  decisions: minutes?.decisions.map(({ content }) => ({ content })) ?? [],
+  decisions: minutes?.decisions.map(({ id, content }) => ({ id, content })) ?? [],
   actionItems:
     minutes?.actionItems.map(({ id, content, assigneeId, dueAt }) => ({
       id,
@@ -125,6 +168,20 @@ const minutesDraft = (minutes?: MeetingMinutes): MinutesDraft => ({
       ...(dueAt ? { dueAt } : {}),
     })) ?? [],
 });
+
+const conversionErrorMessage = (error: Error) => {
+  if (!(error instanceof ApiClientError)) return error.message;
+  if (error.status === 400) return 'Thông tin tạo công việc chưa hợp lệ.';
+  if (error.status === 403) return 'Bạn không còn quyền Quản trị viên để tạo công việc.';
+  if (error.status === 404)
+    return 'Việc cần thực hiện không còn trong phiên bản biên bản mới nhất.';
+  if (error.status === 409)
+    return 'Biên bản đã thay đổi hoặc mục này vừa được chuyển thành công việc ở nơi khác.';
+  if (error.status === 422) return error.message;
+  return error.status >= 500
+    ? 'CampusMeet đang tạm thời gặp sự cố. Vui lòng thử lại.'
+    : error.message;
+};
 
 function MinutesReadView({ minutes, group }: { minutes: MeetingMinutes; group?: GroupDetails }) {
   return (
@@ -159,6 +216,7 @@ function MinutesReadView({ minutes, group }: { minutes: MeetingMinutes; group?: 
                 {item.content}
                 {item.assigneeId ? ` — ${memberLabel(group, item.assigneeId)}` : ''}
                 {item.dueAt ? ` — hạn ${formatDate(item.dueAt)}` : ''}
+                {item.taskId ? ' — Đã chuyển thành công việc' : ''}
               </li>
             ))}
           </ul>
@@ -170,15 +228,253 @@ function MinutesReadView({ minutes, group }: { minutes: MeetingMinutes; group?: 
   );
 }
 
+function ActionItemTaskConversionPanel({
+  meetingId,
+  minutes,
+  group,
+  currentUserId,
+  disabled,
+  queryKey,
+  onConverted,
+}: {
+  meetingId: string;
+  minutes: MeetingMinutes;
+  group: GroupDetails;
+  currentUserId: string;
+  disabled: boolean;
+  queryKey: readonly unknown[];
+  onConverted: (minutes: MeetingMinutes) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [selectedActionId, setSelectedActionId] = useState('');
+  const [priority, setPriority] = useState<Priority>(Priority.MEDIUM);
+  const [assigneeId, setAssigneeId] = useState('');
+  const [title, setTitle] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const submittingRef = useRef(false);
+  const activeMembers = group.members.filter(({ membership }) => membership.active);
+
+  useEffect(() => {
+    if (
+      selectedActionId &&
+      !minutes.actionItems.some((actionItem) => actionItem.id === selectedActionId)
+    ) {
+      setSelectedActionId('');
+      setPriority(Priority.MEDIUM);
+      setAssigneeId('');
+      setTitle('');
+    }
+  }, [minutes.actionItems, selectedActionId]);
+
+  const mutation = useMutation({
+    mutationFn: ({
+      actionItem,
+      input,
+    }: {
+      actionItem: ActionItem;
+      input: ConvertActionItemToTaskRequest;
+    }) => convertActionItemToTask(meetingId, actionItem.id, input),
+    onMutate: () => {
+      setErrorMessage('');
+      setSuccessMessage('');
+    },
+    onSuccess: async ({ task, minutes: authoritativeMinutes }) => {
+      queryClient.setQueryData(queryKey, authoritativeMinutes);
+      onConverted(authoritativeMinutes);
+      setSelectedActionId('');
+      setPriority(Priority.MEDIUM);
+      setAssigneeId('');
+      setTitle('');
+      setErrorMessage('');
+      setSuccessMessage('Đã tạo công việc từ biên bản.');
+      if (task.assigneeId === currentUserId) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+          queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        ]);
+      }
+    },
+    onError: async (error) => {
+      setErrorMessage(conversionErrorMessage(error));
+      if (error instanceof ApiClientError && error.status === 403) {
+        await queryClient.invalidateQueries({ queryKey: ['groups', minutes.groupId] });
+      } else if (
+        error instanceof ApiClientError &&
+        (error.status === 404 || error.status === 409)
+      ) {
+        await queryClient.invalidateQueries({ queryKey });
+      }
+    },
+    onSettled: () => {
+      submittingRef.current = false;
+    },
+  });
+
+  const openForm = (actionItemId: string) => {
+    if (disabled || mutation.isPending) return;
+    setSelectedActionId(actionItemId);
+    setPriority(Priority.MEDIUM);
+    setAssigneeId('');
+    setTitle('');
+    setErrorMessage('');
+    setSuccessMessage('');
+  };
+
+  const submit = (actionItem: ActionItem) => {
+    if (disabled || submittingRef.current || mutation.isPending) return;
+    const normalizedTitle = title.trim();
+    const normalizedAssigneeId = assigneeId.trim();
+    if (!actionItem.assigneeId && !normalizedAssigneeId) {
+      setErrorMessage('Vui lòng chọn người phụ trách đang hoạt động.');
+      return;
+    }
+    if (actionItem.content.length > 200 && !normalizedTitle) {
+      setErrorMessage('Nội dung vượt quá 200 ký tự; vui lòng nhập tiêu đề ngắn gọn.');
+      return;
+    }
+    const input: ConvertActionItemToTaskRequest = {
+      expectedMinutesVersion: minutes.version,
+      priority,
+      ...(!actionItem.assigneeId ? { assigneeId: normalizedAssigneeId } : {}),
+      ...(normalizedTitle ? { title: normalizedTitle } : {}),
+    };
+    submittingRef.current = true;
+    mutation.mutate({ actionItem, input });
+  };
+
+  return (
+    <section className="action-item-task-panel" aria-label="Tạo công việc từ biên bản">
+      <div>
+        <h3>Tạo công việc từ biên bản</h3>
+        <p>Chỉ các việc đã lưu trong phiên bản {minutes.version} mới có thể chuyển đổi.</p>
+        {disabled && <p className="minutes-dirty">Hãy lưu biên bản trước khi tạo công việc.</p>}
+      </div>
+      <ul className="action-item-task-list">
+        {minutes.actionItems.map((actionItem, index) => {
+          const selected = selectedActionId === actionItem.id;
+          return (
+            <li
+              key={actionItem.id || `persisted-action-${index}`}
+              className="action-item-task-entry"
+            >
+              <div className="action-item-task-heading">
+                <span>
+                  <strong>{actionItem.content}</strong>
+                  {actionItem.assigneeId && (
+                    <small>Người phụ trách: {memberLabel(group, actionItem.assigneeId)}</small>
+                  )}
+                </span>
+                {actionItem.taskId ? (
+                  <span className="action-item-task-converted">Đã chuyển thành công việc</span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={disabled || mutation.isPending}
+                    onClick={() => openForm(actionItem.id)}
+                  >
+                    Tạo công việc
+                  </button>
+                )}
+              </div>
+              {selected && !actionItem.taskId && (
+                <div className="action-item-task-form">
+                  <label>
+                    Mức ưu tiên
+                    <select
+                      aria-label={`Mức ưu tiên cho ${actionItem.content}`}
+                      value={priority}
+                      disabled={mutation.isPending}
+                      onChange={(event) => setPriority(event.target.value as Priority)}
+                    >
+                      <option value={Priority.LOW}>Thấp</option>
+                      <option value={Priority.MEDIUM}>Vừa</option>
+                      <option value={Priority.HIGH}>Cao</option>
+                    </select>
+                  </label>
+                  {!actionItem.assigneeId && (
+                    <label>
+                      Người phụ trách
+                      <select
+                        aria-label={`Người phụ trách công việc ${actionItem.content}`}
+                        value={assigneeId}
+                        disabled={mutation.isPending}
+                        onChange={(event) => setAssigneeId(event.target.value)}
+                        required
+                      >
+                        <option value="">Chọn người phụ trách</option>
+                        {activeMembers.map(({ membership, user }) => (
+                          <option key={membership.userId} value={membership.userId}>
+                            {user?.displayName || user?.email || membership.userId}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label>
+                    Tiêu đề công việc{' '}
+                    <span>
+                      {actionItem.content.length > 200 ? '(bắt buộc)' : '(không bắt buộc)'}
+                    </span>
+                    <input
+                      aria-label={`Tiêu đề công việc ${actionItem.content}`}
+                      value={title}
+                      disabled={mutation.isPending}
+                      maxLength={200}
+                      required={actionItem.content.length > 200}
+                      onChange={(event) => setTitle(event.target.value)}
+                    />
+                  </label>
+                  <div className="action-item-task-actions">
+                    <button
+                      type="button"
+                      disabled={disabled || mutation.isPending}
+                      onClick={() => submit(actionItem)}
+                    >
+                      {mutation.isPending ? 'Đang tạo…' : 'Xác nhận tạo công việc'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={mutation.isPending}
+                      onClick={() => {
+                        setSelectedActionId('');
+                        setErrorMessage('');
+                      }}
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {errorMessage && (
+        <p className="error" role="alert">
+          {errorMessage}
+        </p>
+      )}
+      {successMessage && (
+        <p className="minutes-success" role="status">
+          {successMessage}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function MinutesEditor({
   meetingId,
   initial,
   group,
+  currentUserId,
   queryKey,
 }: {
   meetingId: string;
   initial?: MeetingMinutes;
   group: GroupDetails;
+  currentUserId: string;
   queryKey: readonly unknown[];
 }) {
   const queryClient = useQueryClient();
@@ -228,185 +524,206 @@ function MinutesEditor({
     if (!mutation.isPending) mutation.mutate();
   };
 
+  const applyConvertedMinutes = (minutes: MeetingMinutes) => {
+    setDraft(minutesDraft(minutes));
+    setExpectedVersion(minutes.version);
+    setDirty(false);
+    setHasConflict(false);
+    setMessage('');
+  };
+
   return (
-    <form className="minutes-editor" onSubmit={submit}>
-      <div className="minutes-editor-heading">
-        <span>Đang chỉnh sửa từ phiên bản {expectedVersion}</span>
-        {dirty && <span className="minutes-dirty">Có thay đổi chưa lưu</span>}
-      </div>
-      <label>
-        Tóm tắt
-        <textarea
-          value={draft.summary}
-          onChange={(event) => changeDraft({ ...draft, summary: event.target.value })}
-          minLength={1}
-          maxLength={2000}
-          rows={4}
-          required
+    <>
+      <form className="minutes-editor" onSubmit={submit}>
+        <div className="minutes-editor-heading">
+          <span>Đang chỉnh sửa từ phiên bản {expectedVersion}</span>
+          {dirty && <span className="minutes-dirty">Có thay đổi chưa lưu</span>}
+        </div>
+        <label>
+          Tóm tắt
+          <textarea
+            value={draft.summary}
+            onChange={(event) => changeDraft({ ...draft, summary: event.target.value })}
+            minLength={1}
+            maxLength={2000}
+            rows={4}
+            required
+          />
+        </label>
+        <label>
+          Nội dung thảo luận
+          <textarea
+            value={draft.discussion}
+            onChange={(event) => changeDraft({ ...draft, discussion: event.target.value })}
+            maxLength={10000}
+            rows={7}
+          />
+        </label>
+        <fieldset>
+          <legend>Quyết định</legend>
+          {draft.decisions.map((decision, index) => (
+            <div className="minutes-row" key={decision.id ?? `decision-new-${index}`}>
+              <input
+                aria-label={`Quyết định ${index + 1}`}
+                value={decision.content}
+                onChange={(event) =>
+                  changeDraft({
+                    ...draft,
+                    decisions: draft.decisions.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, content: event.target.value } : item,
+                    ),
+                  })
+                }
+                maxLength={1000}
+                required
+              />
+              <button
+                type="button"
+                disabled={mutation.isPending}
+                onClick={() =>
+                  changeDraft({
+                    ...draft,
+                    decisions: draft.decisions.filter((_, itemIndex) => itemIndex !== index),
+                  })
+                }
+              >
+                Xóa
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            disabled={mutation.isPending || draft.decisions.length >= 50}
+            onClick={() =>
+              changeDraft({ ...draft, decisions: [...draft.decisions, { content: '' }] })
+            }
+          >
+            Thêm quyết định
+          </button>
+        </fieldset>
+        <fieldset>
+          <legend>Việc cần thực hiện</legend>
+          {draft.actionItems.map((action, index) => (
+            <div className="minutes-action-row" key={action.id ?? `action-new-${index}`}>
+              <input
+                aria-label={`Việc cần thực hiện ${index + 1}`}
+                value={action.content}
+                onChange={(event) =>
+                  changeDraft({
+                    ...draft,
+                    actionItems: draft.actionItems.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, content: event.target.value } : item,
+                    ),
+                  })
+                }
+                maxLength={1000}
+                required
+              />
+              <select
+                aria-label={`Người phụ trách ${index + 1}`}
+                value={action.assigneeId ?? ''}
+                onChange={(event) =>
+                  changeDraft({
+                    ...draft,
+                    actionItems: draft.actionItems.map((item, itemIndex) =>
+                      itemIndex === index
+                        ? {
+                            ...(item.id ? { id: item.id } : {}),
+                            content: item.content,
+                            ...(event.target.value ? { assigneeId: event.target.value } : {}),
+                            ...(item.dueAt ? { dueAt: item.dueAt } : {}),
+                          }
+                        : item,
+                    ),
+                  })
+                }
+              >
+                <option value="">Chưa giao</option>
+                {group.members.map(({ membership, user }) => (
+                  <option key={membership.userId} value={membership.userId}>
+                    {user?.displayName || user?.email || membership.userId}
+                  </option>
+                ))}
+              </select>
+              <input
+                aria-label={`Hạn hoàn thành ${index + 1}`}
+                type="datetime-local"
+                value={action.dueAt ? toLocalInput(action.dueAt) : ''}
+                onChange={(event) =>
+                  changeDraft({
+                    ...draft,
+                    actionItems: draft.actionItems.map((item, itemIndex) =>
+                      itemIndex === index
+                        ? {
+                            ...(item.id ? { id: item.id } : {}),
+                            content: item.content,
+                            ...(item.assigneeId ? { assigneeId: item.assigneeId } : {}),
+                            ...(event.target.value
+                              ? { dueAt: new Date(event.target.value).toISOString() }
+                              : {}),
+                          }
+                        : item,
+                    ),
+                  })
+                }
+              />
+              <button
+                type="button"
+                disabled={mutation.isPending}
+                onClick={() =>
+                  changeDraft({
+                    ...draft,
+                    actionItems: draft.actionItems.filter((_, itemIndex) => itemIndex !== index),
+                  })
+                }
+              >
+                Xóa
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            disabled={mutation.isPending || draft.actionItems.length >= 100}
+            onClick={() =>
+              changeDraft({ ...draft, actionItems: [...draft.actionItems, { content: '' }] })
+            }
+          >
+            Thêm việc cần thực hiện
+          </button>
+        </fieldset>
+        {message && (
+          <p className={mutation.isError ? 'error' : 'minutes-success'} role="status">
+            {message}
+          </p>
+        )}
+        {hasConflict && initial && initial.version !== expectedVersion && (
+          <button
+            type="button"
+            onClick={() => {
+              setExpectedVersion(initial.version);
+              setHasConflict(false);
+              setMessage(`Đang đối chiếu với phiên bản ${initial.version}; bản nháp vẫn được giữ.`);
+            }}
+          >
+            Dùng phiên bản mới làm mốc
+          </button>
+        )}
+        <button type="submit" disabled={mutation.isPending}>
+          {mutation.isPending ? 'Đang lưu…' : 'Lưu biên bản'}
+        </button>
+      </form>
+      {initial && (
+        <ActionItemTaskConversionPanel
+          meetingId={meetingId}
+          minutes={initial}
+          group={group}
+          currentUserId={currentUserId}
+          disabled={dirty || mutation.isPending}
+          queryKey={queryKey}
+          onConverted={applyConvertedMinutes}
         />
-      </label>
-      <label>
-        Nội dung thảo luận
-        <textarea
-          value={draft.discussion}
-          onChange={(event) => changeDraft({ ...draft, discussion: event.target.value })}
-          maxLength={10000}
-          rows={7}
-        />
-      </label>
-      <fieldset>
-        <legend>Quyết định</legend>
-        {draft.decisions.map((decision, index) => (
-          <div className="minutes-row" key={`decision-${index}`}>
-            <input
-              aria-label={`Quyết định ${index + 1}`}
-              value={decision.content}
-              onChange={(event) =>
-                changeDraft({
-                  ...draft,
-                  decisions: draft.decisions.map((item, itemIndex) =>
-                    itemIndex === index ? { content: event.target.value } : item,
-                  ),
-                })
-              }
-              maxLength={1000}
-              required
-            />
-            <button
-              type="button"
-              disabled={mutation.isPending}
-              onClick={() =>
-                changeDraft({
-                  ...draft,
-                  decisions: draft.decisions.filter((_, itemIndex) => itemIndex !== index),
-                })
-              }
-            >
-              Xóa
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          disabled={mutation.isPending || draft.decisions.length >= 50}
-          onClick={() =>
-            changeDraft({ ...draft, decisions: [...draft.decisions, { content: '' }] })
-          }
-        >
-          Thêm quyết định
-        </button>
-      </fieldset>
-      <fieldset>
-        <legend>Việc cần thực hiện</legend>
-        {draft.actionItems.map((action, index) => (
-          <div className="minutes-action-row" key={action.id ?? `action-new-${index}`}>
-            <input
-              aria-label={`Việc cần thực hiện ${index + 1}`}
-              value={action.content}
-              onChange={(event) =>
-                changeDraft({
-                  ...draft,
-                  actionItems: draft.actionItems.map((item, itemIndex) =>
-                    itemIndex === index ? { ...item, content: event.target.value } : item,
-                  ),
-                })
-              }
-              maxLength={1000}
-              required
-            />
-            <select
-              aria-label={`Người phụ trách ${index + 1}`}
-              value={action.assigneeId ?? ''}
-              onChange={(event) =>
-                changeDraft({
-                  ...draft,
-                  actionItems: draft.actionItems.map((item, itemIndex) =>
-                    itemIndex === index
-                      ? {
-                          ...(item.id ? { id: item.id } : {}),
-                          content: item.content,
-                          ...(event.target.value ? { assigneeId: event.target.value } : {}),
-                          ...(item.dueAt ? { dueAt: item.dueAt } : {}),
-                        }
-                      : item,
-                  ),
-                })
-              }
-            >
-              <option value="">Chưa giao</option>
-              {group.members.map(({ membership, user }) => (
-                <option key={membership.userId} value={membership.userId}>
-                  {user?.displayName || user?.email || membership.userId}
-                </option>
-              ))}
-            </select>
-            <input
-              aria-label={`Hạn hoàn thành ${index + 1}`}
-              type="datetime-local"
-              value={action.dueAt ? toLocalInput(action.dueAt) : ''}
-              onChange={(event) =>
-                changeDraft({
-                  ...draft,
-                  actionItems: draft.actionItems.map((item, itemIndex) =>
-                    itemIndex === index
-                      ? {
-                          ...(item.id ? { id: item.id } : {}),
-                          content: item.content,
-                          ...(item.assigneeId ? { assigneeId: item.assigneeId } : {}),
-                          ...(event.target.value
-                            ? { dueAt: new Date(event.target.value).toISOString() }
-                            : {}),
-                        }
-                      : item,
-                  ),
-                })
-              }
-            />
-            <button
-              type="button"
-              disabled={mutation.isPending}
-              onClick={() =>
-                changeDraft({
-                  ...draft,
-                  actionItems: draft.actionItems.filter((_, itemIndex) => itemIndex !== index),
-                })
-              }
-            >
-              Xóa
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          disabled={mutation.isPending || draft.actionItems.length >= 100}
-          onClick={() =>
-            changeDraft({ ...draft, actionItems: [...draft.actionItems, { content: '' }] })
-          }
-        >
-          Thêm việc cần thực hiện
-        </button>
-      </fieldset>
-      {message && (
-        <p className={mutation.isError ? 'error' : 'minutes-success'} role="status">
-          {message}
-        </p>
       )}
-      {hasConflict && initial && initial.version !== expectedVersion && (
-        <button
-          type="button"
-          onClick={() => {
-            setExpectedVersion(initial.version);
-            setHasConflict(false);
-            setMessage(`Đang đối chiếu với phiên bản ${initial.version}; bản nháp vẫn được giữ.`);
-          }}
-        >
-          Dùng phiên bản mới làm mốc
-        </button>
-      )}
-      <button type="submit" disabled={mutation.isPending}>
-        {mutation.isPending ? 'Đang lưu…' : 'Lưu biên bản'}
-      </button>
-    </form>
+    </>
   );
 }
 
@@ -434,6 +751,28 @@ const supportedContentTypes = [
   'audio/webm',
   'audio/mp4',
 ] as const;
+
+const documentContentTypes = supportedContentTypes.filter(
+  (contentType) => !contentType.startsWith('audio/'),
+);
+
+const attachmentStatusLabels: Record<Attachment['status'], string> = {
+  PENDING_UPLOAD: 'Đang tải lên',
+  UPLOADED: 'Đang xử lý',
+  READY: 'Sẵn sàng',
+  REJECTED: 'Xử lý thất bại',
+  EXPIRED: 'Đã hết hạn',
+};
+
+const googleSyncLabel: Record<string, string> = {
+  NOT_REQUESTED: 'Chưa đồng bộ',
+  PENDING: 'Đang đồng bộ',
+  READY: 'Đã đồng bộ',
+  SYNCED: 'Đã đồng bộ',
+  FAILED: 'Đồng bộ thất bại',
+  FAILED_RETRYABLE: 'Đồng bộ thất bại',
+  ACTION_REQUIRED: 'Cần kết nối lại',
+};
 
 type SupportedContentType = (typeof supportedContentTypes)[number];
 
@@ -497,7 +836,7 @@ function AttachmentListItem({
         </small>
       </div>
       <span className={`meeting-status meeting-status-${attachment.status.toLowerCase()}`}>
-        {attachment.status}
+        {attachmentStatusLabels[attachment.status]}
       </span>
       <button
         type="button"
@@ -525,12 +864,12 @@ function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
         SupportedContentType | undefined;
       if (
         !contentType ||
-        !supportedContentTypes.includes(contentType as (typeof supportedContentTypes)[number])
+        !documentContentTypes.includes(contentType as (typeof documentContentTypes)[number])
       ) {
-        throw new Error('Định dạng file này chưa được hỗ trợ.');
+        throw new Error('Định dạng tệp này chưa được hỗ trợ.');
       }
       if (file.size > maxAttachmentSizeBytes) {
-        throw new Error('File vượt quá giới hạn 50 MB.');
+        throw new Error('Tệp vượt quá giới hạn 50 MB.');
       }
       const checksum = await checksumFile(file);
       const target = await createAttachmentUploadTarget(meeting.id, {
@@ -549,7 +888,7 @@ function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
         body: file,
       });
       if (!response.ok) {
-        throw new Error('Không thể tải file lên kho lưu trữ.');
+        throw new Error('Không thể tải tệp lên kho lưu trữ.');
       }
       return completeAttachmentUpload(meeting.id, target.attachment.attachmentId, {
         attachmentId: target.attachment.attachmentId,
@@ -573,16 +912,16 @@ function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
   return (
     <section className="app-panel meeting-attachment-panel">
       <span className="section-kicker">Tệp đính kèm</span>
-      <h2>Upload tài liệu hoặc audio</h2>
+      <h2>Tải tài liệu lên</h2>
       <p>
-        Tối đa 10 file cho mỗi cuộc họp, mỗi file tối đa 50 MB. Sau khi upload, hệ thống sẽ tạo một
-        AIJob để xử lý tiếp.
+        Tối đa 10 tệp cho mỗi cuộc họp, mỗi tệp tối đa 50 MB. Tài liệu sẽ được kiểm tra và xử lý sau
+        khi tải lên.
       </p>
       <label className="meeting-upload-field">
-        Chọn file
+        Chọn tài liệu
         <input
           type="file"
-          accept={supportedContentTypes.join(',')}
+          accept={documentContentTypes.join(',')}
           onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
         />
       </label>
@@ -599,7 +938,7 @@ function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
           if (selectedFile) void uploadMutation.mutateAsync(selectedFile);
         }}
       >
-        {uploadMutation.isPending ? 'Đang upload…' : 'Upload file'}
+        {uploadMutation.isPending ? 'Đang tải lên…' : 'Tải tài liệu lên'}
       </button>
       {uploadMutation.isError && (
         <p className="error" role="alert">
@@ -608,11 +947,11 @@ function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
       )}
       {attachmentsQuery.isPending ? (
         <div className="meeting-attachment-state" role="status">
-          Đang tải danh sách file…
+          Đang tải danh sách tài liệu…
         </div>
       ) : attachmentsQuery.isError ? (
         <div className="meeting-attachment-state error" role="status">
-          <strong>Không tải được danh sách file</strong>
+          <strong>Không tải được danh sách tài liệu</strong>
           <button
             type="button"
             className="button-quiet"
@@ -633,7 +972,7 @@ function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
           ))}
         </ul>
       ) : (
-        <div className="meeting-attachment-state">Chưa có file nào được gắn vào cuộc họp này.</div>
+        <div className="meeting-attachment-state">Chưa có tài liệu nào trong cuộc họp này.</div>
       )}
     </section>
   );
@@ -672,6 +1011,22 @@ function MeetingForm({
     [...(initial?.agenda ?? [])].sort((a, b) => a.order - b.order).map(createAgendaDraft),
   );
   const [agendaErrors, setAgendaErrors] = useState<Record<string, string>>({});
+  const [agendaPreset, setAgendaPreset] = useState<AgendaPresetId>('weekly-progress');
+  const [pendingAgendaPreset, setPendingAgendaPreset] = useState<AgendaPresetId | null>(null);
+
+  const applyAgendaPreset = (presetId: AgendaPresetId) => {
+    setAgenda(agendaFromPreset(presetId));
+    setAgendaErrors({});
+    setPendingAgendaPreset(null);
+  };
+
+  const requestAgendaPreset = () => {
+    if (agenda.length) {
+      setPendingAgendaPreset(agendaPreset);
+      return;
+    }
+    applyAgendaPreset(agendaPreset);
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -819,6 +1174,41 @@ function MeetingForm({
       )}
       <fieldset className="meeting-agenda-editor">
         <legend>Chương trình họp</legend>
+        <div className="meeting-agenda-preset">
+          <label>
+            Mẫu chương trình họp
+            <select
+              value={agendaPreset}
+              onChange={(event) => setAgendaPreset(event.target.value as AgendaPresetId)}
+            >
+              {agendaPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="button-secondary" type="button" onClick={requestAgendaPreset}>
+            Áp dụng mẫu
+          </button>
+        </div>
+        {pendingAgendaPreset && (
+          <div className="meeting-agenda-confirm" role="alert">
+            <span>Áp dụng mẫu mới sẽ thay thế chương trình hiện tại.</span>
+            <div>
+              <button type="button" onClick={() => applyAgendaPreset(pendingAgendaPreset)}>
+                Áp dụng và thay thế
+              </button>
+              <button
+                className="button-quiet"
+                type="button"
+                onClick={() => setPendingAgendaPreset(null)}
+              >
+                Giữ nguyên
+              </button>
+            </div>
+          </div>
+        )}
         {agenda.length === 0 ? (
           <p className="meeting-agenda-empty">Chưa có mục chương trình nào.</p>
         ) : (
@@ -840,7 +1230,7 @@ function MeetingForm({
                         })
                       }
                     >
-                      Di chuyển lên
+                      ↑
                     </button>
                     <button
                       type="button"
@@ -854,7 +1244,7 @@ function MeetingForm({
                         })
                       }
                     >
-                      Di chuyển xuống
+                      ↓
                     </button>
                     <button
                       className="button-danger-quiet"
@@ -905,22 +1295,26 @@ function MeetingForm({
                     {agendaErrors[item.localId]}
                   </p>
                 )}
-                <label>
-                  Mô tả <span>(không bắt buộc)</span>
-                  <textarea
-                    value={item.description}
-                    rows={2}
-                    maxLength={1000}
-                    onChange={(event) => {
-                      const description = event.target.value;
-                      setAgenda((current) =>
-                        current.map((entry) =>
-                          entry.localId === item.localId ? { ...entry, description } : entry,
-                        ),
-                      );
-                    }}
-                  />
-                </label>
+                <details className="meeting-agenda-description" open={Boolean(item.description)}>
+                  <summary>{item.description ? 'Mô tả' : 'Thêm mô tả'}</summary>
+                  <label>
+                    <span className="sr-only">Mô tả mục chương trình {index + 1}</span>
+                    <textarea
+                      value={item.description}
+                      rows={2}
+                      maxLength={1000}
+                      placeholder="Ghi chú ngắn cho nội dung này"
+                      onChange={(event) => {
+                        const description = event.target.value;
+                        setAgenda((current) =>
+                          current.map((entry) =>
+                            entry.localId === item.localId ? { ...entry, description } : entry,
+                          ),
+                        );
+                      }}
+                    />
+                  </label>
+                </details>
               </div>
             ))}
           </div>
@@ -982,7 +1376,7 @@ export function GroupMeetingsPage() {
     enabled: Boolean(groupId),
   });
   const meetingsQuery = useInfiniteQuery({
-    queryKey: ['groups', groupId, 'meetings'],
+    queryKey: ['groups', groupId, 'meetings', 'timeline'],
     queryFn: async ({ pageParam }) => {
       const page = await getMeetings(groupId, pageParam ? { cursor: pageParam } : {});
       return (Array.isArray(page) ? { items: page } : page) as MeetingTimelineResponse;
@@ -1076,7 +1470,7 @@ export function GroupMeetingsPage() {
               <strong>Chưa có cuộc họp sắp tới</strong>
               <p>
                 {isAdmin
-                  ? 'Tạo lịch đầu tiên bằng biểu mẫu bên cạnh.'
+                  ? 'Tạo lịch đầu tiên bằng biểu mẫu lên lịch.'
                   : 'Quản trị viên nhóm chưa tạo lịch mới.'}
               </p>
             </div>
@@ -1087,12 +1481,12 @@ export function GroupMeetingsPage() {
               disabled={meetingsQuery.isFetchingNextPage}
               onClick={() => void meetingsQuery.fetchNextPage()}
             >
-              {meetingsQuery.isFetchingNextPage ? 'Äang táº£i thÃªmâ€¦' : 'Xem thÃªm'}
+              {meetingsQuery.isFetchingNextPage ? 'Đang tải thêm…' : 'Xem thêm'}
             </button>
           )}
           {meetingsQuery.isFetchNextPageError && (
             <p className="error" role="alert">
-              KhÃ´ng thá»ƒ táº£i trang tiáº¿p theo. Danh sÃ¡ch Ä‘Ã£ táº£i váº«n Ä‘Æ°á»£c giá»¯.
+              Không thể tải trang tiếp theo. Danh sách đã tải vẫn được giữ.
             </p>
           )}{' '}
           {history.length > 0 && (
@@ -1137,7 +1531,7 @@ function MeetingListItem({ meeting }: { meeting: Meeting }) {
         <small>{formatDate(meeting.startsAt)}</small>
       </span>
       <span className={`meeting-status meeting-status-${meeting.status.toLowerCase()}`}>
-        {statusLabel[meeting.status] ?? meeting.status}
+        {statusLabel[meeting.status] ?? 'Chưa xác định'}
       </span>
     </Link>
   );
@@ -1213,6 +1607,10 @@ export function MeetingDetailPage() {
       });
     },
   });
+  const googleRetryMutation = useMutation({
+    mutationFn: () => retryGoogleMeetingSync(meetingId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] }),
+  });
 
   if (query.isPending)
     return (
@@ -1240,13 +1638,14 @@ export function MeetingDetailPage() {
     minutesQuery.isError &&
     minutesQuery.error instanceof ApiClientError &&
     minutesQuery.error.status === 404;
+  const visibleGoogleSyncStatus = meeting.googleSync?.status ?? meeting.googleSyncStatus;
   return (
     <FeaturePage title={meeting.title} description={formatDate(meeting.startsAt)}>
       <div className="meeting-detail-layout">
         <section className="app-panel meeting-overview">
           <div className="meeting-overview-heading">
             <span className={`meeting-status meeting-status-${meeting.status.toLowerCase()}`}>
-              {statusLabel[meeting.status] ?? meeting.status}
+              {statusLabel[meeting.status] ?? 'Chưa xác định'}
             </span>
             <span>
               {Math.max(
@@ -1256,16 +1655,48 @@ export function MeetingDetailPage() {
               phút
             </span>
           </div>
-          {meeting.meetUrl?.startsWith('https://meet.google.com/') && (
-            <a
-              className="button meeting-meet-link"
-              href={meeting.meetUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Tham gia Google Meet
-            </a>
+          {meeting.googleSync?.status === 'PENDING' && (
+            <p className="state" role="status">
+              Google Meet đang được đồng bộ.
+            </p>
           )}
+          {meeting.googleSync?.status === 'FAILED' && (
+            <div className="state state-error" role="status">
+              <p>Đồng bộ Google Calendar/Meet thất bại.</p>
+              {isAdmin && (
+                <button
+                  type="button"
+                  disabled={googleRetryMutation.isPending}
+                  onClick={() => googleRetryMutation.mutate()}
+                  aria-label="Thử đồng bộ lại Google Meet"
+                >
+                  {googleRetryMutation.isPending ? 'Đang gửi yêu cầu…' : 'Thử đồng bộ lại'}
+                </button>
+              )}
+              {googleRetryMutation.isError && (
+                <p role="alert">Không thể gửi yêu cầu đồng bộ lại. Vui lòng thử lại.</p>
+              )}
+            </div>
+          )}
+          {meeting.googleSync?.status === 'ACTION_REQUIRED' && (
+            <div className="state state-error" role="status">
+              <p>Cần kết nối lại tài khoản Google để đồng bộ cuộc họp.</p>
+              {meeting.organizerId === currentUserId && (
+                <Link to="/app/settings">Kết nối lại Google</Link>
+              )}
+            </div>
+          )}
+          {meeting.googleSync?.status === 'SYNCED' &&
+            meeting.googleSync.meetUrl?.startsWith('https://meet.google.com/') && (
+              <a
+                className="button meeting-meet-link"
+                href={meeting.googleSync.meetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Tham gia Google Meet
+              </a>
+            )}
           <div className="meeting-detail-grid">
             <div>
               <small>Bắt đầu</small>
@@ -1274,6 +1705,10 @@ export function MeetingDetailPage() {
             <div>
               <small>Kết thúc</small>
               <strong>{formatDate(meeting.endsAt)}</strong>
+            </div>
+            <div>
+              <small>Đồng bộ Google</small>
+              <strong>{googleSyncLabel[visibleGoogleSyncStatus] ?? 'Chưa xác định'}</strong>
             </div>
           </div>
           <div className="meeting-agenda">
@@ -1314,7 +1749,7 @@ export function MeetingDetailPage() {
               </div>
             )}
         </section>
-        <MeetingAttachmentsPanel meeting={meeting} />
+        {environment.capabilities.documentUpload && <MeetingAttachmentsPanel meeting={meeting} />}
         <aside className="app-panel meeting-attendee-panel">
           <span className="section-kicker">Thành phần</span>
           <h2>Người tham dự</h2>
@@ -1362,6 +1797,7 @@ export function MeetingDetailPage() {
                 meetingId={meetingId}
                 initial={minutesQuery.data}
                 group={groupQuery.data}
+                currentUserId={currentUserId}
                 queryKey={minutesQueryKey}
               />
             )}
@@ -1491,7 +1927,7 @@ export function MeetingDetailPage() {
               </div>
             </details>
           )}
-        {canGenerateMeetingOutputs && groupQuery.data && (
+        {environment.capabilities.ai && canGenerateMeetingOutputs && groupQuery.data && (
           <MeetingAIWorkspace meetingId={meeting.id} group={groupQuery.data} />
         )}
       </div>

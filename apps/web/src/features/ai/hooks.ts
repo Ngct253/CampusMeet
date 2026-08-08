@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import type {
   AIJob,
   ConfirmTaskProposalRequest,
@@ -73,15 +73,12 @@ export const createAIHooks = (service: AIService) => ({
     });
   },
   useConfirmTaskProposal() {
-    const queryClient = useQueryClient();
     return useMutation<
       ConfirmTaskProposalResponse,
       Error,
-      IdempotentRequest & { proposalId: string; request: ConfirmTaskProposalRequest }
+      { proposalId: string; request: ConfirmTaskProposalRequest }
     >({
-      mutationFn: ({ proposalId, request, idempotencyKey }) =>
-        service.confirmTaskProposal(proposalId, request, idempotencyKey),
-      onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+      mutationFn: ({ proposalId, request }) => service.confirmTaskProposal(proposalId, request),
     });
   },
   useProgressAnalysis() {

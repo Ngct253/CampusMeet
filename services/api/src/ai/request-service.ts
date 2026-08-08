@@ -5,13 +5,21 @@ import type {
   GroupProgressAnalysisRequest,
   MeetingChatRequest,
 } from '@campusmeet/shared';
-import type { AIJobOrchestrator, MeetingScopeReader, MembershipAuthorizer } from './ports';
+import type {
+  AIJobIdempotencyReader,
+  AIJobOrchestrator,
+  MeetingScopeReader,
+  MembershipAuthorizer,
+} from './ports';
+import type { GroupProgressSnapshotProvider } from '../domain/ports';
 
 export class AIRequestService {
   constructor(
     private readonly access: MembershipAuthorizer,
     private readonly meetings: MeetingScopeReader,
     private readonly jobs: AIJobOrchestrator,
+    private readonly snapshots: GroupProgressSnapshotProvider,
+    private readonly jobReplays: AIJobIdempotencyReader,
   ) {}
 
   async requestMeetingChat(input: {
@@ -67,7 +75,10 @@ export class AIRequestService {
     idempotencyKey: string;
     requestId: string;
   }): Promise<AIJob> {
-    const groupId = await this.access.requireMeetingOrganizerOrAdmin(input.actorId, input.meetingId);
+    const groupId = await this.access.requireMeetingOrganizerOrAdmin(
+      input.actorId,
+      input.meetingId,
+    );
     return this.jobs.enqueue({
       ...input,
       groupId,
@@ -89,7 +100,10 @@ export class AIRequestService {
     idempotencyKey: string;
     requestId: string;
   }): Promise<AIJob> {
-    const groupId = await this.access.requireMeetingOrganizerOrAdmin(input.actorId, input.meetingId);
+    const groupId = await this.access.requireMeetingOrganizerOrAdmin(
+      input.actorId,
+      input.meetingId,
+    );
     return this.jobs.enqueue({
       ...input,
       groupId,
@@ -112,6 +126,25 @@ export class AIRequestService {
     requestId: string;
   }): Promise<AIJob> {
     await this.access.requireGroupAdmin(input.actorId, input.groupId);
+    const existing = await this.jobReplays.findExisting({
+      actorId: input.actorId,
+      groupId: input.groupId,
+      operation: 'PROGRESS_ANALYSIS',
+      idempotencyKey: input.idempotencyKey,
+    });
+    if (existing) {
+      if (
+        existing.payload.operation !== 'PROGRESS_ANALYSIS' ||
+        existing.payload.request.snapshotVersion === undefined
+      ) {
+        throw new Error('AI_IDEMPOTENCY_DATA_INTEGRITY');
+      }
+      return existing.job;
+    }
+
+    const snapshot = input.request.snapshotVersion
+      ? await this.snapshots.getVersion(input.groupId, input.request.snapshotVersion)
+      : await this.snapshots.generate(input.groupId);
     return this.jobs.enqueue({
       ...input,
       type: 'PROGRESS_ANALYSIS',
@@ -119,7 +152,7 @@ export class AIRequestService {
         operation: 'PROGRESS_ANALYSIS',
         actorId: input.actorId,
         groupId: input.groupId,
-        request: input.request,
+        request: { snapshotVersion: snapshot.version },
       },
     });
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import {
   GoogleSyncStatus,
+  GoogleMeetingSyncStatus,
   IntegrationStatus,
   MeetingStatus,
   type Meeting,
@@ -39,7 +40,19 @@ describe('DynamoDbMeetingRepository', () => {
         return Promise.resolve({});
       },
     } as unknown as DynamoDBDocumentClient;
-    await new DynamoDbMeetingRepository(db, 'meeting-data').create(meeting);
+    await new DynamoDbMeetingRepository(db, 'meeting-data').create(meeting, {
+      meetingId: 'm1',
+      groupId: 'g1',
+      organizerId: 'u1',
+      provider: 'GOOGLE',
+      syncStatus: GoogleMeetingSyncStatus.PENDING,
+      syncRevision: 1,
+      desiredMeetingVersion: 1,
+      desiredMeetingStatus: MeetingStatus.SCHEDULED,
+      attemptCount: 0,
+      createdAt: meeting.createdAt,
+      updatedAt: meeting.updatedAt,
+    });
     expect(captured?.constructor.name).not.toBe('ScanCommand');
     const tx = captured?.input.TransactItems as Array<{ Put: { Item: Record<string, unknown> } }>;
     expect(tx[0]?.Put.Item).toMatchObject({
@@ -50,6 +63,7 @@ describe('DynamoDbMeetingRepository', () => {
     });
     expect(tx.map((x) => x.Put.Item.SK)).toContain('ATTENDEE#u2');
     expect(tx.map((x) => x.Put.Item.SK)).toContain('AGENDA#000000#a0');
+    expect(tx.map((x) => x.Put.Item.SK)).toContain('INTEGRATION#GOOGLE');
   });
   it('list query GSI1 với limit/cursor, không Scan', async () => {
     let captured: Command | undefined;
@@ -57,7 +71,18 @@ describe('DynamoDbMeetingRepository', () => {
       send: (command: Command) => {
         captured = command;
         return Promise.resolve({
-          Items: [{ ...meeting, startAt: meeting.startsAt, endAt: meeting.endsAt }],
+          Items: [
+            {
+              PK: 'MEETING#m1',
+              SK: 'META',
+              entityType: 'Meeting',
+              GSI1PK: 'GROUP#g1',
+              GSI1SK: `MEETING#${meeting.startsAt}#${meeting.id}`,
+              ...meeting,
+              startAt: meeting.startsAt,
+              endAt: meeting.endsAt,
+            },
+          ],
           LastEvaluatedKey: {
             PK: 'MEETING#m1',
             SK: 'META',
@@ -77,6 +102,27 @@ describe('DynamoDbMeetingRepository', () => {
     });
     expect(page.items).toHaveLength(1);
     expect(page.nextCursor).toBeTruthy();
+  });
+  it('rejects malformed metadata returned by the group Meeting index', async () => {
+    const db = {
+      send: () =>
+        Promise.resolve({
+          Items: [
+            {
+              PK: 'MEETING#m1',
+              SK: 'META',
+              entityType: 'Reminder',
+              GSI1PK: 'GROUP#g1',
+              GSI1SK: `MEETING#${meeting.startsAt}#${meeting.id}`,
+              ...meeting,
+            },
+          ],
+        }),
+    } as unknown as DynamoDBDocumentClient;
+
+    await expect(
+      new DynamoDbMeetingRepository(db, 'meeting-data').listByGroup('g1', 100),
+    ).rejects.toThrow('GROUP_MEETING_DATA_INTEGRITY');
   });
   it('conditional conflict được map 409', async () => {
     const conflict = Object.assign(new Error('conflict'), { name: 'TransactionCanceledException' });

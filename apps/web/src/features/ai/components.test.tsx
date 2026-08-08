@@ -2,8 +2,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type {
-  AIJob,
+import {
+  Priority,
+  type AIJob,
   Citation,
   GroundedAnswer,
   GroupProgressAnalysis,
@@ -192,7 +193,7 @@ describe('MinutesDraftPreview', () => {
 });
 
 describe('TaskProposalEditor', () => {
-  it('requires missing assignee and priority before handing off to M3 confirmation', () => {
+  it('requires missing fields and sends only editable confirmation fields', () => {
     const proposal: TaskProposal = {
       proposalId: 'proposal-1',
       groupId: 'group-1',
@@ -202,31 +203,42 @@ describe('TaskProposalEditor', () => {
       citations: [citation],
       status: 'PENDING',
     };
-    const onComplete = vi.fn();
+    const onConfirm = vi.fn();
     render(
       <TaskProposalEditor
         proposal={proposal}
         assigneeOptions={[{ userId: 'user-1', displayName: 'Lan Nguyễn' }]}
-        onComplete={onComplete}
+        onConfirm={onConfirm}
       />,
     );
 
-    const completeButton = screen.getByRole('button', { name: 'Xác nhận tạo công việc' });
-    expect(completeButton).toBeDisabled();
+    const confirmButton = screen.getByRole('button', { name: 'Xác nhận tạo công việc' });
+    expect(confirmButton).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Người phụ trách'), {
       target: { value: 'user-1' },
     });
     fireEvent.change(screen.getByLabelText('Mức ưu tiên'), { target: { value: 'HIGH' } });
-    fireEvent.click(completeButton);
+    fireEvent.change(screen.getByLabelText('Tiêu đề công việc'), {
+      target: { value: '  Hoàn thiện bản demo cuối  ' },
+    });
+    fireEvent.change(screen.getByLabelText('Hạn hoàn thành'), {
+      target: { value: '2026-08-10T10:30' },
+    });
+    fireEvent.click(confirmButton);
 
-    expect(onComplete).toHaveBeenCalledWith({
+    expect(onConfirm).toHaveBeenCalledWith({
       proposalId: 'proposal-1',
-      assigneeId: 'user-1',
-      priority: 'HIGH',
+      request: {
+        title: 'Hoàn thiện bản demo cuối',
+        assigneeId: 'user-1',
+        priority: Priority.HIGH,
+        dueAt: new Date('2026-08-10T10:30').toISOString(),
+      },
     });
   });
 
-  it('does not allow a regular member to confirm a proposal', () => {
+  it('prevents rapid duplicate confirmation and exposes no optimistic task id', () => {
+    const onConfirm = vi.fn();
     render(
       <TaskProposalEditor
         proposal={{
@@ -235,18 +247,67 @@ describe('TaskProposalEditor', () => {
           meetingId: 'meeting-1',
           title: 'Hoàn thiện bản demo',
           assigneeId: 'user-1',
-          priority: 'HIGH',
+          priority: 'MEDIUM',
+          missingFields: [],
+          citations: [citation],
+          status: 'PENDING',
+        }}
+        assigneeOptions={[{ userId: 'user-1', displayName: 'Lan Nguyễn' }]}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    const confirmButton = screen.getByRole('button', { name: 'Xác nhận tạo công việc' });
+    fireEvent.click(confirmButton);
+    fireEvent.click(confirmButton);
+
+    expect(onConfirm).toHaveBeenCalledOnce();
+    expect(confirmButton).toBeDisabled();
+    expect(screen.queryByText(/Đã tạo công việc/)).not.toBeInTheDocument();
+  });
+
+  it('hides confirmation from non-admins and shows the authoritative confirmed task', () => {
+    const { rerender } = render(
+      <TaskProposalEditor
+        proposal={{
+          proposalId: 'proposal-1',
+          groupId: 'group-1',
+          meetingId: 'meeting-1',
+          title: 'Hoàn thiện bản demo',
+          assigneeId: 'user-1',
+          priority: 'MEDIUM',
           missingFields: [],
           citations: [citation],
           status: 'PENDING',
         }}
         canConfirm={false}
-        onComplete={vi.fn()}
+        onConfirm={vi.fn()}
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Xác nhận tạo công việc' })).toBeDisabled();
-    expect(screen.getByText(/Chỉ Quản trị viên nhóm/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Xác nhận tạo công việc' }),
+    ).not.toBeInTheDocument();
+    rerender(
+      <TaskProposalEditor
+        proposal={{
+          proposalId: 'proposal-1',
+          groupId: 'group-1',
+          meetingId: 'meeting-1',
+          title: 'Hoàn thiện bản demo',
+          assigneeId: 'user-1',
+          priority: 'MEDIUM',
+          missingFields: [],
+          citations: [citation],
+          status: 'CONFIRMED',
+          confirmedTaskId: 'task-authoritative',
+        }}
+        canConfirm={false}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Đã tạo công việc task-authoritative.')).toBeInTheDocument();
   });
 });
 

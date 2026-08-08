@@ -42,13 +42,15 @@ const saved: MeetingMinutes = {
   summary: input.summary,
   discussion: input.discussion,
   decisions: [{ id: 'decision-1', content: 'Quyết định' }],
-  actionItems: [{
-    id: 'action-1',
-    content: 'Hành động',
-    assigneeId: 'user-1',
-    dueAt: '2026-08-10T03:30:00.000Z',
-    taskId: 'task-1',
-  }],
+  actionItems: [
+    {
+      id: 'action-1',
+      content: 'Hành động',
+      assigneeId: 'user-1',
+      dueAt: '2026-08-10T03:30:00.000Z',
+      taskId: 'task-1',
+    },
+  ],
   version: 1,
   createdBy: 'admin-1',
   createdAt: '2026-08-04T03:00:00.000Z',
@@ -132,15 +134,38 @@ describe('MinutesService', () => {
       'admin-1',
       expect.objectContaining({
         ...input,
-        actionItems: [expect.objectContaining({
-          id: expect.any(String),
-          content: 'Hành động',
-          assigneeId: 'user-1',
-        })],
+        decisions: [
+          expect.objectContaining({
+            id: expect.any(String),
+            content: 'Quyết định',
+          }),
+        ],
+        actionItems: [
+          expect.objectContaining({
+            id: expect.any(String),
+            content: 'Hành động',
+            assigneeId: 'user-1',
+          }),
+        ],
       }),
       1,
       undefined,
     );
+  });
+
+  it('assigns distinct server ids to every new Decision on first creation', async () => {
+    const { minutes, meetings, groups } = dependencies();
+    await new MinutesService(minutes, meetings, groups).update('admin-1', meeting.id, {
+      ...input,
+      decisions: [{ content: 'Nội dung giống nhau' }, { content: 'Nội dung giống nhau' }],
+    });
+
+    const decisions = minutes.createVersion.mock.calls[0]?.[2].decisions;
+    expect(decisions).toEqual([
+      { id: expect.any(String), content: 'Nội dung giống nhau' },
+      { id: expect.any(String), content: 'Nội dung giống nhau' },
+    ]);
+    expect(decisions[0]?.id).not.toBe(decisions[1]?.id);
   });
 
   it('rejects a regular member from writing', async () => {
@@ -200,12 +225,15 @@ describe('MinutesService', () => {
     minutes.getLatest.mockResolvedValue({ ...saved, version: 7 });
     const nextInput: UpdateMeetingMinutesRequest = {
       ...input,
-      actionItems: [{
-        id: 'action-1',
-        content: 'Hành động cập nhật',
-        assigneeId: 'user-1',
-        dueAt: '2026-08-11T03:30:00.000Z',
-      }],
+      decisions: [{ id: 'decision-1', content: 'Quyết định cập nhật' }],
+      actionItems: [
+        {
+          id: 'action-1',
+          content: 'Hành động cập nhật',
+          assigneeId: 'user-1',
+          dueAt: '2026-08-11T03:30:00.000Z',
+        },
+      ],
       expectedVersion: 7,
     };
     await new MinutesService(minutes, meetings, groups).update('admin-1', meeting.id, nextInput);
@@ -214,13 +242,16 @@ describe('MinutesService', () => {
       'admin-1',
       {
         ...nextInput,
-        actionItems: [{
-          id: 'action-1',
-          content: 'Hành động cập nhật',
-          assigneeId: 'user-1',
-          dueAt: '2026-08-11T03:30:00.000Z',
-          taskId: 'task-1',
-        }],
+        decisions: [{ id: 'decision-1', content: 'Quyết định cập nhật' }],
+        actionItems: [
+          {
+            id: 'action-1',
+            content: 'Hành động cập nhật',
+            assigneeId: 'user-1',
+            dueAt: '2026-08-11T03:30:00.000Z',
+            taskId: 'task-1',
+          },
+        ],
       },
       8,
       saved.id,
@@ -235,23 +266,99 @@ describe('MinutesService', () => {
     expect(minutes.createVersion).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves Decision identity across edits, reorder and removal while assigning only new ids', async () => {
+    const { minutes, meetings, groups } = dependencies();
+    minutes.getLatest.mockResolvedValue({
+      ...saved,
+      decisions: [
+        { id: 'decision-1', content: 'Giống nhau' },
+        { id: 'decision-2', content: 'Giống nhau' },
+        { id: 'decision-removed', content: 'Sẽ xóa' },
+      ],
+    });
+
+    await new MinutesService(minutes, meetings, groups).update('admin-1', meeting.id, {
+      ...input,
+      expectedVersion: 1,
+      decisions: [
+        { id: 'decision-2', content: 'Giống nhau đã sửa' },
+        { id: 'decision-1', content: 'Giống nhau' },
+        { content: 'Giống nhau' },
+      ],
+    });
+
+    const resolved = minutes.createVersion.mock.calls[0]?.[2];
+    expect(resolved.decisions).toEqual([
+      { id: 'decision-2', content: 'Giống nhau đã sửa' },
+      { id: 'decision-1', content: 'Giống nhau' },
+      { id: expect.any(String), content: 'Giống nhau' },
+    ]);
+    expect(resolved.decisions[2]?.id).not.toBe('decision-1');
+    expect(resolved.decisions[2]?.id).not.toBe('decision-2');
+    expect(resolved.decisions).not.toContainEqual(
+      expect.objectContaining({ id: 'decision-removed' }),
+    );
+  });
+
+  it('rejects duplicate and unknown Decision ids without creating a version', async () => {
+    const { minutes, meetings, groups } = dependencies();
+    minutes.getLatest.mockResolvedValue(saved);
+    const service = new MinutesService(minutes, meetings, groups);
+    const base = { ...input, expectedVersion: 1, actionItems: [] };
+
+    await expect(
+      service.update('admin-1', meeting.id, {
+        ...base,
+        decisions: [
+          { id: 'decision-1', content: 'A' },
+          { id: 'decision-1', content: 'B' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'UNPROCESSABLE_ENTITY', statusCode: 422 });
+    await expect(
+      service.update('admin-1', meeting.id, {
+        ...base,
+        decisions: [{ id: 'decision-forged', content: 'A' }],
+      }),
+    ).rejects.toMatchObject({ code: 'UNPROCESSABLE_ENTITY', statusCode: 422 });
+    expect(minutes.createVersion).not.toHaveBeenCalled();
+  });
+
+  it('keeps stale-version conflict authoritative before Decision reconciliation', async () => {
+    const { minutes, meetings, groups } = dependencies();
+    minutes.getLatest.mockResolvedValue(saved);
+
+    await expect(
+      new MinutesService(minutes, meetings, groups).update('admin-1', meeting.id, {
+        ...input,
+        expectedVersion: 0,
+        decisions: [{ id: 'decision-forged', content: 'Không được reconcile' }],
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT', statusCode: 409 });
+    expect(minutes.createVersion).not.toHaveBeenCalled();
+  });
+
   it('rejects duplicate and unknown action item ids without creating a version', async () => {
     const { minutes, meetings, groups } = dependencies();
     minutes.getLatest.mockResolvedValue(saved);
     const service = new MinutesService(minutes, meetings, groups);
     const base = { ...input, expectedVersion: 1 };
 
-    await expect(service.update('admin-1', meeting.id, {
-      ...base,
-      actionItems: [
-        { id: 'action-1', content: 'A' },
-        { id: 'action-1', content: 'B' },
-      ],
-    })).rejects.toMatchObject({ code: 'UNPROCESSABLE_ENTITY', statusCode: 422 });
-    await expect(service.update('admin-1', meeting.id, {
-      ...base,
-      actionItems: [{ id: 'action-unknown', content: 'A' }],
-    })).rejects.toMatchObject({ code: 'UNPROCESSABLE_ENTITY', statusCode: 422 });
+    await expect(
+      service.update('admin-1', meeting.id, {
+        ...base,
+        actionItems: [
+          { id: 'action-1', content: 'A' },
+          { id: 'action-1', content: 'B' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'UNPROCESSABLE_ENTITY', statusCode: 422 });
+    await expect(
+      service.update('admin-1', meeting.id, {
+        ...base,
+        actionItems: [{ id: 'action-unknown', content: 'A' }],
+      }),
+    ).rejects.toMatchObject({ code: 'UNPROCESSABLE_ENTITY', statusCode: 422 });
     expect(minutes.createVersion).not.toHaveBeenCalled();
   });
 

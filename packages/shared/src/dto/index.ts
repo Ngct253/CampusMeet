@@ -4,6 +4,7 @@ import type {
   ISODateTime,
   MeetingMinutes,
   Meeting,
+  GoogleMeetingSyncSummary,
   Task,
 } from '../types';
 import { Priority, TaskStatus } from '../enums';
@@ -83,22 +84,6 @@ export const taskInputSchema = z
     sourceMeetingId: z.string().trim().min(1).optional(),
   })
   .strict();
-export const taskSchema = z.object({
-  id: z.string().min(1),
-  groupId: z.string().min(1),
-  title: z.string().min(1).max(200),
-  assigneeId: z.string().min(1),
-  status: z.nativeEnum(TaskStatus),
-  priority: z.nativeEnum(Priority),
-  dueAt: z.string().datetime({ offset: true }).optional(),
-  sourceMeetingId: z.string().min(1).optional(),
-  sourceActionItemId: z.string().min(1).optional(),
-  createdBy: z.string().min(1).optional(),
-  createdAt: z.string().datetime({ offset: true }).optional(),
-  updatedAt: z.string().datetime({ offset: true }).optional(),
-  completedAt: z.string().datetime({ offset: true }).optional(),
-  version: z.number().int().nonnegative().optional(),
-});
 export const updateTaskStatusInputSchema = z
   .object({
     status: z.nativeEnum(TaskStatus),
@@ -106,7 +91,10 @@ export const updateTaskStatusInputSchema = z
   })
   .strict();
 const minutesDecisionInputSchema = z
-  .object({ content: z.string().trim().min(1).max(1000) })
+  .object({
+    id: z.string().trim().min(1).optional(),
+    content: z.string().trim().min(1).max(1000),
+  })
   .strict();
 const minutesActionItemInputSchema = z
   .object({
@@ -169,7 +157,9 @@ export interface MeetingDetailResponse extends MeetingResponse {
   organizer: { userId: string };
   attendees: Array<{ userId: string }>;
   agenda: AgendaItem[];
+  googleSync?: GoogleMeetingSyncSummary;
 }
+export type GoogleMeetingSyncRetryResponse = GoogleMeetingSyncSummary;
 export interface CursorPage<T> {
   items: T[];
   nextCursor?: string;

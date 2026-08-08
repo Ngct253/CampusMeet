@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   aiJobDetailSchema,
-  confirmTaskProposalRequestSchema,
+  confirmTaskProposalInputSchema,
+  confirmTaskProposalResponseSchema,
   groupKnowledgeQuerySchema,
+  groupProgressAnalysisRequestSchema,
+  groupProgressSnapshotSchema,
   knowledgeIngestionPayloadSchema,
   supportedDocumentContentTypes,
   taskProposalSchema,
@@ -39,13 +42,72 @@ describe('M5 shared schemas', () => {
     ).toBe(false);
   });
 
-  it('requires the human-confirmed assignee and priority for a task proposal', () => {
+  it('keeps confirmation input strict and accepts only editable Task fields', () => {
     expect(
-      confirmTaskProposalRequestSchema.safeParse({ assigneeId: 'user-1', priority: 'HIGH' }).success,
-    ).toBe(true);
-    expect(confirmTaskProposalRequestSchema.safeParse({ assigneeId: 'user-1' }).success).toBe(
+      confirmTaskProposalInputSchema.parse({
+        title: ' Final title ',
+        assigneeId: ' member-1 ',
+        priority: 'HIGH',
+        dueAt: '2026-08-10T10:30:00+07:00',
+      }),
+    ).toEqual({
+      title: 'Final title',
+      assigneeId: 'member-1',
+      priority: 'HIGH',
+      dueAt: '2026-08-10T10:30:00+07:00',
+    });
+    for (const field of ['taskId', 'createdBy', 'version', 'status', 'groupId', 'meetingId']) {
+      expect(confirmTaskProposalInputSchema.safeParse({ [field]: 'forged' }).success).toBe(false);
+    }
+    expect(confirmTaskProposalInputSchema.safeParse({ dueAt: '2026-08-10T10:30:00' }).success).toBe(
       false,
     );
+  });
+
+  it('requires an authoritative Task link on confirmed proposals and responses', () => {
+    const proposal = {
+      proposalId: 'proposal-1',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      title: 'Final title',
+      assigneeId: 'member-1',
+      priority: 'HIGH',
+      missingFields: [],
+      citations: [
+        {
+          citationId: 'citation-1',
+          groupId: 'group-1',
+          meetingId: 'meeting-1',
+          sourceType: 'TRANSCRIPT',
+          sourceId: 'transcript-1',
+          sourceVersion: 1,
+          internalUri: 'campusmeet://meetings/meeting-1/transcripts/transcript-1',
+        },
+      ],
+      status: 'CONFIRMED',
+      confirmedTaskId: 'task-1',
+    };
+    expect(taskProposalSchema.safeParse({ ...proposal, confirmedTaskId: undefined }).success).toBe(
+      false,
+    );
+    expect(
+      confirmTaskProposalResponseSchema.safeParse({
+        task: {
+          id: 'task-1',
+          groupId: 'group-1',
+          title: 'Final title',
+          assigneeId: 'member-1',
+          status: 'TODO',
+          priority: 'HIGH',
+          sourceMeetingId: 'meeting-1',
+          createdBy: 'admin-1',
+          createdAt: '2026-08-08T00:00:00.000Z',
+          updatedAt: '2026-08-08T00:00:00.000Z',
+          version: 1,
+        },
+        proposal,
+      }).success,
+    ).toBe(true);
   });
 
   it('accepts every supported document type and rejects executable content', () => {
@@ -137,5 +199,99 @@ describe('M5 shared schemas', () => {
         },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('groupProgressSnapshotSchema', () => {
+  const validSnapshot = {
+    groupId: 'group-1',
+    version: 1,
+    generatedAt: '2026-08-08T08:00:00.000Z',
+    taskCounts: {
+      total: 6,
+      todo: 2,
+      doing: 3,
+      done: 1,
+      overdue: 2,
+    },
+    meetingCounts: {
+      completed: 4,
+      upcoming: 2,
+    },
+  };
+
+  it('accepts a valid snapshot', () => {
+    expect(groupProgressSnapshotSchema.safeParse(validSnapshot).success).toBe(true);
+  });
+
+  it('requires a version', () => {
+    const withoutVersion: Record<string, unknown> = { ...validSnapshot };
+    delete withoutVersion.version;
+
+    expect(groupProgressSnapshotSchema.safeParse(withoutVersion).success).toBe(false);
+  });
+
+  it.each([0, -1, 10_000_000_000, 1.5])('rejects invalid version %s', (version) => {
+    expect(groupProgressSnapshotSchema.safeParse({ ...validSnapshot, version }).success).toBe(
+      false,
+    );
+  });
+
+  it('requires generatedAt to be an ISO datetime with timezone', () => {
+    expect(
+      groupProgressSnapshotSchema.safeParse({
+        ...validSnapshot,
+        generatedAt: '2026-08-08T08:00:00',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects negative counts', () => {
+    expect(
+      groupProgressSnapshotSchema.safeParse({
+        ...validSnapshot,
+        taskCounts: { ...validSnapshot.taskCounts, todo: -1 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires total to equal todo + doing + done', () => {
+    expect(
+      groupProgressSnapshotSchema.safeParse({
+        ...validSnapshot,
+        taskCounts: { ...validSnapshot.taskCounts, total: 7 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects overdue counts greater than unfinished task counts', () => {
+    expect(
+      groupProgressSnapshotSchema.safeParse({
+        ...validSnapshot,
+        taskCounts: { ...validSnapshot.taskCounts, overdue: 6 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects unknown fields', () => {
+    expect(
+      groupProgressSnapshotSchema.safeParse({ ...validSnapshot, recordType: 'LATEST' }).success,
+    ).toBe(false);
+    expect(
+      groupProgressSnapshotSchema.safeParse({
+        ...validSnapshot,
+        taskCounts: { ...validSnapshot.taskCounts, blocked: 1 },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('groupProgressAnalysisRequestSchema snapshotVersion', () => {
+  it.each([1, 9_999_999_999])('accepts supported version %s', (snapshotVersion) => {
+    expect(groupProgressAnalysisRequestSchema.safeParse({ snapshotVersion }).success).toBe(true);
+  });
+
+  it.each([0, -1, 1.5, 10_000_000_000])('rejects unsupported version %s', (snapshotVersion) => {
+    expect(groupProgressAnalysisRequestSchema.safeParse({ snapshotVersion }).success).toBe(false);
   });
 });
