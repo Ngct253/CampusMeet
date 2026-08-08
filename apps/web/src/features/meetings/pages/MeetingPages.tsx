@@ -19,6 +19,7 @@ import { FeaturePage } from '../../../components/FeaturePage';
 import { environment } from '../../../config/environment';
 import { ApiClientError } from '../../../lib/api-client';
 import { MeetingAIWorkspace } from '../../ai';
+import { TranscriptPanel } from '../../transcripts';
 import { getGroup } from '../../groups/service';
 import {
   cancelMeeting,
@@ -2199,6 +2200,11 @@ export function MeetingDetailPage() {
               </div>
             </details>
           )}
+        <TranscriptPanel
+          meeting={meeting}
+          group={groupQuery.data}
+          actorId={auth.user?.userId ?? ''}
+        />
         {environment.capabilities.ai && canGenerateMeetingOutputs && groupQuery.data && (
           <MeetingAIWorkspace meetingId={meeting.id} group={groupQuery.data} />
         )}
