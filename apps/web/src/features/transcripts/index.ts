@@ -1,2 +1,2 @@
 export { TranscriptPanel } from './TranscriptPanel';
-export { getTranscript, updateTranscriptSegment } from './service';
+export { approveTranscript, getTranscript, updateTranscriptSegment } from './service';

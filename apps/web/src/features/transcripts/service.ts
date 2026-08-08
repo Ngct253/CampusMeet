@@ -1,5 +1,7 @@
 import type {
   ApiSuccessResponse,
+  ApproveTranscriptRequest,
+  ApproveTranscriptResponse,
   TranscriptWithSegments,
   UpdateTranscriptSegmentRequest,
   Transcript,
@@ -30,5 +32,21 @@ export const updateTranscriptSegment = async (
     >(
       `/transcripts/${encodeURIComponent(transcriptId)}/segments/${encodeURIComponent(segmentId)}`,
       { method: 'PATCH', body: JSON.stringify(input) },
+    )
+  ).data;
+
+export const approveTranscript = async (
+  transcriptId: string,
+  input: ApproveTranscriptRequest,
+  idempotencyKey: string,
+): Promise<ApproveTranscriptResponse> =>
+  (
+    await apiClient.request<ApiSuccessResponse<ApproveTranscriptResponse>>(
+      `/transcripts/${encodeURIComponent(transcriptId)}/approve`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(input),
+      },
     )
   ).data;

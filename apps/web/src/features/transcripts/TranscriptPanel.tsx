@@ -7,13 +7,26 @@ import {
   type TranscriptSegment,
 } from '@campusmeet/shared';
 import { ApiClientError } from '../../lib/api-client';
-import { getTranscript, updateTranscriptSegment } from './service';
+import { approveTranscript, getTranscript, updateTranscriptSegment } from './service';
 import './transcript.css';
 
 type Draft = Pick<TranscriptSegment, 'text' | 'speakerLabel' | 'languageCode'> & {
   segmentId: string;
   baseVersion: number;
 };
+
+type ApprovalAttempt = {
+  transcriptId: string;
+  version: number;
+  idempotencyKey: string;
+};
+
+const createIdempotencyKey = () => {
+  if (typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID();
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
 export function TranscriptPanel({
   meeting,
   group,
@@ -25,6 +38,8 @@ export function TranscriptPanel({
 }) {
   const queryClient = useQueryClient();
   const submitting = useRef(false);
+  const approvalSubmitting = useRef(false);
+  const approvalAttempt = useRef<ApprovalAttempt | undefined>(undefined);
   const [editing, setEditing] = useState<string>();
   const [draft, setDraft] = useState<Draft>();
   const [message, setMessage] = useState('');
@@ -44,6 +59,7 @@ export function TranscriptPanel({
     membership?.active &&
     (meeting.organizerId === actorId || membership.role === GroupRole.GROUP_ADMIN),
   );
+  const canApprove = canEdit && transcript?.status === 'READY';
   const mutation = useMutation({
     mutationFn: (value: Draft) =>
       updateTranscriptSegment(transcript!.transcriptId, value.segmentId, {
@@ -70,6 +86,50 @@ export function TranscriptPanel({
     },
     onSettled: () => {
       submitting.current = false;
+    },
+  });
+  const approvalMutation = useMutation({
+    mutationFn: (attempt: ApprovalAttempt) =>
+      approveTranscript(
+        attempt.transcriptId,
+        { expectedVersion: attempt.version },
+        attempt.idempotencyKey,
+      ),
+    onSuccess: async (result) => {
+      queryClient.setQueryData<{
+        pages: Array<{
+          transcript: typeof result.transcript | null;
+          segments: TranscriptSegment[];
+          nextCursor?: string;
+        }>;
+        pageParams: unknown[];
+      }>(key, (current) =>
+        current
+          ? {
+              ...current,
+              pages: current.pages.map((page, index) =>
+                index === 0 ? { ...page, transcript: result.transcript } : page,
+              ),
+            }
+          : current,
+      );
+      setMessage('Transcript đã được duyệt.');
+      await queryClient.invalidateQueries({ queryKey: key });
+    },
+    onError: async (error: Error) => {
+      if (error instanceof ApiClientError && error.status === 409) {
+        setMessage(
+          'Transcript đã thay đổi hoặc vừa được duyệt ở nơi khác. Đã tải lại phiên bản mới nhất; vui lòng kiểm tra trước khi thử lại.',
+        );
+        await queryClient.invalidateQueries({ queryKey: key });
+      } else if (error instanceof ApiClientError && error.status === 422) {
+        setMessage('Transcript không còn ở trạng thái có thể duyệt. Vui lòng tải lại và kiểm tra.');
+      } else {
+        setMessage('Không thể duyệt transcript. Bạn có thể thử lại an toàn.');
+      }
+    },
+    onSettled: () => {
+      approvalSubmitting.current = false;
     },
   });
   if (query.isLoading)
@@ -123,6 +183,31 @@ export function TranscriptPanel({
             <small>Đã duyệt lịch sử ở phiên bản {transcript.approvedVersion}</small>
           )}
         </div>
+        {canApprove && (
+          <button
+            type="button"
+            disabled={approvalMutation.isPending}
+            onClick={() => {
+              if (approvalSubmitting.current || approvalMutation.isPending) return;
+              approvalSubmitting.current = true;
+              const currentAttempt = approvalAttempt.current;
+              const attempt =
+                currentAttempt?.transcriptId === transcript.transcriptId &&
+                currentAttempt.version === transcript.version
+                  ? currentAttempt
+                  : {
+                      transcriptId: transcript.transcriptId,
+                      version: transcript.version,
+                      idempotencyKey: createIdempotencyKey(),
+                    };
+              approvalAttempt.current = attempt;
+              setMessage('');
+              approvalMutation.mutate(attempt);
+            }}
+          >
+            {approvalMutation.isPending ? 'Đang duyệt…' : 'Duyệt transcript'}
+          </button>
+        )}
       </header>
       {message && <p role="status">{message}</p>}
       {draft && transcript.version !== draft.baseVersion && (
