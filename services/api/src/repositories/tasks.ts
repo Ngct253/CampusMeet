@@ -33,6 +33,8 @@ const toTask = (item: DynamoItem): Task | undefined => {
   const createdAt = stringValue(item, 'createdAt');
   const updatedAt = stringValue(item, 'updatedAt');
   const completedAt = stringValue(item, 'completedAt');
+  const completionNote = stringValue(item, 'completionNote');
+  const completionEvidenceUrl = stringValue(item, 'completionEvidenceUrl');
   const version = typeof item.version === 'number' ? item.version : undefined;
   if (!id || !groupId || !title || !assigneeId || !status || !priority) {
     return undefined;
@@ -56,6 +58,8 @@ const toTask = (item: DynamoItem): Task | undefined => {
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),
     ...(completedAt ? { completedAt } : {}),
+    ...(completionNote ? { completionNote } : {}),
+    ...(completionEvidenceUrl ? { completionEvidenceUrl } : {}),
     ...(version !== undefined ? { version } : {}),
   };
 };
@@ -273,6 +277,8 @@ export class DynamoDbTaskRepository implements TaskRepository {
     status: TaskStatus,
     expectedVersion: number,
     isLegacyVersion: boolean,
+    completionNote?: string,
+    completionEvidenceUrl?: string,
   ): Promise<Task> {
     const updatedAt = new Date().toISOString();
     const nextVersion = expectedVersion + 1;
@@ -280,8 +286,12 @@ export class DynamoDbTaskRepository implements TaskRepository {
     const eventId = randomUUID();
     const isCompleting = status === TaskStatus.DONE;
     const isReopening = task.status === TaskStatus.DONE && status === TaskStatus.DOING;
+    if (isCompleting && !completionNote) throw new Error('TASK_COMPLETION_NOTE_REQUIRED');
     const updateExpression = isCompleting
-      ? 'SET #status = :status, updatedAt = :updatedAt, #version = :nextVersion, GSI1SK = :gsi1sk, completedAt = :completedAt'
+      ? 'SET #status = :status, updatedAt = :updatedAt, #version = :nextVersion, GSI1SK = :gsi1sk, completedAt = :completedAt, completionNote = :completionNote' +
+        (completionEvidenceUrl
+          ? ', completionEvidenceUrl = :completionEvidenceUrl'
+          : ' REMOVE completionEvidenceUrl')
       : isReopening
         ? 'SET #status = :status, updatedAt = :updatedAt, #version = :nextVersion, GSI1SK = :gsi1sk REMOVE completedAt'
         : 'SET #status = :status, updatedAt = :updatedAt, #version = :nextVersion, GSI1SK = :gsi1sk';
@@ -307,7 +317,15 @@ export class DynamoDbTaskRepository implements TaskRepository {
                   ':nextVersion': nextVersion,
                   ':gsi1sk': `STATUS#${status}#DUE#${dueSortValue}#TASK#${task.id}`,
                   ...(isLegacyVersion ? {} : { ':expectedVersion': expectedVersion }),
-                  ...(isCompleting ? { ':completedAt': updatedAt } : {}),
+                  ...(isCompleting
+                    ? {
+                        ':completedAt': updatedAt,
+                        ':completionNote': completionNote,
+                        ...(completionEvidenceUrl
+                          ? { ':completionEvidenceUrl': completionEvidenceUrl }
+                          : {}),
+                      }
+                    : {}),
                 },
               },
             },
@@ -326,6 +344,12 @@ export class DynamoDbTaskRepository implements TaskRepository {
                   toStatus: status,
                   createdAt: updatedAt,
                   version: nextVersion,
+                  ...(isCompleting
+                    ? {
+                        completionNote,
+                        ...(completionEvidenceUrl ? { completionEvidenceUrl } : {}),
+                      }
+                    : {}),
                 },
                 ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
               },
@@ -355,7 +379,10 @@ export class DynamoDbTaskRepository implements TaskRepository {
       updatedAt,
       version: nextVersion,
       ...(isCompleting ? { completedAt: updatedAt } : {}),
+      ...(isCompleting ? { completionNote } : {}),
+      ...(isCompleting && completionEvidenceUrl ? { completionEvidenceUrl } : {}),
     };
+    if (isCompleting && !completionEvidenceUrl) delete updatedTask.completionEvidenceUrl;
     if (isReopening) delete updatedTask.completedAt;
     return updatedTask;
   }

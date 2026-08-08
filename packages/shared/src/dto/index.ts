@@ -88,8 +88,26 @@ export const updateTaskStatusInputSchema = z
   .object({
     status: z.nativeEnum(TaskStatus),
     expectedVersion: z.number().int().nonnegative(),
+    completionNote: z.string().trim().min(3).max(2000).optional(),
+    completionEvidenceUrl: z.string().trim().url().max(2048).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    if (input.status === TaskStatus.DONE && !input.completionNote) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['completionNote'],
+        message: 'Hãy ghi lại kết quả trước khi hoàn thành công việc.',
+      });
+    }
+    if (input.status !== TaskStatus.DONE && (input.completionNote || input.completionEvidenceUrl)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['completionNote'],
+        message: 'Chỉ gửi kết quả khi hoàn thành công việc.',
+      });
+    }
+  });
 const minutesDecisionInputSchema = z
   .object({
     id: z.string().trim().min(1).optional(),

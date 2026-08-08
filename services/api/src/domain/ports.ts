@@ -163,6 +163,8 @@ export interface TaskRepository {
     status: TaskStatus,
     expectedVersion: number,
     isLegacyVersion: boolean,
+    completionNote?: string,
+    completionEvidenceUrl?: string,
   ): Promise<Task>;
 }
 

@@ -155,8 +155,6 @@ describe('TaskService.updateTaskStatus', () => {
 
   it.each([
     [TaskStatus.TODO, TaskStatus.DOING],
-    [TaskStatus.TODO, TaskStatus.DONE],
-    [TaskStatus.DOING, TaskStatus.TODO],
     [TaskStatus.DOING, TaskStatus.DONE],
     [TaskStatus.DONE, TaskStatus.DOING],
   ])('allows transition %s -> %s', async (fromStatus, toStatus) => {
@@ -168,17 +166,42 @@ describe('TaskService.updateTaskStatus', () => {
     await new TaskService(tasks, groups, meetings).updateTaskStatus('user-2', current.id, {
       status: toStatus,
       expectedVersion: 1,
+      ...(toStatus === TaskStatus.DONE ? { completionNote: 'Đã bàn giao bản demo.' } : {}),
     });
-    expect(tasks.updateStatus).toHaveBeenCalledWith(current, 'user-2', toStatus, 1, false);
+    expect(tasks.updateStatus).toHaveBeenCalledWith(
+      current,
+      'user-2',
+      toStatus,
+      1,
+      false,
+      ...(toStatus === TaskStatus.DONE ? ['Đã bàn giao bản demo.', undefined] : []),
+    );
   });
 
-  it('returns 422 for DONE -> TODO', async () => {
+  it.each([
+    [TaskStatus.TODO, TaskStatus.DONE],
+    [TaskStatus.DOING, TaskStatus.TODO],
+    [TaskStatus.DONE, TaskStatus.TODO],
+  ])('returns 422 for unsupported %s -> %s', async (fromStatus, toStatus) => {
     const { tasks, groups, meetings } = dependencies();
-    tasks.getById.mockResolvedValue(taskFor(TaskStatus.DONE));
+    tasks.getById.mockResolvedValue(taskFor(fromStatus));
 
     await expect(
       new TaskService(tasks, groups, meetings).updateTaskStatus('user-2', task.id, {
-        status: TaskStatus.TODO,
+        status: toStatus,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'UNPROCESSABLE_ENTITY', statusCode: 422 });
+    expect(tasks.updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('requires a result before completing DOING -> DONE', async () => {
+    const { tasks, groups, meetings } = dependencies();
+    tasks.getById.mockResolvedValue(taskFor(TaskStatus.DOING));
+
+    await expect(
+      new TaskService(tasks, groups, meetings).updateTaskStatus('user-2', task.id, {
+        status: TaskStatus.DONE,
         expectedVersion: 1,
       }),
     ).rejects.toMatchObject({ code: 'UNPROCESSABLE_ENTITY', statusCode: 422 });

@@ -777,3 +777,340 @@
   width: fit-content;
   margin-bottom: 1rem;
 }
+
+.meeting-google-pending p {
+  margin: 0 0 0.4rem;
+}
+
+/* Minutes workspace */
+.minutes-workspace {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.minutes-workflow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+  overflow: hidden;
+}
+
+.minutes-workflow li {
+  display: flex;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 0.9rem 1rem;
+  background: #f8faff;
+}
+
+.minutes-workflow li + li {
+  border-left: 1px solid var(--color-border);
+}
+
+.minutes-workflow li > span,
+.minutes-form-section-heading > span:first-child {
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 1.75rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.minutes-workflow strong,
+.minutes-workflow small {
+  display: block;
+}
+
+.minutes-workflow small {
+  margin-top: 0.2rem;
+  color: var(--color-muted);
+  line-height: 1.4;
+}
+
+.minutes-empty-guided {
+  min-height: 8rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem;
+  border: 1px dashed #b8c4da;
+  border-radius: 0.85rem;
+  background: #fbfcff;
+}
+
+.minutes-empty-guided p {
+  max-width: 62ch;
+}
+
+.minutes-read-view {
+  gap: 1.15rem;
+}
+
+.minutes-read-heading,
+.minutes-editor-heading,
+.minutes-form-actions,
+.minutes-read-heading > div,
+.minutes-editor-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.minutes-read-heading,
+.minutes-editor-heading,
+.minutes-form-actions {
+  justify-content: space-between;
+}
+
+.minutes-read-heading > div,
+.minutes-editor-heading > div:first-child {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.minutes-read-heading span,
+.minutes-editor-heading span {
+  color: var(--color-muted);
+  font-size: 0.88rem;
+}
+
+.minutes-saved-state,
+.minutes-tracked,
+.minutes-not-tracked {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.minutes-saved-state,
+.minutes-tracked {
+  background: #eaf7f1;
+  color: #166b4b !important;
+}
+
+.minutes-not-tracked {
+  background: #f0f3f8;
+  color: #526079;
+}
+
+.minutes-summary-block {
+  padding: 1rem;
+  border-radius: 0.8rem;
+  background: #f7f9fd;
+}
+
+.minutes-summary-block h3,
+.minutes-result-section h3,
+.minutes-form-section h3 {
+  margin: 0;
+}
+
+.minutes-discussion-read {
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 1rem;
+}
+
+.minutes-discussion-read summary,
+.minutes-discussion-editor summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--color-primary-dark);
+  font-weight: 750;
+}
+
+.minutes-result-section > p,
+.minutes-inline-empty {
+  margin: 0.5rem 0 0;
+  color: var(--color-muted);
+}
+
+.minutes-result-list,
+.minutes-action-summary-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.65rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.minutes-result-list li {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+}
+
+.minutes-result-list li > span:first-child {
+  color: var(--color-success);
+  font-weight: 800;
+}
+
+.minutes-action-summary-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.minutes-action-summary-list strong,
+.minutes-action-summary-list li div > span {
+  display: block;
+}
+
+.minutes-action-summary-list li div > span {
+  margin-top: 0.25rem;
+  color: var(--color-muted);
+  font-size: 0.88rem;
+}
+
+.minutes-edit-button,
+.minutes-add-button {
+  width: fit-content;
+}
+
+.minutes-editor {
+  gap: 1.15rem;
+}
+
+.minutes-editor-heading {
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.minutes-form-section {
+  display: grid !important;
+  gap: 0.85rem !important;
+  padding: 1rem !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 0.85rem !important;
+}
+
+.minutes-form-section-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.minutes-form-section-heading p,
+.minutes-form-section-heading small {
+  display: block;
+  margin: 0.2rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.field-required {
+  color: var(--color-danger);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.minutes-discussion-editor {
+  padding-top: 0.25rem;
+}
+
+.minutes-discussion-editor label {
+  margin-top: 0.75rem;
+}
+
+.minutes-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.minutes-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(11rem, 1fr) minmax(10rem, 0.8fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border-radius: 0.75rem;
+  background: #f8faff;
+}
+
+.minutes-action-row label {
+  min-width: 0;
+  font-size: 0.88rem;
+}
+
+.minutes-action-row input,
+.minutes-action-row select {
+  max-width: none;
+}
+
+.minutes-action-remove {
+  min-height: 2.75rem;
+}
+
+.minutes-form-actions {
+  padding-top: 0.25rem;
+  justify-content: flex-end;
+}
+
+.action-item-task-panel {
+  margin-top: 0;
+  padding-top: 1.25rem;
+}
+
+.action-item-task-panel > div:first-child p {
+  max-width: 70ch;
+  color: var(--color-muted);
+}
+
+.action-item-task-entry {
+  box-shadow: none;
+}
+
+@media (max-width: 900px) {
+  .minutes-workflow {
+    grid-template-columns: 1fr;
+  }
+
+  .minutes-workflow li + li {
+    border-top: 1px solid var(--color-border);
+    border-left: 0;
+  }
+
+  .minutes-action-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .minutes-action-content {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 600px) {
+  .minutes-empty-guided,
+  .minutes-action-summary-list li,
+  .minutes-editor-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .minutes-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .minutes-action-content {
+    grid-column: auto;
+  }
+}
