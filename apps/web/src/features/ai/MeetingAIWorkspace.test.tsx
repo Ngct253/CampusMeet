@@ -2,13 +2,17 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   GroupRole,
+  Priority,
   type AIJob,
   type AIJobDetail,
   type Citation,
+  type ConfirmTaskProposalResponse,
   type GroupDetails,
 } from '@campusmeet/shared';
+import { AIServiceError } from './service';
 import { MeetingAIWorkspace } from './MeetingAIWorkspace';
 
 const aiMocks = vi.hoisted(() => ({
@@ -17,9 +21,16 @@ const aiMocks = vi.hoisted(() => ({
   minutesReset: vi.fn(),
   tasksMutate: vi.fn(),
   tasksReset: vi.fn(),
+  confirmMutate: vi.fn(),
+  confirmReset: vi.fn(),
+  refetchJob: vi.fn(),
 }));
 
 type MutationOptions = { onSuccess?: (job: AIJob) => void };
+type ConfirmationOptions = {
+  onSuccess?: (response: ConfirmTaskProposalResponse) => void | Promise<void>;
+  onError?: (error: Error) => void | Promise<void>;
+};
 
 const queuedJob = (aiJobId: string, type: AIJob['type'], meetingId = 'meeting-1'): AIJob => ({
   aiJobId,
@@ -43,6 +54,7 @@ vi.mock('./hooks', async (importOriginal) => {
       isLoading: false,
       isError: false,
       error: null,
+      refetch: aiMocks.refetchJob,
     }),
     useMinutesDraftMutation: () => ({
       mutate: aiMocks.minutesMutate,
@@ -54,6 +66,13 @@ vi.mock('./hooks', async (importOriginal) => {
     useTaskProposalsMutation: () => ({
       mutate: aiMocks.tasksMutate,
       reset: aiMocks.tasksReset,
+      isPending: false,
+      isError: false,
+      error: null,
+    }),
+    useConfirmTaskProposalMutation: () => ({
+      mutate: aiMocks.confirmMutate,
+      reset: aiMocks.confirmReset,
       isPending: false,
       isError: false,
       error: null,
@@ -101,6 +120,48 @@ const group: GroupDetails = {
   ],
 };
 
+const confirmedResponse = (): ConfirmTaskProposalResponse => ({
+  task: {
+    id: 'task-authoritative',
+    groupId: 'group-1',
+    title: 'Hoàn thiện bản demo',
+    assigneeId: 'user-1',
+    status: 'TODO',
+    priority: Priority.HIGH,
+    sourceMeetingId: 'meeting-1',
+    createdBy: 'admin',
+    createdAt: '2026-08-08T01:00:00.000Z',
+    updatedAt: '2026-08-08T01:00:00.000Z',
+    version: 1,
+  },
+  proposal: {
+    proposalId: 'proposal-1',
+    groupId: 'group-1',
+    meetingId: 'meeting-1',
+    title: 'Hoàn thiện bản demo',
+    assigneeId: 'user-1',
+    priority: 'HIGH',
+    missingFields: [],
+    status: 'CONFIRMED',
+    confirmedTaskId: 'task-authoritative',
+    citations: [citation],
+  },
+});
+
+const renderWorkspace = (details: GroupDetails = group) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidateQueries = vi.spyOn(client, 'invalidateQueries');
+  return {
+    ...render(
+      <QueryClientProvider client={client}>
+        <MeetingAIWorkspace meetingId="meeting-1" group={details} />
+      </QueryClientProvider>,
+    ),
+    client,
+    invalidateQueries,
+  };
+};
+
 afterEach(cleanup);
 
 beforeEach(() => {
@@ -111,6 +172,9 @@ beforeEach(() => {
   });
   aiMocks.tasksMutate.mockImplementation((_input: unknown, options?: MutationOptions) => {
     options?.onSuccess?.(queuedJob('tasks-job', 'GENERATE_TASK_PROPOSALS'));
+  });
+  aiMocks.confirmMutate.mockImplementation((_input: unknown, options?: ConfirmationOptions) => {
+    void options?.onSuccess?.(confirmedResponse());
   });
 });
 
@@ -128,7 +192,7 @@ it('tạo và hiển thị biên bản nháp đúng meeting', async () => {
     },
   };
 
-  render(<MeetingAIWorkspace meetingId="meeting-1" group={group} />);
+  renderWorkspace();
   fireEvent.click(screen.getByRole('button', { name: 'Tạo biên bản nháp' }));
 
   expect(aiMocks.minutesMutate).toHaveBeenCalledWith(
@@ -139,7 +203,7 @@ it('tạo và hiển thị biên bản nháp đúng meeting', async () => {
   expect(screen.getByText('Phạm vi demo được thống nhất.')).toBeInTheDocument();
 });
 
-it('bổ sung field TaskProposal nhưng không tự tạo Task', async () => {
+it('xác nhận proposal bằng API và chỉ hiển thị task id từ response authoritative', async () => {
   aiMocks.jobs['tasks-job'] = {
     ...queuedJob('tasks-job', 'GENERATE_TASK_PROPOSALS'),
     status: 'COMPLETED',
@@ -156,18 +220,119 @@ it('bổ sung field TaskProposal nhưng không tự tạo Task', async () => {
     ],
   };
 
-  render(<MeetingAIWorkspace meetingId="meeting-1" group={group} />);
+  const { invalidateQueries } = renderWorkspace();
   fireEvent.click(screen.getByRole('button', { name: 'Đề xuất công việc' }));
   expect(await screen.findByText('Hoàn thiện bản demo')).toBeInTheDocument();
-  const completeButton = screen.getByRole('button', { name: 'Hoàn tất thông tin' });
-  expect(completeButton).toBeDisabled();
+  const confirmButton = screen.getByRole('button', { name: 'Xác nhận tạo công việc' });
+  expect(confirmButton).toBeDisabled();
   fireEvent.change(screen.getByLabelText('Người phụ trách'), { target: { value: 'user-1' } });
   fireEvent.change(screen.getByLabelText('Mức ưu tiên'), { target: { value: 'HIGH' } });
-  fireEvent.click(completeButton);
+  expect(screen.queryByText(/task-authoritative/)).not.toBeInTheDocument();
+  fireEvent.click(confirmButton);
 
-  expect(
-    screen.getByText(/Công việc chưa được tạo cho đến khi Quản trị viên nhóm xác nhận/i),
-  ).toBeInTheDocument();
+  expect(aiMocks.confirmMutate).toHaveBeenCalledWith(
+    {
+      proposalId: 'proposal-1',
+      request: {
+        title: 'Hoàn thiện bản demo',
+        assigneeId: 'user-1',
+        priority: Priority.HIGH,
+      },
+    },
+    expect.any(Object),
+  );
+  expect(await screen.findByText('Đã tạo công việc task-authoritative.')).toBeInTheDocument();
+  expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['tasks'] });
+  expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard'] });
+});
+
+it('không hiển thị nút xác nhận cho MEMBER', async () => {
+  aiMocks.jobs['tasks-job'] = {
+    ...queuedJob('tasks-job', 'GENERATE_TASK_PROPOSALS'),
+    status: 'COMPLETED',
+    result: [
+      {
+        proposalId: 'proposal-1',
+        groupId: 'group-1',
+        meetingId: 'meeting-1',
+        title: 'Hoàn thiện bản demo',
+        assigneeId: 'user-1',
+        priority: 'HIGH',
+        missingFields: [],
+        status: 'PENDING',
+        citations: [citation],
+      },
+    ],
+  };
+  renderWorkspace({ ...group, group: { ...group.group, role: GroupRole.MEMBER } });
+  fireEvent.click(screen.getByRole('button', { name: 'Đề xuất công việc' }));
+
+  expect(await screen.findByText('Hoàn thiện bản demo')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Xác nhận tạo công việc' })).not.toBeInTheDocument();
+});
+
+it('giữ nội dung chỉnh sửa khi backend trả 422', async () => {
+  aiMocks.jobs['tasks-job'] = {
+    ...queuedJob('tasks-job', 'GENERATE_TASK_PROPOSALS'),
+    status: 'COMPLETED',
+    result: [
+      {
+        proposalId: 'proposal-1',
+        groupId: 'group-1',
+        meetingId: 'meeting-1',
+        title: 'Hoàn thiện bản demo',
+        assigneeId: 'user-1',
+        priority: 'HIGH',
+        missingFields: [],
+        status: 'PENDING',
+        citations: [citation],
+      },
+    ],
+  };
+  aiMocks.confirmMutate.mockImplementation((_input: unknown, options?: ConfirmationOptions) => {
+    void options?.onError?.(
+      new AIServiceError(422, 'VALIDATION_ERROR', 'Người phụ trách không còn hoạt động.'),
+    );
+  });
+  renderWorkspace();
+  fireEvent.click(screen.getByRole('button', { name: 'Đề xuất công việc' }));
+  const title = await screen.findByLabelText('Tiêu đề công việc');
+  fireEvent.change(title, { target: { value: 'Bản demo đã chỉnh sửa' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Người phụ trách không còn hoạt động.',
+  );
+  expect(title).toHaveValue('Bản demo đã chỉnh sửa');
+});
+
+it('refetch proposal job khi confirmation trả 409 mà không tạo task id giả', async () => {
+  aiMocks.jobs['tasks-job'] = {
+    ...queuedJob('tasks-job', 'GENERATE_TASK_PROPOSALS'),
+    status: 'COMPLETED',
+    result: [
+      {
+        proposalId: 'proposal-1',
+        groupId: 'group-1',
+        meetingId: 'meeting-1',
+        title: 'Hoàn thiện bản demo',
+        assigneeId: 'user-1',
+        priority: 'HIGH',
+        missingFields: [],
+        status: 'PENDING',
+        citations: [citation],
+      },
+    ],
+  };
+  aiMocks.confirmMutate.mockImplementation((_input: unknown, options?: ConfirmationOptions) => {
+    void options?.onError?.(new AIServiceError(409, 'CONFLICT', 'Proposal đã thay đổi.'));
+  });
+  renderWorkspace();
+  fireEvent.click(screen.getByRole('button', { name: 'Đề xuất công việc' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Xác nhận tạo công việc' }));
+
+  await waitFor(() => expect(aiMocks.refetchJob).toHaveBeenCalledOnce());
+  expect(screen.queryByText(/Đã tạo công việc/)).not.toBeInTheDocument();
 });
 
 it('từ chối hiển thị result thuộc meeting khác', async () => {
@@ -184,7 +349,7 @@ it('từ chối hiển thị result thuộc meeting khác', async () => {
     },
   };
 
-  render(<MeetingAIWorkspace meetingId="meeting-1" group={group} />);
+  renderWorkspace();
   fireEvent.click(screen.getByRole('button', { name: 'Tạo biên bản nháp' }));
 
   expect(await screen.findByRole('alert')).toHaveTextContent('Không thể hoàn thành yêu cầu');
@@ -205,11 +370,20 @@ it('xóa output cũ khi đổi meeting', async () => {
     },
   };
 
-  const view = render(<MeetingAIWorkspace meetingId="meeting-1" group={group} />);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <MeetingAIWorkspace meetingId="meeting-1" group={group} />
+    </QueryClientProvider>,
+  );
   fireEvent.click(screen.getByRole('button', { name: 'Tạo biên bản nháp' }));
   expect(await screen.findByText('Nội dung chỉ thuộc cuộc họp đầu tiên.')).toBeInTheDocument();
 
-  view.rerender(<MeetingAIWorkspace meetingId="meeting-2" group={group} />);
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <MeetingAIWorkspace meetingId="meeting-2" group={group} />
+    </QueryClientProvider>,
+  );
 
   await waitFor(() =>
     expect(screen.queryByText('Nội dung chỉ thuộc cuộc họp đầu tiên.')).not.toBeInTheDocument(),

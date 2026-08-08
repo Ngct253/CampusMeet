@@ -156,7 +156,8 @@ describe('TasksPage', () => {
     ]);
     renderPage();
     expect(await screen.findByText('Hoàn thiện báo cáo')).toBeInTheDocument();
-    expect(screen.getByText('Ưu tiên: HIGH')).toBeInTheDocument();
+    expect(screen.getByText('Ưu tiên cao')).toBeInTheDocument();
+    expect(screen.getByText('Chưa làm')).toBeInTheDocument();
   });
 
   it('shows status actions allowed for TODO, DOING, and DONE', async () => {
@@ -191,10 +192,12 @@ describe('TasksPage', () => {
     ]);
     renderPage();
 
-    expect(await screen.findByRole('button', { name: 'Bắt đầu' })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Hoàn thành' })).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Đưa về TODO' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Mở lại' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Bắt đầu công việc' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ghi nhận hoàn thành' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tiếp tục thực hiện' })).toBeInTheDocument();
+    expect(screen.queryByText('TODO')).not.toBeInTheDocument();
+    expect(screen.queryByText('DOING')).not.toBeInTheDocument();
+    expect(screen.queryByText('DONE')).not.toBeInTheDocument();
   });
 
   it('sends legacy version 0 and prevents a double status update while pending', async () => {
@@ -211,7 +214,7 @@ describe('TasksPage', () => {
     services.updateTaskStatus.mockReturnValue(new Promise(() => undefined));
     renderPage();
 
-    const startButton = await screen.findByRole('button', { name: 'Bắt đầu' });
+    const startButton = await screen.findByRole('button', { name: 'Bắt đầu công việc' });
     fireEvent.click(startButton);
     fireEvent.click(startButton);
     await waitFor(() =>
@@ -221,7 +224,7 @@ describe('TasksPage', () => {
       }),
     );
     expect(services.updateTaskStatus).toHaveBeenCalledTimes(1);
-    expect(screen.getAllByRole('button', { name: 'Đang cập nhật…' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Đang cập nhật…' })).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: 'Đang cập nhật…' })[0]).toBeDisabled();
   });
 
@@ -240,7 +243,7 @@ describe('TasksPage', () => {
     const { client } = renderPage();
     const invalidate = vi.spyOn(client, 'invalidateQueries');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Bắt đầu' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Bắt đầu công việc' }));
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tasks'] }));
   });
 
@@ -258,19 +261,19 @@ describe('TasksPage', () => {
     services.updateTaskStatus.mockRejectedValue(new ApiClientError('conflict', 409, 'CONFLICT'));
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Bắt đầu' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Bắt đầu công việc' }));
     expect(
       await screen.findByText(
         'Công việc đã được cập nhật ở nơi khác. Danh sách đang được làm mới.',
       ),
     ).toBeInTheDocument();
     await waitFor(() => expect(services.getTasks.mock.calls.length).toBeGreaterThan(1));
-    expect(screen.getByText('TODO')).toBeInTheDocument();
+    expect(screen.getByText('Chưa làm')).toBeInTheDocument();
   });
 
   it.each([
     [403, 'Bạn không có quyền cập nhật công việc này.'],
-    [422, 'Không thể chuyển sang trạng thái công việc đã chọn.'],
+    [422, 'Chưa thể ghi nhận hoàn thành. Hãy kiểm tra lại phần kết quả.'],
   ])('shows status error %s without applying an optimistic status', async (status, message) => {
     services.getTasks.mockResolvedValue([
       {
@@ -278,7 +281,7 @@ describe('TasksPage', () => {
         groupId: 'group-1',
         title: 'Task TODO',
         assigneeId: 'admin-1',
-        status: 'TODO',
+        status: 'DOING',
         priority: 'HIGH',
         version: 1,
       },
@@ -288,10 +291,59 @@ describe('TasksPage', () => {
     );
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Hoàn thành' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ghi nhận hoàn thành' }));
+    fireEvent.change(screen.getByLabelText('Kết quả đã hoàn thành'), {
+      target: { value: 'Đã hoàn thiện và bàn giao kết quả.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận hoàn thành' }));
     expect(await screen.findByText(message)).toBeInTheDocument();
-    expect(screen.getByText('TODO')).toBeInTheDocument();
-    expect(screen.queryByText('DONE')).not.toBeInTheDocument();
+    expect(screen.getByText('Đang làm')).toBeInTheDocument();
+    expect(screen.queryByText('Hoàn thành')).not.toBeInTheDocument();
+  });
+
+  it('requires a result and sends optional evidence before marking a task complete', async () => {
+    const doing = {
+      id: 'task-1',
+      groupId: 'group-1',
+      title: 'Kiểm tra bản phát hành',
+      assigneeId: 'admin-1',
+      status: 'DOING',
+      priority: 'HIGH',
+      version: 4,
+    };
+    services.getTasks.mockResolvedValue([doing]);
+    services.updateTaskStatus.mockResolvedValue({
+      ...doing,
+      status: 'DONE',
+      version: 5,
+      completionNote: 'Đã kiểm tra trên production.',
+      completionEvidenceUrl: 'https://example.com/evidence',
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Ghi nhận hoàn thành' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận hoàn thành' }));
+    expect(
+      await screen.findByText('Hãy mô tả ngắn gọn kết quả đã hoàn thành.'),
+    ).toBeInTheDocument();
+    expect(services.updateTaskStatus).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Kết quả đã hoàn thành'), {
+      target: { value: '  Đã kiểm tra trên production.  ' },
+    });
+    fireEvent.change(screen.getByLabelText('Liên kết minh chứng (không bắt buộc)'), {
+      target: { value: 'https://example.com/evidence' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận hoàn thành' }));
+
+    await waitFor(() =>
+      expect(services.updateTaskStatus).toHaveBeenCalledWith('task-1', {
+        status: 'DONE',
+        expectedVersion: 4,
+        completionNote: 'Đã kiểm tra trên production.',
+        completionEvidenceUrl: 'https://example.com/evidence',
+      }),
+    );
   });
 
   it('only offers GROUP_ADMIN groups and hides the form without one', async () => {
@@ -327,12 +379,12 @@ describe('TasksPage', () => {
     fireEvent.change(await screen.findByLabelText('Người phụ trách'), {
       target: { value: 'user-2' },
     });
-    fireEvent.change(screen.getByLabelText('Cuộc họp nguồn (không bắt buộc)'), {
+    fireEvent.change(screen.getByLabelText('Cuộc họp'), {
       target: { value: 'meeting-1' },
     });
     fireEvent.change(screen.getByLabelText('Nhóm'), { target: { value: 'group-3' } });
     expect(screen.getByLabelText('Người phụ trách')).toHaveValue('');
-    expect(screen.getByLabelText('Cuộc họp nguồn (không bắt buộc)')).toHaveValue('');
+    expect(screen.getByLabelText('Cuộc họp')).toHaveValue('');
   });
 
   it('validates title before sending', async () => {
@@ -374,7 +426,7 @@ describe('TasksPage', () => {
     expect(services.createTask.mock.calls[0]?.[1]).toBe('00000000-0000-4000-8000-000000000001');
   });
 
-  it('converts datetime-local to UTC ISO and sends an optional meeting', async () => {
+  it('uses the end of the selected due date and sends an optional meeting', async () => {
     enableCreateForm();
     services.createTask.mockResolvedValue({
       id: 'task-1',
@@ -389,16 +441,16 @@ describe('TasksPage', () => {
     await fillRequiredFields();
     fireEvent.change(screen.getByLabelText('Mức ưu tiên'), { target: { value: Priority.HIGH } });
     fireEvent.change(screen.getByLabelText('Hạn hoàn thành (không bắt buộc)'), {
-      target: { value: '2026-08-10T17:30' },
+      target: { value: '2026-08-10' },
     });
-    fireEvent.change(await screen.findByLabelText('Cuộc họp nguồn (không bắt buộc)'), {
+    fireEvent.change(await screen.findByLabelText('Cuộc họp'), {
       target: { value: 'meeting-1' },
     });
     submitForm();
     await waitFor(() => expect(services.createTask).toHaveBeenCalled());
     expect(services.createTask.mock.calls[0]?.[0]).toMatchObject({
       priority: Priority.HIGH,
-      dueAt: new Date('2026-08-10T17:30').toISOString(),
+      dueAt: new Date('2026-08-10T23:59:59').toISOString(),
       sourceMeetingId: 'meeting-1',
     });
   });
@@ -529,7 +581,7 @@ describe('TasksPage', () => {
     );
     renderPage();
     await fillRequiredFields();
-    const meetingSelect = await screen.findByLabelText('Cuộc họp nguồn (không bắt buộc)');
+    const meetingSelect = await screen.findByLabelText('Cuộc họp');
     fireEvent.change(meetingSelect, { target: { value: 'meeting-1' } });
     submitForm();
 
@@ -561,7 +613,7 @@ describe('TasksPage', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries');
     await fillRequiredFields();
     if (status === 404) {
-      fireEvent.change(await screen.findByLabelText('Cuộc họp nguồn (không bắt buộc)'), {
+      fireEvent.change(await screen.findByLabelText('Cuộc họp'), {
         target: { value: 'meeting-1' },
       });
     }
@@ -569,7 +621,7 @@ describe('TasksPage', () => {
     expect(await screen.findByText(message)).toBeInTheDocument();
     if (status === 403) expect(invalidate).toHaveBeenCalledWith({ queryKey: ['groups'] });
     if (status === 404) {
-      expect(screen.getByLabelText('Cuộc họp nguồn (không bắt buộc)')).toHaveValue('');
+      expect(screen.getByLabelText('Cuộc họp')).toHaveValue('');
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['groups', 'group-1', 'meetings'] });
     }
     if (status === 422) {

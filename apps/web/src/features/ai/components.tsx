@@ -1,4 +1,5 @@
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
+import { Priority } from '@campusmeet/shared';
 import type {
   AIJob,
   Citation,
@@ -7,6 +8,7 @@ import type {
   KnowledgeScope,
   MinutesDraft,
   TaskProposal,
+  ConfirmTaskProposalRequest,
 } from '@campusmeet/shared';
 import './ai.css';
 
@@ -325,7 +327,7 @@ export function AIChatPanel({
             ? 'Hỏi từ tài liệu, bản ghi và biên bản mà bạn được phép truy cập.'
             : 'Hỏi từ tài liệu, bản ghi và biên bản đã duyệt trong nhóm hiện tại.'
         }
-        eyebrow={context === 'meeting' ? 'Meeting copilot' : 'Group copilot'}
+        eyebrow={context === 'meeting' ? 'Trợ lý cuộc họp' : 'Trợ lý nhóm'}
         icon="message"
         title={context === 'meeting' ? 'Nối lại mạch cuộc họp' : 'Đối chiếu kiến thức nhóm'}
       />
@@ -561,7 +563,7 @@ export function MinutesDraftPreview({ draft }: { draft: MinutesDraft }) {
       <PanelHeader
         aside={<span className="ai-review-label">Chờ duyệt</span>}
         description="Chỉ ghi lại nội dung đã được nêu; bạn vẫn là người quyết định bản cuối."
-        eyebrow="Meeting record"
+        eyebrow="Biên bản cuộc họp"
         icon="document"
         title="Biên bản nháp"
       />
@@ -581,24 +583,60 @@ export function MinutesDraftPreview({ draft }: { draft: MinutesDraft }) {
 
 export interface CompletedTaskProposalFields {
   proposalId: string;
-  assigneeId: string;
-  priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  request: ConfirmTaskProposalRequest;
 }
+
+const toLocalDateTimeInput = (value: string | undefined) => {
+  if (!value) return '';
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+};
 
 export function TaskProposalEditor({
   proposal,
   assigneeOptions = [],
-  onComplete,
+  canConfirm = true,
+  isPending = false,
+  error,
+  onConfirm,
 }: {
   proposal: TaskProposal;
   assigneeOptions?: Array<{ userId: string; displayName: string }>;
-  onComplete: (fields: CompletedTaskProposalFields) => void;
+  canConfirm?: boolean;
+  isPending?: boolean;
+  error?: string;
+  onConfirm: (fields: CompletedTaskProposalFields) => void;
 }) {
   const assigneeInputId = useId();
   const priorityInputId = useId();
+  const titleInputId = useId();
+  const dueAtInputId = useId();
+  const [title, setTitle] = useState(proposal.title);
   const [assigneeId, setAssigneeId] = useState(proposal.assigneeId ?? '');
   const [priority, setPriority] = useState<TaskProposal['priority']>(proposal.priority);
-  const hasMissingFields = !assigneeId.trim() || !priority;
+  const [dueAt, setDueAt] = useState(toLocalDateTimeInput(proposal.dueAt));
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  useEffect(() => {
+    setTitle(proposal.title);
+    setAssigneeId(proposal.assigneeId ?? '');
+    setPriority(proposal.priority);
+    setDueAt(toLocalDateTimeInput(proposal.dueAt));
+    setIsSubmitting(false);
+  }, [
+    proposal.assigneeId,
+    proposal.confirmedTaskId,
+    proposal.dueAt,
+    proposal.priority,
+    proposal.proposalId,
+    proposal.status,
+    proposal.title,
+  ]);
+  useEffect(() => {
+    if (error) setIsSubmitting(false);
+  }, [error]);
+  const assigneeIsActive = assigneeOptions.some((assignee) => assignee.userId === assigneeId);
+  const hasMissingFields = !title.trim() || !assigneeId.trim() || !assigneeIsActive || !priority;
+  const isConfirmed = proposal.status === 'CONFIRMED' && Boolean(proposal.confirmedTaskId);
   return (
     <article className="ai-surface ai-task-proposal">
       <header className="ai-proposal-header">
@@ -609,7 +647,7 @@ export function TaskProposalEditor({
           <span className="ai-eyebrow">Đề xuất từ cuộc họp</span>
           <h4>{proposal.title}</h4>
         </div>
-        <span className="ai-review-label">Cần xác nhận</span>
+        <span className="ai-review-label">{isConfirmed ? 'Đã xác nhận' : 'Cần xác nhận'}</span>
       </header>
       {proposal.description && <p className="ai-proposal-description">{proposal.description}</p>}
       {hasMissingFields && (
@@ -619,11 +657,22 @@ export function TaskProposalEditor({
         </div>
       )}
       <div className="ai-proposal-fields">
+        <label htmlFor={titleInputId}>
+          Tiêu đề công việc
+          <input
+            id={titleInputId}
+            value={title}
+            maxLength={200}
+            disabled={isConfirmed || isPending || !canConfirm}
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        </label>
         <label htmlFor={assigneeInputId}>
           Người phụ trách
           <select
             id={assigneeInputId}
             value={assigneeId}
+            disabled={isConfirmed || isPending || !canConfirm}
             onChange={(event) => setAssigneeId(event.target.value)}
           >
             <option value="">Chọn thành viên</option>
@@ -633,7 +682,9 @@ export function TaskProposalEditor({
               </option>
             ))}
             {assigneeId && !assigneeOptions.some((assignee) => assignee.userId === assigneeId) && (
-              <option value={assigneeId}>{assigneeId}</option>
+              <option disabled value={assigneeId}>
+                {assigneeId} (không còn hoạt động)
+              </option>
             )}
           </select>
         </label>
@@ -642,6 +693,7 @@ export function TaskProposalEditor({
           <select
             id={priorityInputId}
             value={priority ?? ''}
+            disabled={isConfirmed || isPending || !canConfirm}
             onChange={(event) => {
               const selectedPriority = event.target.value;
               setPriority(
@@ -651,25 +703,57 @@ export function TaskProposalEditor({
           >
             <option value="">Chọn mức ưu tiên</option>
             <option value="LOW">Thấp</option>
-            <option value="MEDIUM">Trung bình</option>
+            <option value="MEDIUM">Vừa</option>
             <option value="HIGH">Cao</option>
           </select>
         </label>
+        <label htmlFor={dueAtInputId}>
+          Hạn hoàn thành
+          <input
+            id={dueAtInputId}
+            type="datetime-local"
+            value={dueAt}
+            disabled={isConfirmed || isPending || !canConfirm}
+            onChange={(event) => setDueAt(event.target.value)}
+          />
+        </label>
       </div>
+      {error && (
+        <p className="ai-feedback ai-feedback--error" role="alert">
+          {error}
+        </p>
+      )}
       <div className="ai-form-footer">
-        <span>AI không tự tạo công việc khi chưa có xác nhận.</span>
-        <button
-          className="ai-button ai-button--primary"
-          type="button"
-          disabled={hasMissingFields}
-          onClick={() =>
-            priority &&
-            onComplete({ proposalId: proposal.proposalId, assigneeId: assigneeId.trim(), priority })
-          }
-        >
-          Hoàn tất thông tin
-          <AIIcon name="arrow" size={16} />
-        </button>
+        <span>
+          {isConfirmed
+            ? `Đã tạo công việc ${proposal.confirmedTaskId}.`
+            : canConfirm
+              ? 'AI không tự tạo công việc khi chưa có xác nhận.'
+              : 'Chỉ Quản trị viên nhóm được xác nhận tạo công việc.'}
+        </span>
+        {!isConfirmed && canConfirm && proposal.status === 'PENDING' && (
+          <button
+            className="ai-button ai-button--primary"
+            type="button"
+            disabled={hasMissingFields || isPending || isSubmitting}
+            onClick={() => {
+              if (!priority || isPending || isSubmitting) return;
+              setIsSubmitting(true);
+              onConfirm({
+                proposalId: proposal.proposalId,
+                request: {
+                  title: title.trim(),
+                  assigneeId: assigneeId.trim(),
+                  priority: priority as Priority,
+                  ...(dueAt ? { dueAt: new Date(dueAt).toISOString() } : {}),
+                },
+              });
+            }}
+          >
+            {isPending || isSubmitting ? 'Đang tạo…' : 'Xác nhận tạo công việc'}
+            <AIIcon name="arrow" size={16} />
+          </button>
+        )}
       </div>
       <CitationViewer citations={proposal.citations} />
     </article>

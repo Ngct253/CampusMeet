@@ -170,6 +170,8 @@ export interface Task {
   createdAt?: ISODateTime;
   updatedAt?: ISODateTime;
   completedAt?: ISODateTime;
+  completionNote?: string;
+  completionEvidenceUrl?: string;
   version?: number;
 }
 export interface Notification {

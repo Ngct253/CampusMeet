@@ -11,4 +11,22 @@ describe('application API routing', () => {
 
     expect(response).toMatchObject({ statusCode: 200 });
   });
+
+  it('registers the exact POST Task Proposal confirmation route', async () => {
+    const event = apiEvent('/ai/task-proposals/proposal-1/confirm');
+    event.requestContext.http.method = 'POST';
+
+    const response = await handler(event, {} as never, () => undefined);
+
+    expect(response).toMatchObject({ statusCode: 401 });
+  });
+  it.each([
+    ['GET', '/meetings/meeting-1/transcripts'],
+    ['PATCH', '/transcripts/tx/segments/seg'],
+  ] as const)('registers exact Transcript route %s %s', async (method, path) => {
+    const event = apiEvent(path);
+    event.requestContext.http.method = method;
+    const response = await handler(event, {} as never, () => undefined);
+    expect(response).toMatchObject({ statusCode: 401 });
+  });
 });

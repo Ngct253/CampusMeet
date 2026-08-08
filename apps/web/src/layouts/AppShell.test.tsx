@@ -7,6 +7,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GroundedAnswer } from '@campusmeet/shared';
 import { AppShell } from './AppShell';
 
+vi.mock('../config/environment', () => ({
+  environment: { capabilities: { ai: true, documentUpload: true } },
+}));
+
 vi.mock('../auth/AuthProvider', () => ({
   useAuth: () => ({
     status: 'authenticated',

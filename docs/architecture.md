@@ -116,9 +116,19 @@ Mỗi entity logic vẫn tồn tại. Việc gom bảng dùng composite `PK/SK`,
 - Partial transcript không lưu hoặc ingest. Final segment ghi idempotent theo `sessionId + sequence`/`ResultId`.
 - Chat current-meeting có thể đọc final segment được phép trực tiếp; approved transcript/minutes/file mới ingest vào Knowledge Base cho selected/whole-group RAG.
 - Retrieval luôn filter group/meeting-set/ACL/source status trước khi model nhận chunk.
-- AI output là draft có citation. Task/tool proposal chỉ thực thi sau preview, authorization, optimistic version và idempotency.
+- AI output là draft có citation. Task Proposal chỉ trở thành Task sau preview và xác nhận của active Group Admin; backend tạo Task và liên kết proposal atomically bằng DynamoDB transaction xuyên `task-data`/`ai-work`. Proposal ID là identity chống tạo Task trùng khi concurrent confirm hoặc retry. Tool proposal vẫn cần contract thực thi riêng.
 - Phân tích tiến độ chỉ diễn giải snapshot task/meeting do backend tính; không đánh giá cá nhân.
 - CampusMeet web là sản phẩm chính; Meet Add-on chỉ là client surface dùng chung API, data và authorization.
+
+### Ranh giới canonical Transcript
+
+Mỗi Meeting có tối đa một canonical Transcript trong slice edit/approval đầu tiên. M2 sở hữu consent/live STT, stable Transcript identity, final-segment persistence, gap/failure metadata và producer transition `LIVE → FINALIZING → READY` hoặc `FAILED`. M3 không chạy STT: M3 đọc Transcript persisted, kiểm tra active membership/Organizer/Group Admin, edit bằng optimistic version, ghi audit, approve exact version và tạo/recover ingestion request idempotent. M5 không sửa Transcript: M5 normalize immutable approved artifact, persist `KnowledgeSource`, ingest/retrieve và tạo citation/AI output theo exact approved source version.
+
+Current Transcript trong `meeting-data` là materialized metadata + final segments; edit tăng current `version` đúng một. Approval không tăng version mà đặt `status=APPROVED`, `approvedVersion=version`, actor/time server-side. Edit một Transcript đã approve tạo current version mới ở `READY` nhưng giữ provenance của approved version cũ. Edit/edit và edit/approve condition đồng thời trên identity/context, exact version và allowed lifecycle để chỉ một mutation thắng; edit và approval event là immutable audit metadata, không chứa full transcript text.
+
+Approval version N phải freeze chính xác content N thành immutable S3 input artifact trước handoff. M5 nhận `sourceType=TRANSCRIPT`, exact group/meeting/transcript, `sourceVersion=N`, `approved=true` và immutable object reference; downstream không được đọc mutable segment rồi gắn nhãn approved N hoặc fallback sang latest. Approval persistence và enqueue/start là recoverable boundary: retry cùng intent phải heal cùng logical job, không tạo version/job trùng.
+
+GET Transcript dành cho active member. PATCH segment và approve chỉ dành cho Meeting Organizer đang active hoặc active Group Admin; uploader không có quyền riêng. Client không cung cấp authoritative `groupId`, actor, approval metadata hoặc S3/AIJob reference. Ingestion status trong shared runtime (`PENDING|PROCESSING|READY|FAILED|STALE`) vẫn authoritative cho code; bộ tên conceptual cũ trong tài liệu không được dùng để silently rename runtime ở PR này. Exact `expectedTranscriptVersion` trong downstream generation là frozen approved source version; enforcement còn là M5 runtime follow-up.
 
 ### Ranh giới Group Progress Snapshot
 

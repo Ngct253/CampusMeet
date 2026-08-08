@@ -7,6 +7,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AIJob, AIJobDetail, KnowledgeScope } from '@campusmeet/shared';
 import { GroupDetailPage, GroupsPage } from './GroupPages';
 
+vi.mock('../../../config/environment', () => ({
+  environment: { capabilities: { ai: true, documentUpload: true } },
+}));
+
 const groupServices = vi.hoisted(() => ({
   getGroups: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
   getGroup: vi.fn(),

@@ -112,7 +112,9 @@ for (const parameter of [
   'UserContentBucketName',
   'BedrockEmbeddingModelId',
   'BedrockEmbeddingDimensions',
-  'BedrockGenerationModelArn',
+  'BedrockMantleRegion',
+  'BedrockMantleModelId',
+  'BedrockMantleApiKeySecretArn',
   'ExistingKnowledgeVectorIndexArn',
 ]) {
   assert.equal(
@@ -144,7 +146,9 @@ for (const marker of [
   'USER_CONTENT_BUCKET: !Ref UserContentBucketName',
   'BEDROCK_KNOWLEDGE_BASE_ID: !Ref CampusMeetKnowledgeBase',
   'BEDROCK_DATA_SOURCE_ID: !GetAtt CampusMeetKnowledgeDataSource.DataSourceId',
-  'BEDROCK_GENERATION_MODEL_ID: !Ref BedrockGenerationModelArn',
+  "BEDROCK_MANTLE_BASE_URL: !Sub 'https://bedrock-mantle.${BedrockMantleRegion}.api.aws/v1'",
+  'BEDROCK_MANTLE_MODEL_ID: !Ref BedrockMantleModelId',
+  'BEDROCK_MANTLE_API_KEY_SECRET: !Ref BedrockMantleApiKeySecretArn',
   'RequireResolvedAIInfrastructure:',
   'KnowledgeVectorBucket:',
   'Type: AWS::S3Vectors::VectorBucket',
@@ -165,6 +169,9 @@ for (const marker of [
   'InclusionPrefixes: [kb/]',
   'MaxTokens: 300',
   'OverlapPercentage: 20',
+  'NonFilterableMetadataKeys:',
+  'AMAZON_BEDROCK_METADATA',
+  'AMAZON_BEDROCK_TEXT',
   's3vectors:PutVectors',
   's3vectors:GetVectors',
   's3vectors:DeleteVectors',
@@ -174,7 +181,9 @@ for (const marker of [
   'bedrock:Retrieve',
   'bedrock:StartIngestionJob',
   'bedrock:GetIngestionJob',
-  'bedrock:InvokeModel',
+  'Sid: ReadBedrockMantleApiKey',
+  'secretsmanager:GetSecretValue',
+  'Resource: !Ref BedrockMantleApiKeySecretArn',
   'AIWorkerLogGroup:',
   'AIWorkerErrorAlarm:',
   'AIWorkerDurationAlarm:',
@@ -199,6 +208,12 @@ for (const marker of [
     `Application template is missing reusable M4 prerequisite ${marker}.`,
   );
 }
+
+assert.equal(
+  m4Template.includes('"AI_RATE_LIMITED"'),
+  true,
+  'M4 orchestration must retry the safe Mantle rate-limit error.',
+);
 
 const knowledgeBase = appTemplate.slice(
   appTemplate.indexOf('  CampusMeetKnowledgeBase:'),
@@ -299,6 +314,21 @@ assert.equal(
   true,
   'The Lambda optimized integration must define JSONPath Parameters.',
 );
+
+for (const marker of [
+  '"Next": "IngestionPending"',
+  '"Variable": "$.worker.Payload.pending"',
+  '"Next": "WaitForIngestion"',
+  '"action": "CHECK_INGESTION"',
+  '"ingestionJobId.$": "$.worker.Payload.ingestionJobId"',
+  '"ResultPath": "$.worker"',
+]) {
+  assert.equal(
+    m4Template.includes(marker),
+    true,
+    `M4 orchestration is missing ingestion polling marker ${marker}.`,
+  );
+}
 
 for (const marker of [
   '  ReminderFunction:',

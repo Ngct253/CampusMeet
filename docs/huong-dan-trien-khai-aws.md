@@ -376,14 +376,16 @@ Chi tiết: [Thiết kế kỹ thuật upload/live transcript/AI](thiet-ke-ky-th
 
 Application stack yêu cầu các parameter sau và không có fallback/mock:
 
-| Parameter                    | Nguồn                  | Mục đích                                                                  |
-| ---------------------------- | ---------------------- | ------------------------------------------------------------------------- |
-| `UserContentBucketName`      | Output stack M4        | Worker đọc source và chỉ ghi/xóa normalized source dưới `kb/*`            |
-| `BedrockEmbeddingModelId`    | Mặc định M5            | Cohere Embed Multilingual v3 cho tài liệu đa ngôn ngữ                     |
-| `BedrockEmbeddingDimensions` | Mặc định M5            | 1024 chiều, khớp model và S3 Vector Index                                 |
-| `BedrockGenerationModelArn`  | Cấu hình dev đã review | Truyền vào `Converse` và giới hạn `bedrock:InvokeModel` vào đúng resource |
+| Parameter                      | Nguồn                     | Mục đích                                                       |
+| ------------------------------ | ------------------------- | -------------------------------------------------------------- |
+| `UserContentBucketName`        | Output stack M4           | Worker đọc source và chỉ ghi/xóa normalized source dưới `kb/*` |
+| `BedrockEmbeddingModelId`      | Mặc định M5               | Cohere Embed Multilingual v3 cho tài liệu đa ngôn ngữ          |
+| `BedrockEmbeddingDimensions`   | Mặc định M5               | 1024 chiều, khớp model và S3 Vector Index                      |
+| `BedrockMantleRegion`          | Mặc định `us-east-1`      | Region Mantle, độc lập với region của application stack        |
+| `BedrockMantleModelId`         | Mặc định M5               | `openai.gpt-oss-20b` qua Chat Completions API                  |
+| `BedrockMantleApiKeySecretArn` | Secret ARN của môi trường | Secret JSON có trường `apiKey`; không truyền key vào template  |
 
-`infra/parameters.example.json` chỉ chứa placeholder công khai. CloudFormation Rule từ chối change set nếu một trong các placeholder này chưa được thay. Model ARN có thể là foundation model hoặc inference profile được phép dùng trong account; không hard-code account ID hoặc model ARN thật vào Git.
+`infra/parameters.example.json` chỉ chứa placeholder công khai. CloudFormation Rule từ chối change set nếu secret ARN chưa được thay. Tạo một Amazon Bedrock API key mới có quyền dùng Mantle, lưu dưới dạng `{"apiKey":"..."}` trong AWS Secrets Manager, rồi truyền ARN của secret vào parameter. Không tái sử dụng khóa từng xuất hiện trong source hoặc lịch sử Git. AI Worker chỉ được đọc đúng secret này; generation đi qua `https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions`. Mantle có quota riêng với endpoint Bedrock Runtime nên không phụ thuộc quota Claude cross-region đang pending.
 
 Kiểm tra local, không deploy:
 
@@ -395,7 +397,7 @@ npm.cmd run sam:build:app
 
 Outputs phục vụ tích hợp gồm AI Worker, Knowledge Base/data source, Vector Bucket/Index, role, log group, hai alarm và alarm topic. AI Worker chỉ có quyền DynamoDB theo từng bảng/thao tác, `s3:GetObject` trên bucket được cấp, ghi/xóa dưới `kb/*`, retrieve/ingestion trên đúng Knowledge Base và invoke đúng model ARN. Knowledge Base role chỉ đọc prefix `kb/`, invoke Cohere embedding và đọc/ghi đúng vector index.
 
-Data source dùng fixed-size chunking 300 token, overlap 20% và `DataDeletionPolicy: DELETE`. Khi source có version mới, Worker đánh dấu version cũ `STALE`, đặt TTL 30 ngày cho metadata DynamoDB và xóa normalized file cùng sidecar cũ trước khi sync. Bedrock sync tăng dần sẽ xóa document không còn trong S3 khỏi vector store. Khi teardown dev, CloudFormation xóa data source trước rồi xóa vector index/bucket; phải kiểm tra trạng thái `DELETE_UNSUCCESSFUL` trước khi coi cleanup hoàn tất.
+Data source dùng fixed-size chunking 300 token, overlap 20% và `DataDeletionPolicy: DELETE`. S3 Vectors index khai báo `AMAZON_BEDROCK_METADATA` và `AMAZON_BEDROCK_TEXT` là non-filterable để phần text/metadata do Bedrock quản lý không chiếm giới hạn 2 KB của filterable metadata; các trường phân quyền `groupId`, `meetingId`, `sourceType`, `sourceId`, `version`, `approved` và `ingestionStatus` vẫn filterable. Khi source có version mới, Worker đánh dấu version cũ `STALE`, đặt TTL 30 ngày cho metadata DynamoDB và xóa normalized file cùng sidecar cũ trước khi sync. Bedrock sync tăng dần sẽ xóa document không còn trong S3 khỏi vector store. Khi teardown dev, CloudFormation xóa data source trước rồi xóa vector index/bucket; phải kiểm tra trạng thái `DELETE_UNSUCCESSFUL` trước khi coi cleanup hoàn tất.
 
 ### 14.2. User-content bucket của M4 trong môi trường dev
 

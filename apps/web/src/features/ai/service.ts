@@ -2,9 +2,12 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 import {
   aiJobDetailSchema,
   aiJobSchema,
+  confirmTaskProposalResponseSchema,
   type AIJob,
   type AIJobDetail,
   type GenerateMeetingDraftRequest,
+  type ConfirmTaskProposalRequest,
+  type ConfirmTaskProposalResponse,
   type GroupKnowledgeQuery,
   type GroupProgressAnalysisRequest,
   type MeetingChatRequest,
@@ -55,6 +58,10 @@ export interface AIService {
     request: GenerateMeetingDraftRequest,
     idempotencyKey: string,
   ): Promise<AIJob>;
+  confirmTaskProposal(
+    proposalId: string,
+    request: ConfirmTaskProposalRequest,
+  ): Promise<ConfirmTaskProposalResponse>;
   progressAnalysis(
     groupId: string,
     request: GroupProgressAnalysisRequest,
@@ -123,6 +130,12 @@ export const createAIService = (options: AIServiceOptions = {}): AIService => {
       post(`/meetings/${pathId(meetingId)}/ai/minutes-draft`, body, key),
     taskProposals: (meetingId, body, key) =>
       post(`/meetings/${pathId(meetingId)}/ai/task-proposals`, body, key),
+    confirmTaskProposal: (proposalId, body) =>
+      request(
+        `/ai/task-proposals/${pathId(proposalId)}/confirm`,
+        confirmTaskProposalResponseSchema,
+        { method: 'POST', body: JSON.stringify(body) },
+      ),
     progressAnalysis: (groupId, body, key) =>
       post(`/groups/${pathId(groupId)}/ai/progress-analysis`, body, key),
     getJob: (aiJobId) => request(`/ai/jobs/${pathId(aiJobId)}`, aiJobDetailSchema),

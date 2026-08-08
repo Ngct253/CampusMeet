@@ -7,6 +7,10 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+  FrontendOrigin:
+    Type: String
+    AllowedPattern: '^https?://[^/]+$'
+    Description: Exact browser origin allowed to upload directly to the private content bucket.
   DataTablePrefix:
     Type: String
     Default: campusmeet-dev
@@ -63,7 +67,7 @@ Resources:
         CorsRules:
           - AllowedHeaders: ['content-type', 'x-amz-meta-checksum']
             AllowedMethods: [PUT]
-            AllowedOrigins: ['*']
+            AllowedOrigins: [!Ref FrontendOrigin]
             ExposedHeaders: [ETag]
             MaxAge: 300
       LifecycleConfiguration:
@@ -122,13 +126,51 @@ Resources:
                   "action": "EXECUTE"
                 }
               },
+              "ResultPath": "$.worker",
+              "Retry": [{
+                "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "AI_RATE_LIMITED"],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }],
+              "Next": "IngestionPending"
+            },
+            "IngestionPending": {
+              "Type": "Choice",
+              "Choices": [{
+                "Variable": "$.worker.Payload.pending",
+                "BooleanEquals": true,
+                "Next": "WaitForIngestion"
+              }],
+              "Default": "AIJobComplete"
+            },
+            "WaitForIngestion": {
+              "Type": "Wait",
+              "Seconds": 15,
+              "Next": "CheckIngestion"
+            },
+            "CheckIngestion": {
+              "Type": "Task",
+              "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${AIWorkerFunctionArn}",
+                "Payload": {
+                  "aiJobId.$": "$.aiJobId",
+                  "action": "CHECK_INGESTION",
+                  "ingestionJobId.$": "$.worker.Payload.ingestionJobId"
+                }
+              },
+              "ResultPath": "$.worker",
               "Retry": [{
                 "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
                 "IntervalSeconds": 2,
                 "MaxAttempts": 3,
                 "BackoffRate": 2
               }],
-              "End": true
+              "Next": "IngestionPending"
+            },
+            "AIJobComplete": {
+              "Type": "Succeed"
             }
           }
         }
@@ -159,6 +201,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
                   - dynamodb:Query
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem

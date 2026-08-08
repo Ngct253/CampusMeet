@@ -19,8 +19,8 @@ type MembershipReader = Pick<DynamoDbCollaborationRepository, 'getMembership'>;
 type MeetingReader = Pick<MeetingAccessBoundary, 'resolveMeetingGroup'>;
 
 const allowedTransitions: Record<TaskStatus, readonly TaskStatus[]> = {
-  [TaskStatus.TODO]: [TaskStatus.DOING, TaskStatus.DONE],
-  [TaskStatus.DOING]: [TaskStatus.TODO, TaskStatus.DONE],
+  [TaskStatus.TODO]: [TaskStatus.DOING],
+  [TaskStatus.DOING]: [TaskStatus.DONE],
   [TaskStatus.DONE]: [TaskStatus.DOING],
 };
 
@@ -77,12 +77,26 @@ export class TaskService {
       throw new UnprocessableEntityError('Không thể chuyển sang trạng thái công việc đã chọn.');
     }
 
-    return this.tasks.updateStatus(
-      task,
-      actorId,
-      input.status,
-      input.expectedVersion,
-      isLegacyVersion,
-    );
+    if (input.status === TaskStatus.DONE && !input.completionNote) {
+      throw new UnprocessableEntityError('Hãy ghi lại kết quả trước khi hoàn thành công việc.');
+    }
+
+    return input.status === TaskStatus.DONE
+      ? this.tasks.updateStatus(
+          task,
+          actorId,
+          input.status,
+          input.expectedVersion,
+          isLegacyVersion,
+          input.completionNote,
+          input.completionEvidenceUrl,
+        )
+      : this.tasks.updateStatus(
+          task,
+          actorId,
+          input.status,
+          input.expectedVersion,
+          isLegacyVersion,
+        );
   }
 }

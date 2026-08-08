@@ -1,5 +1,7 @@
 import type {
   ActionItem,
+  ConfirmTaskProposalResponse,
+  ConfirmTaskProposalRequest,
   Decision,
   ConvertActionItemToTaskResponse,
   CreateTaskRequest,
@@ -13,6 +15,7 @@ import type {
   Notification,
   Priority,
   Task,
+  TaskProposal,
   TaskStatus,
   UpdateMeetingMinutesRequest,
 } from '@campusmeet/shared';
@@ -137,6 +140,19 @@ export interface ActionItemTaskRepository {
   create(input: ActionItemTaskWrite): Promise<ConvertActionItemToTaskResponse>;
 }
 
+export interface TaskProposalConfirmationWrite {
+  actorId: string;
+  proposal: TaskProposal;
+  input: Required<Pick<ConfirmTaskProposalRequest, 'title' | 'assigneeId' | 'priority'>> &
+    Pick<ConfirmTaskProposalRequest, 'dueAt'>;
+}
+
+export interface TaskProposalConfirmationRepository {
+  getById(proposalId: string): Promise<TaskProposal | null>;
+  getConfirmed(proposal: TaskProposal): Promise<ConfirmTaskProposalResponse>;
+  confirm(input: TaskProposalConfirmationWrite): Promise<ConfirmTaskProposalResponse>;
+}
+
 export interface TaskRepository {
   listByAssignee(userId: string): Promise<Task[]>;
   getById(id: string): Promise<Task | undefined>;
@@ -147,6 +163,8 @@ export interface TaskRepository {
     status: TaskStatus,
     expectedVersion: number,
     isLegacyVersion: boolean,
+    completionNote?: string,
+    completionEvidenceUrl?: string,
   ): Promise<Task>;
 }
 

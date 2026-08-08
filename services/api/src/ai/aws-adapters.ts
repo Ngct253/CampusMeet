@@ -15,7 +15,12 @@ import { DynamoDbMeetingRepository } from '../repositories/dynamodb';
 import { DynamoDbGroupProgressSnapshotRepository } from '../repositories/group-progress-snapshots';
 import { DynamoDbGroupTaskReader } from '../repositories/tasks';
 import { GroupProgressSnapshotService } from '../services/group-progress-snapshot-service';
-import { ForbiddenError, ResourceNotFoundError, ServiceConfigurationError } from '../utils/errors';
+import {
+  ConflictError,
+  ForbiddenError,
+  ResourceNotFoundError,
+  ServiceConfigurationError,
+} from '../utils/errors';
 import type {
   AIJobIdempotencyReader,
   AIJobOrchestrator,
@@ -116,6 +121,7 @@ export class StepFunctionsAIJobOrchestrator
   async enqueue(input: Parameters<AIJobOrchestrator['enqueue']>[0]): Promise<AIJob> {
     const now = new Date().toISOString();
     const aiJobId = `aij_${randomUUID()}`;
+    const requestPayloadHash = this.payloadHash(input.payload);
     const idempotencyKey = this.idempotencyKey({
       actorId: input.actorId,
       groupId: input.groupId,
@@ -163,6 +169,7 @@ export class StepFunctionsAIJobOrchestrator
                   ...idempotencyKey,
                   entityType: 'IdempotencyResult',
                   aiJobId,
+                  requestPayloadHash,
                   expiresAt: Math.floor(Date.now() / 1000) + 86_400,
                 },
                 ConditionExpression: 'attribute_not_exists(PK)',
@@ -192,12 +199,12 @@ export class StepFunctionsAIJobOrchestrator
         groupId: input.groupId,
         operation: input.payload.operation,
       });
-      if (
-        input.payload.operation === 'PROGRESS_ANALYSIS' &&
-        (recoveredPayload.operation !== 'PROGRESS_ANALYSIS' ||
-          recoveredPayload.request.snapshotVersion !== input.payload.request.snapshotVersion)
-      ) {
-        throw new Error('AI_IDEMPOTENCY_DATA_INTEGRITY');
+      const existingPayloadHash =
+        typeof existing.Item?.requestPayloadHash === 'string'
+          ? existing.Item.requestPayloadHash
+          : this.payloadHash(recoveredPayload);
+      if (existingPayloadHash !== requestPayloadHash) {
+        throw new ConflictError('Idempotency-Key đã được dùng cho một yêu cầu AI khác.');
       }
       return this.startJob(existingJob.Item);
     }
@@ -276,7 +283,12 @@ export class StepFunctionsAIJobOrchestrator
       attempt: Number(item.attempt),
       requestId: String(item.requestId),
       provider: 'BEDROCK',
-      ...(item.errorCode ? { errorCode: String(item.errorCode) } : {}),
+      ...(item.inputTokens === undefined ? {} : { inputTokens: Number(item.inputTokens) }),
+      ...(item.outputTokens === undefined ? {} : { outputTokens: Number(item.outputTokens) }),
+      ...(item.estimatedCostUsd === undefined
+        ? {}
+        : { estimatedCostUsd: Number(item.estimatedCostUsd) }),
+      ...(item.errorCode === undefined ? {} : { errorCode: String(item.errorCode) }),
       createdAt: String(item.createdAt),
       updatedAt: String(item.updatedAt),
     };
@@ -396,6 +408,12 @@ export class StepFunctionsAIJobOrchestrator
       .update(`${input.actorId}:${input.groupId}:${input.operation}:${input.idempotencyKey}`)
       .digest('hex');
     return { PK: `IDEMPOTENCY#AI_REQUEST#${keyHash}`, SK: 'RESULT' };
+  }
+
+  private payloadHash(payload: unknown) {
+    return createHash('sha256')
+      .update(JSON.stringify(aiWorkerPayloadSchema.parse(payload)))
+      .digest('hex');
   }
 }
 

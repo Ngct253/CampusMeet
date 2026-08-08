@@ -8,6 +8,7 @@ import {
   type Task,
 } from '@campusmeet/shared';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { FeaturePage } from '../../../components/FeaturePage';
 import { StatusBadge } from '../../../components/ui';
 import { getGroup, getGroups } from '../../groups/service';
@@ -26,17 +27,40 @@ const memberLabel = (group: GroupDetails | undefined, userId: string) => {
 const sameInput = (left: CreateTaskRequest, right: CreateTaskRequest) =>
   JSON.stringify(left) === JSON.stringify(right);
 
-const statusActions: Record<TaskStatus, Array<{ label: string; status: TaskStatus }>> = {
-  [TaskStatus.TODO]: [
-    { label: 'Bắt đầu', status: TaskStatus.DOING },
-    { label: 'Hoàn thành', status: TaskStatus.DONE },
-  ],
-  [TaskStatus.DOING]: [
-    { label: 'Hoàn thành', status: TaskStatus.DONE },
-    { label: 'Đưa về TODO', status: TaskStatus.TODO },
-  ],
-  [TaskStatus.DONE]: [{ label: 'Mở lại', status: TaskStatus.DOING }],
+const statusLabels: Record<TaskStatus, string> = {
+  [TaskStatus.TODO]: 'Chưa làm',
+  [TaskStatus.DOING]: 'Đang làm',
+  [TaskStatus.DONE]: 'Hoàn thành',
 };
+
+const priorityLabels: Record<Priority, string> = {
+  [Priority.LOW]: 'Thấp',
+  [Priority.MEDIUM]: 'Vừa',
+  [Priority.HIGH]: 'Cao',
+};
+
+const formatDueAtPreview = (value: string) =>
+  new Intl.DateTimeFormat('vi-VN', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(`${value}T00:00:00`));
+
+const toLocalDateValue = (value: string) => {
+  const date = new Date(value);
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 10);
+};
+
+const formatDateTime = (value: string) =>
+  new Intl.DateTimeFormat('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
 
 export const TasksPage = () => {
   const queryClient = useQueryClient();
@@ -56,6 +80,10 @@ export const TasksPage = () => {
   const [meetingError, setMeetingError] = useState('');
   const [statusError, setStatusError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [completionTaskId, setCompletionTaskId] = useState('');
+  const [completionNote, setCompletionNote] = useState('');
+  const [completionEvidenceUrl, setCompletionEvidenceUrl] = useState('');
+  const [completionError, setCompletionError] = useState('');
   const attemptRef = useRef<CreateAttempt | undefined>(undefined);
   const submittingRef = useRef(false);
   const statusSubmittingRef = useRef(false);
@@ -131,21 +159,47 @@ export const TasksPage = () => {
   });
 
   const statusMutation = useMutation({
-    mutationFn: ({ task, status }: { task: Task; status: TaskStatus }) =>
-      updateTaskStatus(task.id, { status, expectedVersion: task.version ?? 0 }),
-    onMutate: () => setStatusError(''),
+    mutationFn: ({
+      task,
+      status,
+      result,
+      evidenceUrl,
+    }: {
+      task: Task;
+      status: TaskStatus;
+      result?: string;
+      evidenceUrl?: string;
+    }) =>
+      updateTaskStatus(task.id, {
+        status,
+        expectedVersion: task.version ?? 0,
+        ...(result ? { completionNote: result } : {}),
+        ...(evidenceUrl ? { completionEvidenceUrl: evidenceUrl } : {}),
+      }),
+    onMutate: () => {
+      setStatusError('');
+      setCompletionError('');
+    },
     onSuccess: async () => {
       setStatusError('');
+      setCompletionTaskId('');
+      setCompletionNote('');
+      setCompletionEvidenceUrl('');
       await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiClientError && error.status === 409) {
         setStatusError('Công việc đã được cập nhật ở nơi khác. Danh sách đang được làm mới.');
         await queryClient.invalidateQueries({ queryKey: ['tasks'] });
       } else if (error instanceof ApiClientError && error.status === 403) {
         setStatusError('Bạn không có quyền cập nhật công việc này.');
       } else if (error instanceof ApiClientError && error.status === 422) {
-        setStatusError('Không thể chuyển sang trạng thái công việc đã chọn.');
+        if (variables.status === TaskStatus.DONE) {
+          setCompletionError('Chưa thể ghi nhận hoàn thành. Hãy kiểm tra lại phần kết quả.');
+        } else {
+          setStatusError('Không thể chuyển sang trạng thái công việc đã chọn.');
+        }
       } else {
         setStatusError(error.message);
       }
@@ -159,6 +213,31 @@ export const TasksPage = () => {
     if (statusSubmittingRef.current || statusMutation.isPending) return;
     statusSubmittingRef.current = true;
     statusMutation.mutate({ task, status });
+  };
+
+  const completeTask = (task: Task) => {
+    if (statusSubmittingRef.current || statusMutation.isPending) return;
+    const result = completionNote.trim();
+    const evidenceUrl = completionEvidenceUrl.trim();
+    if (result.length < 3) {
+      setCompletionError('Hãy mô tả ngắn gọn kết quả đã hoàn thành.');
+      return;
+    }
+    if (evidenceUrl) {
+      try {
+        new URL(evidenceUrl);
+      } catch {
+        setCompletionError('Liên kết minh chứng chưa đúng định dạng.');
+        return;
+      }
+    }
+    statusSubmittingRef.current = true;
+    statusMutation.mutate({
+      task,
+      status: TaskStatus.DONE,
+      result,
+      ...(evidenceUrl ? { evidenceUrl } : {}),
+    });
   };
 
   const changeGroup = (nextGroupId: string) => {
@@ -192,7 +271,7 @@ export const TasksPage = () => {
       title: normalizedTitle,
       assigneeId: normalizedAssigneeId,
       priority,
-      ...(dueAt ? { dueAt: new Date(dueAt).toISOString() } : {}),
+      ...(dueAt ? { dueAt: new Date(`${dueAt}T23:59:59`).toISOString() } : {}),
       ...(sourceMeetingId.trim() ? { sourceMeetingId: sourceMeetingId.trim() } : {}),
     };
     const currentAttempt = attemptRef.current;
@@ -210,9 +289,14 @@ export const TasksPage = () => {
   return (
     <FeaturePage title="Công việc" description="Theo dõi công việc được giao và tiến độ cá nhân.">
       <div className="task-page-layout">
-        <section className="app-panel create-task-panel">
-          <span className="section-kicker">Phân công</span>
-          <h2>Tạo công việc</h2>
+        <details className="app-panel create-task-panel">
+          <summary>
+            <span>
+              <small className="section-kicker">Phân công</small>
+              <strong>Tạo công việc</strong>
+            </span>
+            <span aria-hidden="true">＋</span>
+          </summary>
           {groupsQuery.isPending ? (
             <p role="status">Đang tải nhóm quản trị…</p>
           ) : groupsQuery.isError ? (
@@ -273,46 +357,54 @@ export const TasksPage = () => {
                   value={priority}
                   onChange={(event) => setPriority(event.target.value as Priority)}
                 >
-                  <option value={Priority.LOW}>LOW</option>
-                  <option value={Priority.MEDIUM}>MEDIUM</option>
-                  <option value={Priority.HIGH}>HIGH</option>
+                  {Object.values(Priority).map((value) => (
+                    <option key={value} value={value}>
+                      {priorityLabels[value]}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>
                 Hạn hoàn thành <span>(không bắt buộc)</span>
                 <input
-                  type="datetime-local"
+                  type="date"
                   value={dueAt}
                   onChange={(event) => setDueAt(event.target.value)}
                 />
+                {dueAt && <small>Hoàn thành trước cuối ngày {formatDueAtPreview(dueAt)}</small>}
               </label>
-              <label>
-                Cuộc họp nguồn <span>(không bắt buộc)</span>
-                <select
-                  value={sourceMeetingId}
-                  onChange={(event) => {
-                    setSourceMeetingId(event.target.value);
-                    setMeetingError('');
-                  }}
-                  onFocus={() => setMeetingError('')}
-                  onPointerDown={() => setMeetingError('')}
-                  disabled={meetingsQuery.isPending || meetingsQuery.isError}
-                >
-                  <option value="">
-                    {meetingsQuery.isError ? 'Không tải được cuộc họp' : 'Không liên kết cuộc họp'}
-                  </option>
-                  {meetingsQuery.data?.map((meeting) => (
-                    <option key={meeting.id} value={meeting.id}>
-                      {meeting.title}
+              <details className="task-form-optional">
+                <summary>Liên kết với cuộc họp</summary>
+                <label>
+                  Cuộc họp
+                  <select
+                    value={sourceMeetingId}
+                    onChange={(event) => {
+                      setSourceMeetingId(event.target.value);
+                      setMeetingError('');
+                    }}
+                    onFocus={() => setMeetingError('')}
+                    onPointerDown={() => setMeetingError('')}
+                    disabled={meetingsQuery.isPending || meetingsQuery.isError}
+                  >
+                    <option value="">
+                      {meetingsQuery.isError
+                        ? 'Không tải được cuộc họp'
+                        : 'Không liên kết cuộc họp'}
                     </option>
-                  ))}
-                </select>
-              </label>
-              {meetingsQuery.isError && (
-                <p className="task-field-note">
-                  Bạn vẫn có thể tạo công việc không liên kết cuộc họp.
-                </p>
-              )}
+                    {meetingsQuery.data?.map((meeting) => (
+                      <option key={meeting.id} value={meeting.id}>
+                        {meeting.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {meetingsQuery.isError && (
+                  <p className="task-field-note">
+                    Bạn vẫn có thể tạo công việc không liên kết cuộc họp.
+                  </p>
+                )}
+              </details>
               {meetingError && (
                 <p className="error" role="alert">
                   {meetingError}
@@ -336,11 +428,16 @@ export const TasksPage = () => {
               </button>
             </form>
           )}
-        </section>
+        </details>
 
         <section className="app-panel assigned-task-panel">
-          <span className="section-kicker">Cá nhân</span>
-          <h2>Công việc được giao cho tôi</h2>
+          <div className="task-list-heading">
+            <div>
+              <h2>Công việc của tôi</h2>
+              <p>Bắt đầu công việc, cập nhật kết quả và lưu minh chứng khi hoàn thành.</p>
+            </div>
+            {tasksQuery.data && <strong>{tasksQuery.data.length} công việc</strong>}
+          </div>
           {statusError && (
             <p className="error" role="alert">
               {statusError}
@@ -362,26 +459,151 @@ export const TasksPage = () => {
               <p>Công việc mới được giao cho bạn sẽ xuất hiện tại đây.</p>
             </div>
           ) : (
-            <div className="list">
+            <div className="task-list">
               {tasksQuery.data.map((task) => {
                 const updatingThisTask =
                   statusMutation.isPending && statusMutation.variables?.task.id === task.id;
+                const completingThisTask = completionTaskId === task.id;
                 return (
-                  <article key={task.id}>
-                    <strong>{task.title}</strong> <StatusBadge>{task.status}</StatusBadge>
-                    <p>Ưu tiên: {task.priority}</p>
+                  <article className="task-item" key={task.id}>
+                    <div className="task-item-heading">
+                      <div>
+                        <h3>{task.title}</h3>
+                        <div className="task-item-meta">
+                          <span>Ưu tiên {priorityLabels[task.priority].toLowerCase()}</span>
+                          {task.dueAt && (
+                            <span>Hạn {formatDueAtPreview(toLocalDateValue(task.dueAt))}</span>
+                          )}
+                          {task.sourceMeetingId && (
+                            <Link to={`/app/meetings/${task.sourceMeetingId}`}>
+                              Mở cuộc họp nguồn
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                      <StatusBadge>{statusLabels[task.status]}</StatusBadge>
+                    </div>
+                    {task.completionNote && (
+                      <div className="task-completion-result">
+                        <strong>
+                          {task.status === TaskStatus.DONE
+                            ? 'Kết quả hoàn thành'
+                            : 'Kết quả lần hoàn thành trước'}
+                        </strong>
+                        <p>{task.completionNote}</p>
+                        <div>
+                          {task.completedAt && (
+                            <span>Ghi nhận lúc {formatDateTime(task.completedAt)}</span>
+                          )}
+                          {task.completionEvidenceUrl && (
+                            <a
+                              href={task.completionEvidenceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              Mở minh chứng
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     <div className="task-status-actions">
-                      {statusActions[task.status].map((action) => (
+                      {task.status === TaskStatus.TODO && (
                         <button
-                          key={action.status}
                           type="button"
                           disabled={statusMutation.isPending}
-                          onClick={() => changeTaskStatus(task, action.status)}
+                          onClick={() => changeTaskStatus(task, TaskStatus.DOING)}
                         >
-                          {updatingThisTask ? 'Đang cập nhật…' : action.label}
+                          {updatingThisTask ? 'Đang cập nhật…' : 'Bắt đầu công việc'}
                         </button>
-                      ))}
+                      )}
+                      {task.status === TaskStatus.DOING && !completingThisTask && (
+                        <button
+                          type="button"
+                          disabled={statusMutation.isPending}
+                          onClick={() => {
+                            setCompletionTaskId(task.id);
+                            setCompletionNote('');
+                            setCompletionEvidenceUrl('');
+                            setCompletionError('');
+                          }}
+                        >
+                          Ghi nhận hoàn thành
+                        </button>
+                      )}
+                      {task.status === TaskStatus.DONE && (
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          disabled={statusMutation.isPending}
+                          onClick={() => changeTaskStatus(task, TaskStatus.DOING)}
+                        >
+                          {updatingThisTask ? 'Đang cập nhật…' : 'Tiếp tục thực hiện'}
+                        </button>
+                      )}
                     </div>
+                    {task.status === TaskStatus.DOING && completingThisTask && (
+                      <div className="task-completion-form">
+                        <div>
+                          <strong>Ghi nhận kết quả</strong>
+                          <p>
+                            Mô tả kết quả là bắt buộc. Bạn có thể đính kèm liên kết tài liệu hoặc
+                            bản demo.
+                          </p>
+                        </div>
+                        <label>
+                          Kết quả đã hoàn thành
+                          <textarea
+                            value={completionNote}
+                            onChange={(event) => {
+                              setCompletionNote(event.target.value);
+                              setCompletionError('');
+                            }}
+                            maxLength={2000}
+                            rows={3}
+                            placeholder="Ví dụ: Đã hoàn thiện luồng đăng nhập và kiểm tra trên production."
+                            required
+                          />
+                        </label>
+                        <label>
+                          Liên kết minh chứng <span>(không bắt buộc)</span>
+                          <input
+                            type="url"
+                            value={completionEvidenceUrl}
+                            onChange={(event) => {
+                              setCompletionEvidenceUrl(event.target.value);
+                              setCompletionError('');
+                            }}
+                            placeholder="https://..."
+                          />
+                        </label>
+                        {completionError && (
+                          <p className="error" role="alert">
+                            {completionError}
+                          </p>
+                        )}
+                        <div className="task-completion-actions">
+                          <button
+                            type="button"
+                            disabled={statusMutation.isPending}
+                            onClick={() => completeTask(task)}
+                          >
+                            {updatingThisTask ? 'Đang lưu…' : 'Xác nhận hoàn thành'}
+                          </button>
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            disabled={statusMutation.isPending}
+                            onClick={() => {
+                              setCompletionTaskId('');
+                              setCompletionError('');
+                            }}
+                          >
+                            Hủy
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </article>
                 );
               })}

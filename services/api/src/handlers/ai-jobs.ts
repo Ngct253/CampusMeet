@@ -27,7 +27,7 @@ export const aiJobDetailHandler: APIGatewayProxyHandlerV2 = async (event) => {
         Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
         ConsistentRead: true,
         ProjectionExpression:
-          'aiJobId, groupId, meetingId, #type, #status, attempt, requestId, provider, errorCode, createdAt, updatedAt, #result',
+          'aiJobId, groupId, meetingId, #type, #status, attempt, requestId, provider, inputTokens, outputTokens, estimatedCostUsd, errorCode, createdAt, updatedAt, #result',
         ExpressionAttributeNames: { '#type': 'type', '#status': 'status', '#result': 'result' },
       }),
     );
@@ -49,6 +49,11 @@ export const aiJobDetailHandler: APIGatewayProxyHandlerV2 = async (event) => {
       attempt: typeof item.attempt === 'number' ? item.attempt : 0,
       requestId: typeof item.requestId === 'string' ? item.requestId : requestId,
       ...(item.provider ? { provider: item.provider } : {}),
+      ...(typeof item.inputTokens === 'number' ? { inputTokens: item.inputTokens } : {}),
+      ...(typeof item.outputTokens === 'number' ? { outputTokens: item.outputTokens } : {}),
+      ...(typeof item.estimatedCostUsd === 'number'
+        ? { estimatedCostUsd: item.estimatedCostUsd }
+        : {}),
       ...(typeof item.errorCode === 'string' ? { errorCode: item.errorCode } : {}),
       ...(item.result === undefined ? {} : { result: item.result }),
       createdAt: String(item.createdAt),

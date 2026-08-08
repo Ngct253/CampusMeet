@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { groundedAnswerSchema, groupProgressAnalysisSchema } from '@campusmeet/shared';
 import { useAuth } from '../../../auth/AuthProvider';
 import { FeaturePage } from '../../../components/FeaturePage';
+import { environment } from '../../../config/environment';
 import {
   AIJobState,
   GroundedAnswerView,
@@ -353,7 +354,7 @@ export function GroupDetailPage() {
           </Link>
         </section>
 
-        <section className="group-ai-section">
+        {environment.capabilities.ai && <section className="group-ai-section">
           <GroupSearchPanel
             meetingOptions={(meetingsQuery.data ?? []).map((m) => ({
               meetingId: m.id,
@@ -388,9 +389,9 @@ export function GroupDetailPage() {
               {searchAnswer && <GroundedAnswerView answer={searchAnswer} />}
             </AIJobState>
           )}
-        </section>
+        </section>}
 
-        {isAdmin && (
+        {environment.capabilities.ai && isAdmin && (
           <section className="group-ai-progress">
             <ProgressAnalysisPanel analysis={progressAnalysis} isGroupAdmin={isAdmin} />
             <button

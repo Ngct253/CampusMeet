@@ -69,7 +69,7 @@ const patchEvent = (body: unknown = { status: TaskStatus.DOING, expectedVersion:
 };
 
 describe('task status contract', () => {
-  it('is strict, accepts DOING, and rejects IN_PROGRESS', () => {
+  it('is strict, accepts localized workflow payloads, and rejects invalid completion data', () => {
     expect(
       updateTaskStatusInputSchema.parse({ status: TaskStatus.DOING, expectedVersion: 0 }),
     ).toEqual({ status: TaskStatus.DOING, expectedVersion: 0 });
@@ -90,6 +90,32 @@ describe('task status contract', () => {
         actorId: 'client-user',
       }).success,
     ).toBe(false);
+    expect(
+      updateTaskStatusInputSchema.safeParse({
+        status: TaskStatus.DONE,
+        expectedVersion: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      updateTaskStatusInputSchema.parse({
+        status: TaskStatus.DONE,
+        expectedVersion: 1,
+        completionNote: '  Đã bàn giao bản demo.  ',
+        completionEvidenceUrl: 'https://example.com/demo',
+      }),
+    ).toEqual({
+      status: TaskStatus.DONE,
+      expectedVersion: 1,
+      completionNote: 'Đã bàn giao bản demo.',
+      completionEvidenceUrl: 'https://example.com/demo',
+    });
+    expect(
+      updateTaskStatusInputSchema.safeParse({
+        status: TaskStatus.DOING,
+        expectedVersion: 1,
+        completionNote: 'Không được gửi khi đang làm',
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -108,6 +134,8 @@ describe('task status repository', () => {
       TaskStatus.DONE,
       1,
       false,
+      'Đã bàn giao bản demo.',
+      'https://example.com/demo',
     );
     const command = send.mock.calls[0]?.[0] as {
       constructor: { name: string };
@@ -125,6 +153,8 @@ describe('task status repository', () => {
         'attribute_exists(PK) AND #version = :expectedVersion AND #status = :fromStatus',
     });
     expect(update?.UpdateExpression).toContain('completedAt = :completedAt');
+    expect(update?.UpdateExpression).toContain('completionNote = :completionNote');
+    expect(update?.UpdateExpression).toContain('completionEvidenceUrl = :completionEvidenceUrl');
     expect(update?.UpdateExpression).not.toContain('GSI2PK');
     expect(update?.UpdateExpression).not.toContain('GSI2SK');
     expect(update?.UpdateExpression).not.toContain('GSI3PK');
@@ -135,6 +165,8 @@ describe('task status repository', () => {
       ':expectedVersion': 1,
       ':nextVersion': 2,
       ':gsi1sk': `STATUS#DONE#DUE#${currentTask.dueAt}#TASK#task-1`,
+      ':completionNote': 'Đã bàn giao bản demo.',
+      ':completionEvidenceUrl': 'https://example.com/demo',
     });
     expect(history?.ConditionExpression).toBe(
       'attribute_not_exists(PK) AND attribute_not_exists(SK)',
@@ -149,9 +181,16 @@ describe('task status repository', () => {
       fromStatus: TaskStatus.TODO,
       toStatus: TaskStatus.DONE,
       version: 2,
+      completionNote: 'Đã bàn giao bản demo.',
+      completionEvidenceUrl: 'https://example.com/demo',
     });
     expect(historyItem.SK).toEqual(expect.stringMatching(/^EVENT#.+Z#[0-9a-f-]{36}$/));
-    expect(updated).toMatchObject({ status: TaskStatus.DONE, version: 2 });
+    expect(updated).toMatchObject({
+      status: TaskStatus.DONE,
+      version: 2,
+      completionNote: 'Đã bàn giao bản demo.',
+      completionEvidenceUrl: 'https://example.com/demo',
+    });
     expect(updated.completedAt).toBe(updated.updatedAt);
     expect(send.mock.calls.flat().some((value) => value?.constructor?.name === 'ScanCommand')).toBe(
       false,
@@ -288,13 +327,7 @@ describe('task status repository', () => {
       .mockResolvedValueOnce({ Item: taskItem({ ...currentTask, version: 0 }) });
 
     await expect(
-      new DynamoDbTaskRepository().updateStatus(
-        legacy,
-        'user-from-jwt',
-        TaskStatus.DOING,
-        0,
-        true,
-      ),
+      new DynamoDbTaskRepository().updateStatus(legacy, 'user-from-jwt', TaskStatus.DOING, 0, true),
     ).rejects.toMatchObject({ code: 'CONFLICT', statusCode: 409 });
   });
 });
@@ -308,9 +341,11 @@ describe('PATCH /tasks/:taskId/status handler', () => {
 
   it('returns 401 when JWT is missing', async () => {
     const event = patchEvent();
-    delete (event.requestContext as Partial<typeof event.requestContext> & {
-      authorizer?: unknown;
-    }).authorizer;
+    delete (
+      event.requestContext as Partial<typeof event.requestContext> & {
+        authorizer?: unknown;
+      }
+    ).authorizer;
 
     const response = await taskStatusHandler(event, {} as never, () => undefined);
     expect(response).toMatchObject({ statusCode: 401 });
