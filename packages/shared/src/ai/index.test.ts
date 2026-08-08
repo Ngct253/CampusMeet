@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   aiJobDetailSchema,
+  confirmTaskProposalInputSchema,
+  confirmTaskProposalResponseSchema,
   groupKnowledgeQuerySchema,
   groupProgressAnalysisRequestSchema,
   groupProgressSnapshotSchema,
@@ -38,6 +40,74 @@ describe('M5 shared schemas', () => {
         status: 'PENDING',
       }).success,
     ).toBe(false);
+  });
+
+  it('keeps confirmation input strict and accepts only editable Task fields', () => {
+    expect(
+      confirmTaskProposalInputSchema.parse({
+        title: ' Final title ',
+        assigneeId: ' member-1 ',
+        priority: 'HIGH',
+        dueAt: '2026-08-10T10:30:00+07:00',
+      }),
+    ).toEqual({
+      title: 'Final title',
+      assigneeId: 'member-1',
+      priority: 'HIGH',
+      dueAt: '2026-08-10T10:30:00+07:00',
+    });
+    for (const field of ['taskId', 'createdBy', 'version', 'status', 'groupId', 'meetingId']) {
+      expect(confirmTaskProposalInputSchema.safeParse({ [field]: 'forged' }).success).toBe(false);
+    }
+    expect(confirmTaskProposalInputSchema.safeParse({ dueAt: '2026-08-10T10:30:00' }).success).toBe(
+      false,
+    );
+  });
+
+  it('requires an authoritative Task link on confirmed proposals and responses', () => {
+    const proposal = {
+      proposalId: 'proposal-1',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      title: 'Final title',
+      assigneeId: 'member-1',
+      priority: 'HIGH',
+      missingFields: [],
+      citations: [
+        {
+          citationId: 'citation-1',
+          groupId: 'group-1',
+          meetingId: 'meeting-1',
+          sourceType: 'TRANSCRIPT',
+          sourceId: 'transcript-1',
+          sourceVersion: 1,
+          internalUri: 'campusmeet://meetings/meeting-1/transcripts/transcript-1',
+        },
+      ],
+      status: 'CONFIRMED',
+      confirmedTaskId: 'task-1',
+    };
+    expect(taskProposalSchema.safeParse({ ...proposal, confirmedTaskId: undefined }).success).toBe(
+      false,
+    );
+    expect(
+      confirmTaskProposalResponseSchema.safeParse({
+        task: {
+          id: 'task-1',
+          groupId: 'group-1',
+          title: 'Final title',
+          assigneeId: 'member-1',
+          status: 'TODO',
+          priority: 'HIGH',
+          sourceMeetingId: 'meeting-1',
+          createdBy: 'admin-1',
+          createdAt: '2026-08-08T00:00:00.000Z',
+          updatedAt: '2026-08-08T00:00:00.000Z',
+          version: 1,
+        },
+        proposal,
+      }).success,
+    ).toBe(true);
   });
 
   it('accepts every supported document type and rejects executable content', () => {

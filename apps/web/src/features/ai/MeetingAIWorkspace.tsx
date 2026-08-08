@@ -1,9 +1,20 @@
 import { useEffect, useState } from 'react';
-import { minutesDraftSchema, taskProposalSchema, type GroupDetails } from '@campusmeet/shared';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  GroupRole,
+  minutesDraftSchema,
+  taskProposalSchema,
+  type ConfirmTaskProposalResponse,
+  type GroupDetails,
+} from '@campusmeet/shared';
 import { AIJobState, MinutesDraftPreview, TaskProposalEditor } from './components';
-import { useAIJob, useMinutesDraftMutation, useTaskProposalsMutation } from './hooks';
-import { createAIIdempotencyKey } from './service';
-import type { CompletedTaskProposalFields } from './components';
+import {
+  useAIJob,
+  useConfirmTaskProposalMutation,
+  useMinutesDraftMutation,
+  useTaskProposalsMutation,
+} from './hooks';
+import { AIServiceError, createAIIdempotencyKey } from './service';
 
 const taskProposalListSchema = taskProposalSchema.array();
 
@@ -16,23 +27,31 @@ export function MeetingAIWorkspace({
 }) {
   const [minutesJobId, setMinutesJobId] = useState<string>();
   const [taskJobId, setTaskJobId] = useState<string>();
-  const [completedProposals, setCompletedProposals] = useState<
-    Record<string, CompletedTaskProposalFields>
+  const queryClient = useQueryClient();
+  const [confirmedProposals, setConfirmedProposals] = useState<
+    Record<string, ConfirmTaskProposalResponse>
   >({});
+  const [confirmationErrors, setConfirmationErrors] = useState<Record<string, string>>({});
+  const [confirmingProposalId, setConfirmingProposalId] = useState<string>();
   const minutesMutation = useMinutesDraftMutation();
   const taskMutation = useTaskProposalsMutation();
+  const confirmationMutation = useConfirmTaskProposalMutation();
   const minutesJobQuery = useAIJob(minutesJobId);
   const taskJobQuery = useAIJob(taskJobId);
   const resetMinutesMutation = minutesMutation.reset;
   const resetTaskMutation = taskMutation.reset;
+  const resetConfirmationMutation = confirmationMutation.reset;
 
   useEffect(() => {
     setMinutesJobId(undefined);
     setTaskJobId(undefined);
-    setCompletedProposals({});
+    setConfirmedProposals({});
+    setConfirmationErrors({});
+    setConfirmingProposalId(undefined);
     resetMinutesMutation();
     resetTaskMutation();
-  }, [meetingId, resetMinutesMutation, resetTaskMutation]);
+    resetConfirmationMutation();
+  }, [meetingId, resetMinutesMutation, resetTaskMutation, resetConfirmationMutation]);
 
   const minutesResult = minutesDraftSchema.safeParse(minutesJobQuery.data?.result);
   const minutesDraft =
@@ -121,7 +140,8 @@ export function MeetingAIWorkspace({
             onClick={() => {
               taskMutation.reset();
               setTaskJobId(undefined);
-              setCompletedProposals({});
+              setConfirmedProposals({});
+              setConfirmationErrors({});
               taskMutation.mutate(
                 { meetingId, request: {}, idempotencyKey: createAIIdempotencyKey() },
                 { onSuccess: (job) => setTaskJobId(job.aiJobId) },
@@ -155,7 +175,8 @@ export function MeetingAIWorkspace({
           onRetry={() => {
             taskMutation.reset();
             setTaskJobId(undefined);
-            setCompletedProposals({});
+            setConfirmedProposals({});
+            setConfirmationErrors({});
           }}
         >
           {taskProposals?.length === 0 && (
@@ -166,26 +187,59 @@ export function MeetingAIWorkspace({
               </div>
             </div>
           )}
-          {taskProposals?.map((proposal) => (
-            <div className="meeting-ai-proposal" key={`${taskJobId}-${proposal.proposalId}`}>
-              <TaskProposalEditor
-                proposal={proposal}
-                assigneeOptions={assigneeOptions}
-                onComplete={(fields) =>
-                  setCompletedProposals((current) => ({
-                    ...current,
-                    [fields.proposalId]: fields,
-                  }))
-                }
-              />
-              {completedProposals[proposal.proposalId] && (
-                <p className="meeting-ai-proposal-ready" role="status">
-                  Đã đủ thông tin bắt buộc. Công việc chưa được tạo cho đến khi Quản trị viên nhóm
-                  xác nhận qua luồng Task.
-                </p>
-              )}
-            </div>
-          ))}
+          {taskProposals?.map((generatedProposal) => {
+            const proposal =
+              confirmedProposals[generatedProposal.proposalId]?.proposal ?? generatedProposal;
+            return (
+              <div className="meeting-ai-proposal" key={`${taskJobId}-${proposal.proposalId}`}>
+                <TaskProposalEditor
+                  proposal={proposal}
+                  assigneeOptions={assigneeOptions}
+                  canConfirm={group.group.role === GroupRole.GROUP_ADMIN}
+                  isPending={
+                    confirmationMutation.isPending && confirmingProposalId === proposal.proposalId
+                  }
+                  error={confirmationErrors[proposal.proposalId]}
+                  onConfirm={({ proposalId, request }) => {
+                    if (confirmationMutation.isPending) return;
+                    setConfirmingProposalId(proposalId);
+                    setConfirmationErrors((current) => ({ ...current, [proposalId]: '' }));
+                    confirmationMutation.mutate(
+                      { proposalId, request },
+                      {
+                        onSuccess: async (response) => {
+                          setConfirmedProposals((current) => ({
+                            ...current,
+                            [proposalId]: response,
+                          }));
+                          setConfirmingProposalId(undefined);
+                          await Promise.all([
+                            queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+                            queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+                          ]);
+                        },
+                        onError: async (error) => {
+                          setConfirmingProposalId(undefined);
+                          setConfirmationErrors((current) => ({
+                            ...current,
+                            [proposalId]:
+                              error instanceof AIServiceError && error.status === 422
+                                ? error.message
+                                : error instanceof AIServiceError && error.status === 403
+                                  ? 'Bạn không còn quyền xác nhận đề xuất này.'
+                                  : 'Không thể xác nhận đề xuất công việc. Vui lòng thử lại.',
+                          }));
+                          if (error instanceof AIServiceError && error.status === 409) {
+                            await taskJobQuery.refetch();
+                          }
+                        },
+                      },
+                    );
+                  }}
+                />
+              </div>
+            );
+          })}
         </AIJobState>
       )}
     </section>

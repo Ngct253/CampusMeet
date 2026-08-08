@@ -235,7 +235,7 @@ Schema và lifecycle chi tiết nằm tại [M3 Group Progress Snapshot Contract
 | Message                  | `CONVERSATION#<conversationId>` | `MESSAGE#<createdAt>#<messageId>` | Không cần                                                                                                            |
 | Citation                 | `CONVERSATION#<conversationId>` | `CITATION#<messageId>#<order>`    | Không cần                                                                                                            |
 | Task/tool proposal       | `PROPOSAL#<proposalId>`         | `META`                            | `GSI1PK=USER#<userId>`, `GSI1SK=PROPOSAL#<status>#<createdAt>#<id>`                                                  |
-| Proposal execution       | `PROPOSAL#<proposalId>`         | `EXECUTION`                       | Không cần                                                                                                            |
+| Proposal execution       | `PROPOSAL#<proposalId>`         | `EXECUTION`                       | Dành cho proposal nghiệp vụ khác; Task confirmation không tạo item này                                               |
 | Idempotency result       | `IDEMPOTENCY#<scope>#<keyHash>` | `RESULT`                          | TTL bắt buộc                                                                                                         |
 
 ### 8.2 Phạm vi chức năng AI
@@ -296,13 +296,15 @@ Không gọi service ngoài bên trong transaction. Google Calendar, Scheduler, 
 ### Xác nhận proposal
 
 ```text
-Condition proposal=PENDING và version khớp
-Update proposal=EXECUTING
-Thực thi API nghiệp vụ chuẩn
-Update proposal=EXECUTED + result reference
+TransactWrite:
+  Put task-data TASK#<deterministicTaskId>/META nếu PK/SK chưa tồn tại
+  Update ai-work PROPOSAL#<proposalId>/META nếu proposal còn PENDING và chưa có confirmedTaskId
+  Set proposal=CONFIRMED, confirmedTaskId, confirmedBy, confirmedAt và final Task fields
 ```
 
-Nếu thao tác nghiệp vụ và proposal nằm khác bảng, dùng transaction cho phần DynamoDB có thể transaction; service ngoài phải theo saga/idempotency, không giả vờ có distributed transaction.
+Task confirmation dùng transaction DynamoDB xuyên `task-data` và `ai-work`; không có trạng thái Task/proposal mồ côi. Task ID được suy ra ổn định từ namespace operation + `proposalId`. Khi transaction cạnh tranh thất bại, repository consistent re-read proposal và Task đã liên kết; replay hợp lệ trả cùng kết quả authoritative, còn lỗi AWS không liên quan không bị đổi thành conflict. Proposal giữ citation cùng audit gốc và bổ sung actor/timestamp xác nhận.
+
+Nếu proposal nghiệp vụ khác gọi service ngoài không nằm trong DynamoDB transaction, phải dùng saga/idempotency riêng và không giả vờ có distributed transaction.
 
 ## 10. Ranh giới dữ liệu ngoài DynamoDB
 

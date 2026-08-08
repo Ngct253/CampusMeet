@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Priority } from '../enums';
 import type { ISODateTime } from '../types';
 
 export const aiJobStatusSchema = z.enum([
@@ -134,20 +135,73 @@ export const minutesDraftSchema = z.object({
 });
 export type MinutesDraft = z.infer<typeof minutesDraftSchema>;
 
-export const taskProposalSchema = z.object({
-  proposalId: z.string().min(1),
-  groupId: z.string().min(1),
-  meetingId: z.string().min(1),
-  title: z.string().min(1).max(200),
-  description: z.string().max(5_000).optional(),
-  assigneeId: z.string().min(1).optional(),
-  priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional(),
-  dueAt: z.string().datetime({ offset: true }).optional(),
-  missingFields: z.array(z.enum(['assigneeId', 'priority'])),
-  citations: z.array(citationSchema).min(1).max(20),
-  status: proposalStatusSchema,
-});
+export const taskProposalSchema = z
+  .object({
+    proposalId: z.string().min(1),
+    groupId: z.string().min(1),
+    meetingId: z.string().min(1),
+    title: z.string().min(1).max(200),
+    description: z.string().max(5_000).optional(),
+    assigneeId: z.string().min(1).optional(),
+    priority: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional(),
+    dueAt: z.string().datetime({ offset: true }).optional(),
+    missingFields: z.array(z.enum(['assigneeId', 'priority'])),
+    citations: z.array(citationSchema).min(1).max(20),
+    status: proposalStatusSchema,
+    confirmedTaskId: z.string().min(1).optional(),
+  })
+  .superRefine((proposal, context) => {
+    if (proposal.status === 'CONFIRMED' && !proposal.confirmedTaskId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['confirmedTaskId'],
+        message: 'confirmedTaskId is required for a confirmed proposal',
+      });
+    }
+    if (proposal.status === 'PENDING' && proposal.confirmedTaskId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['confirmedTaskId'],
+        message: 'A pending proposal cannot reference a confirmed task',
+      });
+    }
+  });
 export type TaskProposal = z.infer<typeof taskProposalSchema>;
+
+export const confirmTaskProposalInputSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    assigneeId: z.string().trim().min(1).optional(),
+    priority: z.nativeEnum(Priority).optional(),
+    dueAt: z.string().datetime({ offset: true }).optional(),
+  })
+  .strict();
+export type ConfirmTaskProposalRequest = z.infer<typeof confirmTaskProposalInputSchema>;
+
+const confirmedProposalTaskSchema = z
+  .object({
+    id: z.string().min(1),
+    groupId: z.string().min(1),
+    title: z.string().min(1).max(200),
+    assigneeId: z.string().min(1),
+    status: z.literal('TODO'),
+    priority: z.nativeEnum(Priority),
+    dueAt: z.string().datetime({ offset: true }).optional(),
+    sourceMeetingId: z.string().min(1),
+    createdBy: z.string().min(1),
+    createdAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    version: z.literal(1),
+  })
+  .strict();
+
+export const confirmTaskProposalResponseSchema = z
+  .object({
+    task: confirmedProposalTaskSchema,
+    proposal: taskProposalSchema,
+  })
+  .strict();
+export type ConfirmTaskProposalResponse = z.infer<typeof confirmTaskProposalResponseSchema>;
 
 const progressSnapshotCountSchema = z.number().int().nonnegative();
 const groupProgressSnapshotVersionSchema = z.number().int().min(1).max(9_999_999_999);

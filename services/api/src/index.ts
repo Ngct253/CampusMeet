@@ -40,6 +40,7 @@ import {
 import { meHandler } from './handlers/me';
 import { minutesHandler } from './handlers/minutes';
 import { actionItemTaskHandler } from './handlers/action-item-tasks';
+import { taskProposalConfirmationHandler } from './handlers/task-proposals';
 import { notificationsHandler, readNotificationHandler } from './handlers/notifications';
 import { meetContextHandler } from './handlers/meet-context';
 import { tasksHandler, taskStatusHandler } from './handlers/tasks';
@@ -126,6 +127,11 @@ const findRoute = createRouter([
     handler: progressAnalysisHandler,
   },
   { method: 'GET', path: '/ai/jobs/:aiJobId', handler: aiJobDetailHandler },
+  {
+    method: 'POST',
+    path: '/ai/task-proposals/:proposalId/confirm',
+    handler: taskProposalConfirmationHandler,
+  },
 ]);
 
 export const handler: APIGatewayProxyHandlerV2 = async (event, context, callback) => {

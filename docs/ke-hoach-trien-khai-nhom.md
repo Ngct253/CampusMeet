@@ -186,7 +186,7 @@ Meeting
   - minutes trong `meeting-data`;
   - tasks trong `task-data`;
   - immutable `GroupProgressSnapshot` VERSION + full LATEST trong `task-data` (contract PROPOSED, chờ duyệt; writer chưa implement);
-  - proposal state/execution reference trong `ai-work`.
+  - Task Proposal `PENDING → CONFIRMED` và `confirmedTaskId` trong `ai-work`; Task được tạo atomically trong `task-data`.
 
 ### Cách truy vấn
 
@@ -195,7 +195,7 @@ Meeting
 - Group dashboard: task GSI1 group/status/due.
 - Personal dashboard: task GSI2 assignee/due.
 - Tasks from meeting: task GSI3.
-- Proposal: `PROPOSAL#id / META|EXECUTION`; confirm phải kiểm tra lại quyền và version.
+- Task Proposal: `PROPOSAL#id / META`; confirm kiểm tra lại quyền/group/meeting/assignee, rồi transaction tạo deterministic Task và ghi `confirmedTaskId` đúng một lần.
 
 ### Kiểm thử tối thiểu
 
