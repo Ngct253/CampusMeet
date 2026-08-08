@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   GoogleSyncStatus,
   GroupRole,
@@ -7,7 +8,7 @@ import {
   type Membership,
 } from '@campusmeet/shared';
 import type { SFNClient } from '@aws-sdk/client-sfn';
-import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { TransactWriteCommand, type DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { describe, expect, it, vi } from 'vitest';
 import { DynamoAiAccessAdapter, StepFunctionsAIJobOrchestrator } from '../src/ai/aws-adapters';
 import type { MeetingAccessBoundary } from '../src/domain/ports';
@@ -193,6 +194,128 @@ describe('StepFunctionsAIJobOrchestrator idempotency lookup', () => {
         idempotencyKey: 'idem-corrupt',
       }),
     ).rejects.toThrow('AI_IDEMPOTENCY_DATA_INTEGRITY');
+  });
+});
+
+describe('StepFunctionsAIJobOrchestrator prepared persistence', () => {
+  const payload = {
+    operation: 'PROGRESS_ANALYSIS' as const,
+    actorId: 'admin-1',
+    groupId: 'group-1',
+    request: { snapshotVersion: 4 },
+  };
+  const input = {
+    groupId: 'group-1',
+    requestId: 'request-1',
+    type: 'PROGRESS_ANALYSIS' as const,
+    payload,
+  };
+
+  it('prepares one authoritative conditional AIJob contribution without side effects', () => {
+    const send = vi.fn();
+    const start = vi.fn();
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      { send: start } as unknown as SFNClient,
+      'ai-work',
+      'state-machine-arn',
+    );
+
+    const prepared = orchestrator.prepareJob(input);
+    const put = prepared.persistenceContribution.Put!;
+    const item = put.Item!;
+    const expectedHash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+
+    expect(prepared).toMatchObject({
+      aiJobId: expect.stringMatching(/^aij_/),
+      job: {
+        aiJobId: expect.stringMatching(/^aij_/),
+        groupId: 'group-1',
+        type: 'PROGRESS_ANALYSIS',
+        status: 'QUEUED',
+      },
+      payload,
+    });
+    expect(prepared.job.aiJobId).toBe(prepared.aiJobId);
+    expect(put).toMatchObject({
+      TableName: 'ai-work',
+      ConditionExpression: 'attribute_not_exists(PK)',
+    });
+    expect(item).toMatchObject({
+      PK: `AIJOB#${prepared.aiJobId}`,
+      SK: 'META',
+      entityType: 'AIJob',
+      aiJobId: prepared.aiJobId,
+      payload,
+      requestPayloadHash: expectedHash,
+      GSI1PK: 'GROUP#group-1',
+      GSI1SK: expect.stringContaining(`#${prepared.aiJobId}`),
+      GSI2PK: 'AIJOB_STATUS#QUEUED',
+      GSI2SK: expect.stringContaining(`#${prepared.aiJobId}`),
+      orchestrationState: 'STARTING',
+      executionName: prepared.aiJobId.replace(/[^A-Za-z0-9-_]/g, '-'),
+      orchestrationAttempt: 1,
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('can be embedded opaquely in a caller transaction and then started by persisted identity', async () => {
+    const send = vi.fn();
+    const start = vi.fn().mockResolvedValue({});
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      { send: start } as unknown as SFNClient,
+      'ai-work',
+      'state-machine-arn',
+    );
+    const prepared = orchestrator.prepareJob(input);
+    const callerTransaction = new TransactWriteCommand({
+      TransactItems: [
+        {
+          Put: {
+            TableName: 'domain-table',
+            Item: { PK: 'DOMAIN#1', SK: 'META' },
+            ConditionExpression: 'attribute_not_exists(PK)',
+          },
+        },
+        prepared.persistenceContribution,
+      ],
+    });
+
+    expect(callerTransaction.input.TransactItems?.[1]).toBe(prepared.persistenceContribution);
+    expect(send).not.toHaveBeenCalled();
+    send
+      .mockResolvedValueOnce({ Item: prepared.persistenceContribution.Put!.Item })
+      .mockResolvedValueOnce({});
+
+    await expect(orchestrator.ensureStarted(prepared.aiJobId)).resolves.toEqual(prepared.job);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]![0].input).toMatchObject({
+      name: prepared.persistenceContribution.Put!.Item!.executionName,
+      input: JSON.stringify({ aiJobId: prepared.aiJobId }),
+    });
+  });
+
+  it('uses the prepared contribution as enqueue persistence source of truth', async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const orchestrator = new StepFunctionsAIJobOrchestrator(
+      { send } as unknown as DynamoDBDocumentClient,
+      { send: vi.fn().mockResolvedValue({}) } as unknown as SFNClient,
+      'ai-work',
+      'state-machine-arn',
+    );
+    const prepare = vi.spyOn(orchestrator, 'prepareJob');
+
+    await orchestrator.enqueue({
+      ...input,
+      actorId: 'admin-1',
+      idempotencyKey: 'idem-1',
+    });
+
+    const prepared = prepare.mock.results[0]!.value;
+    expect(send.mock.calls[0]![0].input.TransactItems[0]).toBe(prepared.persistenceContribution);
+    expect(send.mock.calls[0]![0].input.TransactItems).toHaveLength(2);
   });
 });
 

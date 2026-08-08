@@ -26,6 +26,8 @@ import type {
   AIJobOrchestrator,
   MeetingScopeReader,
   MembershipAuthorizer,
+  PrepareAIJobInput,
+  PreparedAIJob,
 } from './ports';
 
 const requireValue = (value: string | undefined, name: string): string => {
@@ -115,18 +117,14 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobI
     };
   }
 
-  async enqueue(input: Parameters<AIJobOrchestrator['enqueue']>[0]): Promise<AIJob> {
+  prepareJob(input: PrepareAIJobInput): PreparedAIJob {
     const now = new Date().toISOString();
     const aiJobId = `aij_${randomUUID()}`;
     const executionName = aiJobId.replace(/[^A-Za-z0-9-_]/g, '-');
-    const requestPayloadHash = this.payloadHash(input.payload);
-    const idempotencyKey = this.idempotencyKey({
-      actorId: input.actorId,
-      groupId: input.groupId,
-      operation: input.payload.operation,
-      idempotencyKey: input.idempotencyKey,
-    });
-    const job: AIJob = {
+    const payload = aiWorkerPayloadSchema.parse(input.payload);
+    if (payload.groupId !== input.groupId) throw new Error('AI_JOB_DATA_INTEGRITY');
+    const requestPayloadHash = this.payloadHash(payload);
+    const job = aiJobSchema.parse({
       aiJobId,
       groupId: input.groupId,
       ...(input.meetingId ? { meetingId: input.meetingId } : {}),
@@ -137,32 +135,51 @@ export class StepFunctionsAIJobOrchestrator implements AIJobOrchestrator, AIJobI
       provider: 'BEDROCK',
       createdAt: now,
       updatedAt: now,
+    });
+    return {
+      aiJobId,
+      job,
+      payload,
+      persistenceContribution: {
+        Put: {
+          TableName: this.tableName,
+          Item: {
+            PK: `AIJOB#${aiJobId}`,
+            SK: 'META',
+            entityType: 'AIJob',
+            ...job,
+            payload,
+            requestPayloadHash,
+            GSI1PK: `GROUP#${input.groupId}`,
+            GSI1SK: `AIJOB#${now}#${aiJobId}`,
+            GSI2PK: 'AIJOB_STATUS#QUEUED',
+            GSI2SK: `${now}#${aiJobId}`,
+            orchestrationState: 'STARTING',
+            executionName,
+            orchestrationAttempt: 1,
+          },
+          ConditionExpression: 'attribute_not_exists(PK)',
+        },
+      },
     };
+  }
 
+  async enqueue(input: Parameters<AIJobOrchestrator['enqueue']>[0]): Promise<AIJob> {
+    const prepared = this.prepareJob(input);
+    const { aiJobId, job, payload } = prepared;
+    const executionName = aiJobId.replace(/[^A-Za-z0-9-_]/g, '-');
+    const requestPayloadHash = this.payloadHash(payload);
+    const idempotencyKey = this.idempotencyKey({
+      actorId: input.actorId,
+      groupId: input.groupId,
+      operation: input.payload.operation,
+      idempotencyKey: input.idempotencyKey,
+    });
     try {
       await this.database.send(
         new TransactWriteCommand({
           TransactItems: [
-            {
-              Put: {
-                TableName: this.tableName,
-                Item: {
-                  PK: `AIJOB#${aiJobId}`,
-                  SK: 'META',
-                  entityType: 'AIJob',
-                  ...job,
-                  payload: input.payload,
-                  GSI1PK: `GROUP#${input.groupId}`,
-                  GSI1SK: `AIJOB#${now}#${aiJobId}`,
-                  GSI2PK: 'AIJOB_STATUS#QUEUED',
-                  GSI2SK: `${now}#${aiJobId}`,
-                  orchestrationState: 'STARTING',
-                  executionName,
-                  orchestrationAttempt: 1,
-                },
-                ConditionExpression: 'attribute_not_exists(PK)',
-              },
-            },
+            prepared.persistenceContribution,
             {
               Put: {
                 TableName: this.tableName,

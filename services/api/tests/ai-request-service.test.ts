@@ -25,6 +25,7 @@ const setup = () => {
     requireMeetingsInGroup: vi.fn().mockResolvedValue(undefined),
   };
   const jobs: AIJobOrchestrator = {
+    prepareJob: vi.fn(),
     enqueue: vi.fn().mockResolvedValue(queuedJob),
     ensureStarted: vi.fn().mockResolvedValue(queuedJob),
   };
