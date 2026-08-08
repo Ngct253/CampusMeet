@@ -5,3 +5,4 @@ export * from './upload';
 export * from './types';
 export * from './ai';
 export * from './transcript';
+export * from './live-transcription';

@@ -345,6 +345,16 @@ assert.equal(
   'API role must reconcile ambiguous Step Functions start outcomes.',
 );
 
+for (const marker of [
+  'TranscribeLanguageAllowlist:',
+  'TRANSCRIBE_LANGUAGE_ALLOWLIST:',
+  'Sid: StartM2LiveTranscription',
+  'Action: transcribe:StartStreamTranscriptionWebSocket',
+]) {
+  assert.equal(appTemplate.includes(marker), true, `M2 live transcription wiring is missing ${marker}.`);
+}
+assert.equal(appTemplate.includes('transcribe:*'), false, 'M2 must not grant transcribe:* permissions.');
+
 console.log(
   'Infrastructure contract validation passed: data foundation, Google sync runtime, M5 AI Worker, Knowledge Base, and S3 Vectors.',
 );
