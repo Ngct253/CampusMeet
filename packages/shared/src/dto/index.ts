@@ -83,6 +83,22 @@ export const taskInputSchema = z
     sourceMeetingId: z.string().trim().min(1).optional(),
   })
   .strict();
+export const taskSchema = z.object({
+  id: z.string().min(1),
+  groupId: z.string().min(1),
+  title: z.string().min(1).max(200),
+  assigneeId: z.string().min(1),
+  status: z.nativeEnum(TaskStatus),
+  priority: z.nativeEnum(Priority),
+  dueAt: z.string().datetime({ offset: true }).optional(),
+  sourceMeetingId: z.string().min(1).optional(),
+  sourceActionItemId: z.string().min(1).optional(),
+  createdBy: z.string().min(1).optional(),
+  createdAt: z.string().datetime({ offset: true }).optional(),
+  updatedAt: z.string().datetime({ offset: true }).optional(),
+  completedAt: z.string().datetime({ offset: true }).optional(),
+  version: z.number().int().nonnegative().optional(),
+});
 export const updateTaskStatusInputSchema = z
   .object({
     status: z.nativeEnum(TaskStatus),

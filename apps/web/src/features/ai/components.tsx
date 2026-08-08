@@ -589,10 +589,18 @@ export function TaskProposalEditor({
   proposal,
   assigneeOptions = [],
   onComplete,
+  canConfirm = true,
+  isConfirming = false,
+  confirmedTaskId,
+  confirmationError,
 }: {
   proposal: TaskProposal;
   assigneeOptions?: Array<{ userId: string; displayName: string }>;
   onComplete: (fields: CompletedTaskProposalFields) => void;
+  canConfirm?: boolean;
+  isConfirming?: boolean;
+  confirmedTaskId?: string;
+  confirmationError?: string;
 }) {
   const assigneeInputId = useId();
   const priorityInputId = useId();
@@ -616,6 +624,12 @@ export function TaskProposalEditor({
         <div className="ai-proposal-note">
           <AIIcon name="warning" size={17} />
           Bổ sung trường bắt buộc trước khi chuyển sang bước xác nhận tạo công việc.
+        </div>
+      )}
+      {!canConfirm && (
+        <div className="ai-proposal-note">
+          <AIIcon name="warning" size={17} />
+          Chỉ Quản trị viên nhóm được xác nhận tạo công việc.
         </div>
       )}
       <div className="ai-proposal-fields">
@@ -661,16 +675,30 @@ export function TaskProposalEditor({
         <button
           className="ai-button ai-button--primary"
           type="button"
-          disabled={hasMissingFields}
+          disabled={hasMissingFields || !canConfirm || isConfirming || Boolean(confirmedTaskId)}
           onClick={() =>
             priority &&
             onComplete({ proposalId: proposal.proposalId, assigneeId: assigneeId.trim(), priority })
           }
         >
-          Hoàn tất thông tin
+          {confirmedTaskId
+            ? 'Đã tạo công việc'
+            : isConfirming
+              ? 'Đang tạo công việc…'
+              : 'Xác nhận tạo công việc'}
           <AIIcon name="arrow" size={16} />
         </button>
       </div>
+      {confirmedTaskId && (
+        <p className="meeting-ai-proposal-ready" role="status">
+          Công việc đã được tạo thành công.
+        </p>
+      )}
+      {confirmationError && (
+        <div className="ai-feedback ai-feedback--error" role="alert">
+          {confirmationError}
+        </div>
+      )}
       <CitationViewer citations={proposal.citations} />
     </article>
   );

@@ -1,9 +1,19 @@
 import { useEffect, useState } from 'react';
-import { minutesDraftSchema, taskProposalSchema, type GroupDetails } from '@campusmeet/shared';
+import {
+  GroupRole,
+  Priority,
+  minutesDraftSchema,
+  taskProposalSchema,
+  type GroupDetails,
+} from '@campusmeet/shared';
 import { AIJobState, MinutesDraftPreview, TaskProposalEditor } from './components';
-import { useAIJob, useMinutesDraftMutation, useTaskProposalsMutation } from './hooks';
-import { createAIIdempotencyKey } from './service';
-import type { CompletedTaskProposalFields } from './components';
+import {
+  useAIJob,
+  useConfirmTaskProposalMutation,
+  useMinutesDraftMutation,
+  useTaskProposalsMutation,
+} from './hooks';
+import { createAIIdempotencyKey, taskProposalConfirmationKey } from './service';
 
 const taskProposalListSchema = taskProposalSchema.array();
 
@@ -16,23 +26,28 @@ export function MeetingAIWorkspace({
 }) {
   const [minutesJobId, setMinutesJobId] = useState<string>();
   const [taskJobId, setTaskJobId] = useState<string>();
-  const [completedProposals, setCompletedProposals] = useState<
-    Record<string, CompletedTaskProposalFields>
-  >({});
+  const [confirmedTaskIds, setConfirmedTaskIds] = useState<Record<string, string>>({});
+  const [confirmingProposalId, setConfirmingProposalId] = useState<string>();
+  const [confirmationErrors, setConfirmationErrors] = useState<Record<string, string>>({});
   const minutesMutation = useMinutesDraftMutation();
   const taskMutation = useTaskProposalsMutation();
+  const confirmMutation = useConfirmTaskProposalMutation();
   const minutesJobQuery = useAIJob(minutesJobId);
   const taskJobQuery = useAIJob(taskJobId);
   const resetMinutesMutation = minutesMutation.reset;
   const resetTaskMutation = taskMutation.reset;
+  const resetConfirmMutation = confirmMutation.reset;
 
   useEffect(() => {
     setMinutesJobId(undefined);
     setTaskJobId(undefined);
-    setCompletedProposals({});
+    setConfirmedTaskIds({});
+    setConfirmingProposalId(undefined);
+    setConfirmationErrors({});
     resetMinutesMutation();
     resetTaskMutation();
-  }, [meetingId, resetMinutesMutation, resetTaskMutation]);
+    resetConfirmMutation();
+  }, [meetingId, resetConfirmMutation, resetMinutesMutation, resetTaskMutation]);
 
   const minutesResult = minutesDraftSchema.safeParse(minutesJobQuery.data?.result);
   const minutesDraft =
@@ -121,7 +136,8 @@ export function MeetingAIWorkspace({
             onClick={() => {
               taskMutation.reset();
               setTaskJobId(undefined);
-              setCompletedProposals({});
+              setConfirmedTaskIds({});
+              setConfirmationErrors({});
               taskMutation.mutate(
                 { meetingId, request: {}, idempotencyKey: createAIIdempotencyKey() },
                 { onSuccess: (job) => setTaskJobId(job.aiJobId) },
@@ -155,7 +171,8 @@ export function MeetingAIWorkspace({
           onRetry={() => {
             taskMutation.reset();
             setTaskJobId(undefined);
-            setCompletedProposals({});
+            setConfirmedTaskIds({});
+            setConfirmationErrors({});
           }}
         >
           {taskProposals?.length === 0 && (
@@ -171,19 +188,42 @@ export function MeetingAIWorkspace({
               <TaskProposalEditor
                 proposal={proposal}
                 assigneeOptions={assigneeOptions}
-                onComplete={(fields) =>
-                  setCompletedProposals((current) => ({
-                    ...current,
-                    [fields.proposalId]: fields,
-                  }))
-                }
+                canConfirm={group.group.role === GroupRole.GROUP_ADMIN}
+                isConfirming={confirmingProposalId === proposal.proposalId}
+                confirmedTaskId={confirmedTaskIds[proposal.proposalId]}
+                confirmationError={confirmationErrors[proposal.proposalId]}
+                onComplete={(fields) => {
+                  setConfirmingProposalId(fields.proposalId);
+                  setConfirmationErrors((current) => {
+                    const next = { ...current };
+                    delete next[fields.proposalId];
+                    return next;
+                  });
+                  confirmMutation.mutate(
+                    {
+                      proposalId: fields.proposalId,
+                      request: {
+                        assigneeId: fields.assigneeId,
+                        priority: Priority[fields.priority],
+                      },
+                      idempotencyKey: taskProposalConfirmationKey(fields.proposalId),
+                    },
+                    {
+                      onSuccess: ({ task }) =>
+                        setConfirmedTaskIds((current) => ({
+                          ...current,
+                          [fields.proposalId]: task.id,
+                        })),
+                      onError: (error) =>
+                        setConfirmationErrors((current) => ({
+                          ...current,
+                          [fields.proposalId]: error.message,
+                        })),
+                      onSettled: () => setConfirmingProposalId(undefined),
+                    },
+                  );
+                }}
               />
-              {completedProposals[proposal.proposalId] && (
-                <p className="meeting-ai-proposal-ready" role="status">
-                  Đã đủ thông tin bắt buộc. Công việc chưa được tạo cho đến khi Quản trị viên nhóm
-                  xác nhận qua luồng Task.
-                </p>
-              )}
             </div>
           ))}
         </AIJobState>

@@ -2,6 +2,7 @@ import type {
   ActionItem,
   ConvertActionItemToTaskResponse,
   CreateTaskRequest,
+  TaskProposal,
   Group,
   GroupRole,
   Meeting,
@@ -106,6 +107,17 @@ export interface TaskRepository {
     expectedVersion: number,
     isLegacyVersion: boolean,
   ): Promise<Task>;
+}
+
+export interface TaskProposalConfirmationRepository {
+  getById(proposalId: string): Promise<TaskProposal | undefined>;
+  claim(proposalId: string, actorId: string, idempotencyKey: string): Promise<TaskProposal>;
+  markExecuted(
+    proposalId: string,
+    actorId: string,
+    idempotencyKey: string,
+    taskId: string,
+  ): Promise<TaskProposal>;
 }
 
 export interface NotificationRepository {

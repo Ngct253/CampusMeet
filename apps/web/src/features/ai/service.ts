@@ -2,8 +2,11 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 import {
   aiJobDetailSchema,
   aiJobSchema,
+  confirmTaskProposalResponseSchema,
   type AIJob,
   type AIJobDetail,
+  type ConfirmTaskProposalRequest,
+  type ConfirmTaskProposalResponse,
   type GenerateMeetingDraftRequest,
   type GroupKnowledgeQuery,
   type GroupProgressAnalysisRequest,
@@ -55,6 +58,11 @@ export interface AIService {
     request: GenerateMeetingDraftRequest,
     idempotencyKey: string,
   ): Promise<AIJob>;
+  confirmTaskProposal(
+    proposalId: string,
+    request: ConfirmTaskProposalRequest,
+    idempotencyKey: string,
+  ): Promise<ConfirmTaskProposalResponse>;
   progressAnalysis(
     groupId: string,
     request: GroupProgressAnalysisRequest,
@@ -123,6 +131,16 @@ export const createAIService = (options: AIServiceOptions = {}): AIService => {
       post(`/meetings/${pathId(meetingId)}/ai/minutes-draft`, body, key),
     taskProposals: (meetingId, body, key) =>
       post(`/meetings/${pathId(meetingId)}/ai/task-proposals`, body, key),
+    confirmTaskProposal: (proposalId, body, key) =>
+      request(
+        `/ai/task-proposals/${pathId(proposalId)}/confirm`,
+        confirmTaskProposalResponseSchema,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+          headers: { 'idempotency-key': key },
+        },
+      ),
     progressAnalysis: (groupId, body, key) =>
       post(`/groups/${pathId(groupId)}/ai/progress-analysis`, body, key),
     getJob: (aiJobId) => request(`/ai/jobs/${pathId(aiJobId)}`, aiJobDetailSchema),
@@ -132,3 +150,4 @@ export const createAIService = (options: AIServiceOptions = {}): AIService => {
 export const aiService = createAIService();
 
 export const createAIIdempotencyKey = () => `ai-${crypto.randomUUID()}`;
+export const taskProposalConfirmationKey = (proposalId: string) => `ai-confirm-${proposalId}`;

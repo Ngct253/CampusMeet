@@ -106,6 +106,7 @@ for (const parameter of [
   'BedrockEmbeddingModelId',
   'BedrockEmbeddingDimensions',
   'BedrockGenerationModelArn',
+  'BedrockGenerationFoundationModelId',
 ]) {
   assert.equal(
     appTemplate.includes(`  ${parameter}:`),
@@ -151,6 +152,9 @@ for (const marker of [
   'bedrock:StartIngestionJob',
   'bedrock:GetIngestionJob',
   'bedrock:InvokeModel',
+  'Sid: InvokeConfiguredGenerationProfile',
+  "Resource: !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/${BedrockGenerationFoundationModelId}'",
+  'bedrock:InferenceProfileArn: !Ref BedrockGenerationModelArn',
   'AIWorkerLogGroup:',
   'AIWorkerErrorAlarm:',
   'AIWorkerDurationAlarm:',

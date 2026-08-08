@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AIJob } from '@campusmeet/shared';
+import { Priority, TaskStatus, type AIJob, type TaskProposal } from '@campusmeet/shared';
 import { AIServiceError, createAIService } from './service';
 
 const job: AIJob = {
@@ -84,6 +84,72 @@ describe('AI service', () => {
       'https://api.example.test/ai/jobs/job%2Fone',
       expect.objectContaining({ headers: { authorization: 'Bearer access-token' } }),
     );
+  });
+
+  it('confirms a task proposal through the protected idempotent endpoint', async () => {
+    const proposal: TaskProposal = {
+      proposalId: 'proposal/one',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      title: 'Hoàn thiện bản demo',
+      assigneeId: 'user-1',
+      priority: Priority.HIGH,
+      missingFields: [],
+      citations: [
+        {
+          citationId: 'citation-1',
+          groupId: 'group-1',
+          meetingId: 'meeting-1',
+          sourceType: 'TRANSCRIPT',
+          sourceId: 'transcript-1',
+          sourceVersion: 1,
+          internalUri: 'campusmeet://meetings/meeting-1/transcripts/transcript-1',
+        },
+      ],
+      status: 'EXECUTED',
+      taskId: 'task-1',
+    };
+    const task = {
+      id: 'task-1',
+      groupId: 'group-1',
+      title: proposal.title,
+      assigneeId: 'user-1',
+      priority: Priority.HIGH,
+      status: TaskStatus.TODO,
+      sourceMeetingId: 'meeting-1',
+    };
+    const fetcher = vi.fn<typeof fetch>();
+    fetcher.mockResolvedValue(
+      jsonResponse({ success: true, data: { proposal, task }, requestId: 'request-1' }),
+    );
+    const service = createAIService({
+      baseUrl: 'https://api.example.test',
+      fetcher,
+      getAccessToken: async () => 'access-token',
+    });
+
+    await expect(
+      service.confirmTaskProposal(
+        'proposal/one',
+        { assigneeId: 'user-1', priority: Priority.HIGH },
+        'confirm-key',
+      ),
+    ).resolves.toEqual({ proposal, task });
+
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(url).toBe('https://api.example.test/ai/task-proposals/proposal%2Fone/confirm');
+    expect(init).toMatchObject({
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer access-token',
+        'content-type': 'application/json',
+        'idempotency-key': 'confirm-key',
+      },
+    });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      assigneeId: 'user-1',
+      priority: Priority.HIGH,
+    });
   });
 
   it('preserves the API error code and safe message', async () => {

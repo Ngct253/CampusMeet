@@ -211,7 +211,7 @@ describe('TaskProposalEditor', () => {
       />,
     );
 
-    const completeButton = screen.getByRole('button', { name: 'Hoàn tất thông tin' });
+    const completeButton = screen.getByRole('button', { name: 'Xác nhận tạo công việc' });
     expect(completeButton).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Người phụ trách'), {
       target: { value: 'user-1' },
@@ -224,6 +224,29 @@ describe('TaskProposalEditor', () => {
       assigneeId: 'user-1',
       priority: 'HIGH',
     });
+  });
+
+  it('does not allow a regular member to confirm a proposal', () => {
+    render(
+      <TaskProposalEditor
+        proposal={{
+          proposalId: 'proposal-1',
+          groupId: 'group-1',
+          meetingId: 'meeting-1',
+          title: 'Hoàn thiện bản demo',
+          assigneeId: 'user-1',
+          priority: 'HIGH',
+          missingFields: [],
+          citations: [citation],
+          status: 'PENDING',
+        }}
+        canConfirm={false}
+        onComplete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Xác nhận tạo công việc' })).toBeDisabled();
+    expect(screen.getByText(/Chỉ Quản trị viên nhóm/)).toBeInTheDocument();
   });
 });
 

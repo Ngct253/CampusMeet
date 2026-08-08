@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import type { ISODateTime } from '../types';
+import { taskSchema } from '../dto';
+import { Priority } from '../enums';
 
 export const aiJobStatusSchema = z.enum([
   'QUEUED',
@@ -146,8 +148,23 @@ export const taskProposalSchema = z.object({
   missingFields: z.array(z.enum(['assigneeId', 'priority'])),
   citations: z.array(citationSchema).min(1).max(20),
   status: proposalStatusSchema,
+  taskId: z.string().min(1).optional(),
 });
 export type TaskProposal = z.infer<typeof taskProposalSchema>;
+
+export const confirmTaskProposalRequestSchema = z
+  .object({
+    assigneeId: z.string().trim().min(1),
+    priority: z.nativeEnum(Priority),
+  })
+  .strict();
+export type ConfirmTaskProposalRequest = z.infer<typeof confirmTaskProposalRequestSchema>;
+
+export const confirmTaskProposalResponseSchema = z.object({
+  proposal: taskProposalSchema,
+  task: taskSchema,
+});
+export type ConfirmTaskProposalResponse = z.infer<typeof confirmTaskProposalResponseSchema>;
 
 export const groupProgressSnapshotSchema = z.object({
   groupId: z.string().min(1),

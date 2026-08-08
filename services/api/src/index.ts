@@ -42,6 +42,7 @@ import { actionItemTaskHandler } from './handlers/action-item-tasks';
 import { notificationsHandler, readNotificationHandler } from './handlers/notifications';
 import { meetContextHandler } from './handlers/meet-context';
 import { tasksHandler, taskStatusHandler } from './handlers/tasks';
+import { confirmTaskProposalHandler } from './handlers/task-proposals';
 import { getRequestId } from './utils/request';
 import { notImplemented } from './utils/response';
 import { createRouter } from './utils/router';
@@ -114,6 +115,11 @@ const findRoute = createRouter([
   { method: 'POST', path: '/groups/:groupId/ai/search', handler: groupSearchHandler },
   { method: 'POST', path: '/meetings/:meetingId/ai/minutes-draft', handler: minutesDraftHandler },
   { method: 'POST', path: '/meetings/:meetingId/ai/task-proposals', handler: taskProposalsHandler },
+  {
+    method: 'POST',
+    path: '/ai/task-proposals/:proposalId/confirm',
+    handler: confirmTaskProposalHandler,
+  },
   {
     method: 'POST',
     path: '/groups/:groupId/ai/progress-analysis',

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   aiJobDetailSchema,
+  confirmTaskProposalRequestSchema,
   groupKnowledgeQuerySchema,
   knowledgeIngestionPayloadSchema,
   supportedDocumentContentTypes,
@@ -36,6 +37,15 @@ describe('M5 shared schemas', () => {
         status: 'PENDING',
       }).success,
     ).toBe(false);
+  });
+
+  it('requires the human-confirmed assignee and priority for a task proposal', () => {
+    expect(
+      confirmTaskProposalRequestSchema.safeParse({ assigneeId: 'user-1', priority: 'HIGH' }).success,
+    ).toBe(true);
+    expect(confirmTaskProposalRequestSchema.safeParse({ assigneeId: 'user-1' }).success).toBe(
+      false,
+    );
   });
 
   it('accepts every supported document type and rejects executable content', () => {

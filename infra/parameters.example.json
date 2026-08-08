@@ -13,5 +13,6 @@
   "SesConfigurationSetName": "campusmeet-dev",
   "BedrockEmbeddingModelId": "cohere.embed-multilingual-v3",
   "BedrockEmbeddingDimensions": 1024,
-  "BedrockGenerationModelArn": "arn:aws:bedrock:ap-southeast-1::foundation-model/replace-with-approved-model-id"
+  "BedrockGenerationModelArn": "arn:aws:bedrock:ap-southeast-1:123456789012:inference-profile/apac.replace-with-approved-profile-id",
+  "BedrockGenerationFoundationModelId": "replace-with-profile-foundation-model-id"
 }

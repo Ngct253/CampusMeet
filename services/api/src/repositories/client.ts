@@ -9,7 +9,8 @@ type TableEnvironmentName =
   | 'IDENTITY_TABLE'
   | 'MEETING_TABLE'
   | 'MEETING_DATA_TABLE'
-  | 'TASK_DATA_TABLE';
+  | 'TASK_DATA_TABLE'
+  | 'AI_WORK_TABLE';
 
 export const tableName = (name: TableEnvironmentName) => {
   const value =
