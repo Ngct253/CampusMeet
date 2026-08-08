@@ -1,4 +1,3 @@
-import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 import type {
   GroundedAnswer,
   GroupProgressAnalysis,
@@ -55,11 +54,12 @@ const sourceContext = (chunks: SourceChunk[]) =>
     )
     .join('\n');
 
+export interface GroundedModelClient {
+  generate(system: string, prompt: string): Promise<string>;
+}
+
 export class BedrockGroundedGenerator implements GroundedGenerator {
-  constructor(
-    private readonly client: BedrockRuntimeClient,
-    private readonly modelId: string,
-  ) {}
+  constructor(private readonly client: GroundedModelClient) {}
 
   async answer(input: Parameters<GroundedGenerator['answer']>[0]): Promise<GroundedAnswer> {
     const output = answerOutputSchema.parse(
@@ -149,15 +149,7 @@ export class BedrockGroundedGenerator implements GroundedGenerator {
   }
 
   private async generate(prompt: string): Promise<unknown> {
-    const response = await this.client.send(
-      new ConverseCommand({
-        modelId: this.modelId,
-        system: [{ text: systemPrompt }],
-        messages: [{ role: 'user', content: [{ text: prompt }] }],
-        inferenceConfig: { maxTokens: 4_096, temperature: 0 },
-      }),
-    );
-    const text = response.output?.message?.content?.find((block) => 'text' in block)?.text;
+    const text = await this.client.generate(systemPrompt, prompt);
     if (!text) throw new Error('EMPTY_MODEL_RESPONSE');
     try {
       return JSON.parse(text) as unknown;

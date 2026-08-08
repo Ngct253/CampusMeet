@@ -14,6 +14,7 @@
   "SesConfigurationSetName": "campusmeet-dev",
   "BedrockEmbeddingModelId": "cohere.embed-multilingual-v3",
   "BedrockEmbeddingDimensions": 1024,
-  "BedrockGenerationModelArn": "arn:aws:bedrock:ap-southeast-1:123456789012:inference-profile/apac.replace-with-approved-profile-id",
-  "BedrockGenerationFoundationModelId": "replace-with-profile-foundation-model-id"
+  "BedrockMantleRegion": "us-east-1",
+  "BedrockMantleModelId": "openai.gpt-oss-20b",
+  "BedrockMantleApiKeySecretArn": "arn:aws:secretsmanager:ap-southeast-1:123456789012:secret:replace-with-bedrock-mantle-api-key"
 }

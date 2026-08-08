@@ -1,5 +1,4 @@
 import type { BedrockAgentRuntimeClient } from '@aws-sdk/client-bedrock-agent-runtime';
-import type { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
 import { BedrockGroundedGenerator } from '../src/providers/bedrock-grounded-generator';
@@ -111,25 +110,14 @@ describe('AWS Phase 3 adapters', () => {
   });
 
   it('maps only model citation ids back to canonical citations', async () => {
-    const send = vi.fn().mockResolvedValue({
-      output: {
-        message: {
-          content: [
-            {
-              text: JSON.stringify({
-                answer: 'Nhóm đã thống nhất.',
-                citationIds: ['citation-1'],
-                insufficientContext: false,
-              }),
-            },
-          ],
-        },
-      },
-    });
-    const generator = new BedrockGroundedGenerator(
-      { send } as unknown as BedrockRuntimeClient,
-      'model-from-environment',
+    const generate = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        answer: 'Nhóm đã thống nhất.',
+        citationIds: ['citation-1'],
+        insufficientContext: false,
+      }),
     );
+    const generator = new BedrockGroundedGenerator({ generate });
 
     const answer = await generator.answer({
       question: 'Quyết định gì?',
@@ -139,29 +127,18 @@ describe('AWS Phase 3 adapters', () => {
     });
 
     expect(answer.citations).toEqual([chunk.citation]);
-    expect(send.mock.calls[0]![0].input.modelId).toBe('model-from-environment');
+    expect(generate).toHaveBeenCalledOnce();
   });
 
   it('rejects fabricated citation ids from the model', async () => {
-    const send = vi.fn().mockResolvedValue({
-      output: {
-        message: {
-          content: [
-            {
-              text: JSON.stringify({
-                answer: 'Không có căn cứ.',
-                citationIds: ['fabricated'],
-                insufficientContext: false,
-              }),
-            },
-          ],
-        },
-      },
-    });
-    const generator = new BedrockGroundedGenerator(
-      { send } as unknown as BedrockRuntimeClient,
-      'model-from-environment',
+    const generate = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        answer: 'Không có căn cứ.',
+        citationIds: ['fabricated'],
+        insufficientContext: false,
+      }),
     );
+    const generator = new BedrockGroundedGenerator({ generate });
 
     await expect(
       generator.answer({
