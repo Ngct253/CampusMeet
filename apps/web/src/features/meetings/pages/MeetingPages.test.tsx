@@ -217,6 +217,14 @@ function renderDetail(role?: 'MEMBER' | 'GROUP_ADMIN') {
   };
 }
 
+const openMinutesEditor = async () => {
+  fireEvent.click(await screen.findByRole('button', { name: /^(?:Soạn|Chỉnh sửa) biên bản$/ }));
+};
+
+const submitMinutesEditor = () => {
+  fireEvent.submit(screen.getByLabelText(/^Tóm tắt/).closest('form')!);
+};
+
 it('hiển thị loading state trong khi tải timeline', () => {
   services.getMeetings.mockReturnValue(new Promise(() => undefined));
   renderPage();
@@ -263,7 +271,9 @@ it('áp dụng agenda preset và xác nhận trước khi ghi đè nội dung hi
 
   fireEvent.change(preset, { target: { value: 'kickoff' } });
   fireEvent.click(screen.getByRole('button', { name: 'Áp dụng mẫu' }));
-  expect(screen.getByText('Áp dụng mẫu mới sẽ thay thế chương trình hiện tại.')).toBeInTheDocument();
+  expect(
+    screen.getByText('Áp dụng mẫu mới sẽ thay thế chương trình hiện tại.'),
+  ).toBeInTheDocument();
   expect(screen.getByDisplayValue('Kết quả công việc tuần qua')).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'Áp dụng và thay thế' }));
@@ -384,7 +394,9 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     renderDetail('MEMBER');
     expect(await screen.findByText('Tóm tắt đã lưu')).toBeInTheDocument();
     expect(screen.getByText('Quyết định A')).toBeInTheDocument();
-    expect(screen.getByText(/Việc A — Lan — hạn/)).toBeInTheDocument();
+    expect(screen.getByText('Việc A')).toBeInTheDocument();
+    expect(screen.getByText(/Lan · Hạn/)).toBeInTheDocument();
+    expect(screen.getByText('Đang theo dõi')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Lưu biên bản' })).not.toBeInTheDocument();
   });
 
@@ -407,14 +419,15 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     const { invalidate } = renderDetail('GROUP_ADMIN');
     expect(await screen.findByText('Chưa có biên bản')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Tóm tắt'), {
+    await openMinutesEditor();
+    fireEvent.change(screen.getByLabelText(/^Tóm tắt/), {
       target: { value: 'Biên bản đầu' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Thêm quyết định' }));
     fireEvent.change(screen.getByLabelText('Quyết định 1'), {
       target: { value: 'Chốt phương án' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Thêm việc cần thực hiện' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Thêm việc sau cuộc họp' }));
     fireEvent.change(screen.getByLabelText('Việc cần thực hiện 1'), {
       target: { value: 'Viết báo cáo' },
     });
@@ -436,6 +449,7 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
   it('edits version N, adds/removes rows, and uses only active group member options', async () => {
     services.getMeetingMinutes.mockResolvedValue(minutes);
     renderDetail('GROUP_ADMIN');
+    await openMinutesEditor();
     expect(await screen.findByDisplayValue('Tóm tắt đã lưu')).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'An' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Lan' })).toBeInTheDocument();
@@ -444,9 +458,9 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Xóa' }));
     expect(screen.queryByLabelText('Việc cần thực hiện 1')).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Người ngoài nhóm' })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Tóm tắt'), { target: { value: 'Bản sửa' } });
+    fireEvent.change(screen.getByLabelText(/^Tóm tắt/), { target: { value: 'Bản sửa' } });
     services.updateMeetingMinutes.mockResolvedValue({ ...minutes, summary: 'Bản sửa', version: 3 });
-    fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
+    submitMinutesEditor();
     await waitFor(() =>
       expect(services.updateMeetingMinutes).toHaveBeenCalledWith(
         'meeting-1',
@@ -460,13 +474,15 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.updateMeetingMinutes.mockResolvedValue({ ...minutes, version: 3 });
     renderDetail('GROUP_ADMIN');
 
+    await openMinutesEditor();
+
     const dueAt = (await screen.findByLabelText('Hạn hoàn thành 1')) as HTMLInputElement;
-    expect(new Date(dueAt.value).toISOString()).toBe(minutes.actionItems[0]?.dueAt);
-    fireEvent.change(dueAt, { target: { value: '2026-08-11T09:15' } });
+    expect(dueAt).toHaveValue('2026-08-10');
+    fireEvent.change(dueAt, { target: { value: '2026-08-11' } });
     fireEvent.change(screen.getByLabelText('Việc cần thực hiện 1'), {
       target: { value: 'Việc A cập nhật' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
+    submitMinutesEditor();
 
     await waitFor(() => expect(services.updateMeetingMinutes).toHaveBeenCalledTimes(1));
     const sent = services.updateMeetingMinutes.mock.calls[0]?.[1];
@@ -475,30 +491,35 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
         id: 'action-1',
         content: 'Việc A cập nhật',
         assigneeId: 'user-1',
-        dueAt: new Date('2026-08-11T09:15').toISOString(),
+        dueAt: new Date('2026-08-11T23:59:59').toISOString(),
       },
     ]);
     expect(sent.actionItems[0]).not.toHaveProperty('taskId');
   });
 
   it('keeps persisted Decision ids through edit/delete and leaves new Decisions unassigned', async () => {
-    services.getMeetingMinutes.mockResolvedValue({
+    const initialMinutes = {
       ...minutes,
       decisions: [
         { id: 'decision-1', content: 'Một' },
         { id: 'decision-2', content: 'Hai' },
       ],
-    });
-    services.updateMeetingMinutes.mockResolvedValue({
+    };
+    const savedMinutes = {
       ...minutes,
       decisions: [
         { id: 'decision-2', content: 'Hai cập nhật' },
         { id: 'decision-3', content: 'Mới' },
       ],
       version: 3,
-    });
+    };
+    services.getMeetingMinutes
+      .mockResolvedValueOnce(initialMinutes)
+      .mockResolvedValue(savedMinutes);
+    services.updateMeetingMinutes.mockResolvedValue(savedMinutes);
     renderDetail('GROUP_ADMIN');
 
+    await openMinutesEditor();
     await screen.findByDisplayValue('Một');
     fireEvent.click(screen.getAllByRole('button', { name: 'Xóa' })[0]!);
     fireEvent.change(screen.getByLabelText('Quyết định 1'), {
@@ -506,15 +527,15 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Thêm quyết định' }));
     fireEvent.change(screen.getByLabelText('Quyết định 2'), { target: { value: 'Mới' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
+    submitMinutesEditor();
 
     await waitFor(() => expect(services.updateMeetingMinutes).toHaveBeenCalledTimes(1));
     expect(services.updateMeetingMinutes.mock.calls[0]?.[1].decisions).toEqual([
       { id: 'decision-2', content: 'Hai cập nhật' },
       { content: 'Mới' },
     ]);
-    expect(await screen.findByDisplayValue('Hai cập nhật')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Mới')).toBeInTheDocument();
+    expect(await screen.findByText('Hai cập nhật')).toBeInTheDocument();
+    expect(screen.getByText('Mới')).toBeInTheDocument();
   });
 
   it('keeps the remaining action item id after deleting another item', async () => {
@@ -528,10 +549,11 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.updateMeetingMinutes.mockResolvedValue({ ...minutes, version: 3 });
     renderDetail('GROUP_ADMIN');
 
+    await openMinutesEditor();
     await screen.findByDisplayValue('Việc A');
     const deleteButtons = screen.getAllByRole('button', { name: 'Xóa' });
     fireEvent.click(deleteButtons[1]!);
-    fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
+    submitMinutesEditor();
 
     await waitFor(() => expect(services.updateMeetingMinutes).toHaveBeenCalledTimes(1));
     expect(services.updateMeetingMinutes.mock.calls[0]?.[1].actionItems).toEqual([
@@ -548,7 +570,8 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     renderDetail('GROUP_ADMIN');
     await screen.findByText('Chưa có biên bản');
-    fireEvent.change(screen.getByLabelText('Tóm tắt'), { target: { value: 'Draft' } });
+    await openMinutesEditor();
+    fireEvent.change(screen.getByLabelText(/^Tóm tắt/), { target: { value: 'Draft' } });
     const save = screen.getByRole('button', { name: 'Lưu biên bản' });
     fireEvent.click(save);
     fireEvent.click(save);
@@ -564,13 +587,14 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
       new ApiClientError('Conflict', 409, 'CONFLICT'),
     );
     const { invalidate } = renderDetail('GROUP_ADMIN');
-    const summary = (await screen.findByLabelText('Tóm tắt')) as HTMLTextAreaElement;
+    await openMinutesEditor();
+    const summary = (await screen.findByLabelText(/^Tóm tắt/)) as HTMLTextAreaElement;
     fireEvent.change(summary, { target: { value: 'Bản nháp chưa lưu' } });
     fireEvent.click(screen.getByRole('button', { name: 'Thêm quyết định' }));
     fireEvent.change(screen.getByLabelText('Quyết định 2'), {
       target: { value: 'Quyết định nháp' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
+    submitMinutesEditor();
     expect(await screen.findByText(/Bản nháp của bạn vẫn được giữ/)).toBeInTheDocument();
     expect(screen.getByDisplayValue('Bản nháp chưa lưu')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Quyết định nháp')).toBeInTheDocument();
@@ -588,7 +612,8 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     renderDetail('GROUP_ADMIN');
     await screen.findByText('Chưa có biên bản');
-    fireEvent.change(screen.getByLabelText('Tóm tắt'), {
+    await openMinutesEditor();
+    fireEvent.change(screen.getByLabelText(/^Tóm tắt/), {
       target: { value: 'Draft version zero' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
@@ -596,7 +621,7 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     expect(screen.getByDisplayValue('Draft version zero')).toBeInTheDocument();
     await waitFor(() => expect(services.getMeetingMinutes).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('button', { name: 'Dùng phiên bản mới làm mốc' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Tóm tắt'), {
+    fireEvent.change(screen.getByLabelText(/^Tóm tắt/), {
       target: { value: 'Draft vẫn tiếp tục được sửa' },
     });
     expect(screen.getByDisplayValue('Draft vẫn tiếp tục được sửa')).toBeInTheDocument();
@@ -620,7 +645,8 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.updateMeetingMinutes.mockRejectedValue(new ApiClientError(expected, status, code));
     renderDetail('GROUP_ADMIN');
     await screen.findByText('Chưa có biên bản');
-    fireEvent.change(screen.getByLabelText('Tóm tắt'), {
+    await openMinutesEditor();
+    fireEvent.change(screen.getByLabelText(/^Tóm tắt/), {
       target: { value: 'Draft còn nguyên' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Lưu biên bản' }));
@@ -632,16 +658,20 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.getMeetingMinutes.mockResolvedValue(minutes);
     renderDetail('MEMBER');
 
-    expect(await screen.findByText(/Đã chuyển thành công việc/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Tạo công việc' })).not.toBeInTheDocument();
+    expect(await screen.findByText('Đang theo dõi')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Đưa vào danh sách công việc' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows Create Task for an unconverted persisted Action Item to GROUP_ADMIN', async () => {
     services.getMeetingMinutes.mockResolvedValue(unconvertedMinutes());
     renderDetail('GROUP_ADMIN');
 
-    expect(await screen.findByRole('button', { name: 'Tạo công việc' })).toBeInTheDocument();
-    expect(screen.queryByText('Đã chuyển thành công việc')).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Đang theo dõi')).not.toBeInTheDocument();
   });
 
   it('uses persisted id/version, defaults priority, omits blank title and cannot override source assignee', async () => {
@@ -650,10 +680,10 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.convertActionItemToTask.mockResolvedValue(convertedResponse(source));
     renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' }));
     expect(screen.getByLabelText('Mức ưu tiên cho Việc A')).toHaveValue('MEDIUM');
     expect(screen.queryByLabelText('Người phụ trách công việc Việc A')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
 
     await waitFor(() => expect(services.convertActionItemToTask).toHaveBeenCalledTimes(1));
     expect(services.convertActionItemToTask).toHaveBeenCalledWith('meeting-1', 'action-1', {
@@ -678,7 +708,7 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.convertActionItemToTask.mockResolvedValue(convertedResponse(source, 'admin-1'));
     renderDetail();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' }));
     const priority = screen.getByLabelText('Mức ưu tiên cho Việc A');
     expect(priority).toHaveValue('MEDIUM');
     expect(screen.getByRole('option', { name: 'Thấp' })).toBeInTheDocument();
@@ -689,7 +719,7 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
       within(assigneeSelect).queryByRole('option', { name: 'Không hoạt động' }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
     expect(
       await screen.findByText('Vui lòng chọn người phụ trách đang hoạt động.'),
     ).toBeInTheDocument();
@@ -702,7 +732,7 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     fireEvent.change(screen.getByLabelText('Tiêu đề công việc Việc A'), {
       target: { value: ' Task tùy chỉnh ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
 
     await waitFor(() => expect(services.convertActionItemToTask).toHaveBeenCalledTimes(1));
     expect(services.convertActionItemToTask).toHaveBeenCalledWith('meeting-1', 'action-1', {
@@ -720,8 +750,8 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.convertActionItemToTask.mockResolvedValue(convertedResponse(source));
     renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
     expect(
       await screen.findByText('Nội dung vượt quá 200 ký tự; vui lòng nhập tiêu đề ngắn gọn.'),
     ).toBeInTheDocument();
@@ -730,7 +760,7 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     fireEvent.change(screen.getByLabelText(`Tiêu đề công việc ${longContent}`), {
       target: { value: 'Tiêu đề hợp lệ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
     await waitFor(() => expect(services.convertActionItemToTask).toHaveBeenCalledTimes(1));
     expect(services.convertActionItemToTask.mock.calls[0]?.[2]).toEqual(
       expect.objectContaining({ title: 'Tiêu đề hợp lệ' }),
@@ -741,11 +771,14 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.getMeetingMinutes.mockResolvedValue(unconvertedMinutes());
     renderDetail('GROUP_ADMIN');
 
-    const create = await screen.findByRole('button', { name: 'Tạo công việc' });
+    const create = await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' });
     expect(create).toBeEnabled();
-    fireEvent.change(screen.getByLabelText('Tóm tắt'), { target: { value: 'Draft chưa lưu' } });
-    expect(create).toBeDisabled();
-    expect(screen.getByText('Hãy lưu biên bản trước khi tạo công việc.')).toBeInTheDocument();
+    await openMinutesEditor();
+    fireEvent.change(screen.getByLabelText(/^Tóm tắt/), {
+      target: { value: 'Draft chưa lưu' },
+    });
+    expect(screen.queryByRole('button', { name: 'Đưa vào danh sách công việc' })).toBeNull();
+    expect(screen.getByText('Chưa lưu')).toBeInTheDocument();
   });
 
   it('prevents double submit, avoids optimistic taskId, and consumes authoritative Minutes', async () => {
@@ -760,20 +793,18 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     const { client, invalidate } = renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
-    const submit = screen.getByRole('button', { name: 'Xác nhận tạo công việc' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' }));
+    const submit = screen.getByRole('button', { name: 'Xác nhận và giao việc' });
     fireEvent.click(submit);
     fireEvent.click(submit);
     await waitFor(() => expect(services.convertActionItemToTask).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('button', { name: 'Đang tạo…' })).toBeDisabled();
-    expect(screen.queryByText('Đã chuyển thành công việc')).not.toBeInTheDocument();
+    expect(screen.queryByText('Đang theo dõi')).not.toBeInTheDocument();
 
     resolveConversion(response);
-    expect(await screen.findByText('Đã chuyển thành công việc')).toBeInTheDocument();
+    expect(await screen.findByText('Đang theo dõi')).toBeInTheDocument();
     expect(client.getQueryData(['meetings', 'meeting-1', 'minutes'])).toEqual(response.minutes);
-    expect(
-      screen.getByText(`Đang chỉnh sửa từ phiên bản ${response.minutes.version}`),
-    ).toBeInTheDocument();
+    expect(screen.getByText(`Phiên bản ${response.minutes.version}`)).toBeInTheDocument();
     await waitFor(() => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tasks'] });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['dashboard'] });
@@ -786,9 +817,9 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     services.convertActionItemToTask.mockResolvedValue(convertedResponse(source, 'admin-1'));
     const { invalidate } = renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
-    expect(await screen.findByText('Đã chuyển thành công việc')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
+    expect(await screen.findByText('Đang theo dõi')).toBeInTheDocument();
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['tasks'] });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['dashboard'] });
   });
@@ -800,8 +831,8 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     const { invalidate } = renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
     expect(
       await screen.findByText('Bạn không còn quyền Quản trị viên để tạo công việc.'),
     ).toBeInTheDocument();
@@ -820,11 +851,11 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
       );
       const { invalidate } = renderDetail('GROUP_ADMIN');
 
-      fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' }));
       fireEvent.change(screen.getByLabelText('Tiêu đề công việc Việc A'), {
         target: { value: 'Giữ input này' },
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
 
       expect(await screen.findByText(message)).toBeInTheDocument();
       expect(screen.getByDisplayValue('Giữ input này')).toBeInTheDocument();
@@ -844,15 +875,17 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
     );
     renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' }));
     fireEvent.change(screen.getByLabelText('Tiêu đề công việc Việc A'), {
       target: { value: 'Input sẽ bị bỏ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
 
     await waitFor(() => expect(services.getMeetingMinutes).toHaveBeenCalledTimes(2));
     expect(screen.queryByDisplayValue('Input sẽ bị bỏ')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Tạo công việc' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Đưa vào danh sách công việc' }),
+    ).not.toBeInTheDocument();
   });
 
   it('keeps input on 422 and permits retry after a network/server failure', async () => {
@@ -864,20 +897,20 @@ describe('Meeting Minutes on MeetingDetailPage', () => {
       .mockResolvedValueOnce(convertedResponse(source));
     renderDetail('GROUP_ADMIN');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Tạo công việc' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Đưa vào danh sách công việc' }));
     fireEvent.change(screen.getByLabelText('Tiêu đề công việc Việc A'), {
       target: { value: 'Không được mất' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
     expect(await screen.findByText('Quy tắc nghiệp vụ')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Không được mất')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
     expect(await screen.findByText('Mất kết nối')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Không được mất')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận tạo công việc' }));
-    expect(await screen.findByText('Đã chuyển thành công việc')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và giao việc' }));
+    expect(await screen.findByText('Đang theo dõi')).toBeInTheDocument();
     expect(services.convertActionItemToTask).toHaveBeenCalledTimes(3);
   });
 });
@@ -1182,7 +1215,7 @@ it('detail cancelled không tạo placeholder metadata khi contract không có d
 });
 
 it.each([
-  ['PENDING', 'Google Meet đang được đồng bộ.'],
+  ['PENDING', /Google Meet đang được đồng bộ/],
   ['FAILED', 'Đồng bộ Google Calendar/Meet thất bại.'],
   ['ACTION_REQUIRED', 'Cần kết nối lại tài khoản Google để đồng bộ cuộc họp.'],
 ])('hiển thị Google sync status %s độc lập với Meeting lifecycle', async (status, message) => {
