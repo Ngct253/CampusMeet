@@ -1,4 +1,20 @@
 import type { AIJob, AIJobType, AIWorkerPayload } from '@campusmeet/shared';
+import type { TransactWriteCommandInput } from '@aws-sdk/lib-dynamodb';
+
+export type PrepareAIJobInput = {
+  groupId: string;
+  meetingId?: string;
+  requestId: string;
+  type: AIJobType;
+  payload: AIWorkerPayload;
+};
+
+export type PreparedAIJob = {
+  aiJobId: string;
+  job: AIJob;
+  payload: AIWorkerPayload;
+  persistenceContribution: NonNullable<TransactWriteCommandInput['TransactItems']>[number];
+};
 
 export interface MembershipAuthorizer {
   requireMember(actorId: string, groupId: string): Promise<void>;
@@ -12,6 +28,7 @@ export interface MeetingScopeReader {
 }
 
 export interface AIJobOrchestrator {
+  prepareJob(input: PrepareAIJobInput): PreparedAIJob;
   enqueue(input: {
     actorId: string;
     groupId: string;
