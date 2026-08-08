@@ -423,6 +423,72 @@ it('chỉ cho tải tài liệu đã sẵn sàng và dùng tên định dạng t
   open.mockRestore();
 });
 
+it('không gửi lại metadata đã được ký sẵn trong URL upload S3', async () => {
+  const bytes = new TextEncoder().encode('Nội dung kiểm thử upload');
+  const file = new File([bytes], 'ghi-chu.txt', { type: 'text/plain' });
+  Object.defineProperty(file, 'arrayBuffer', {
+    value: vi.fn().mockResolvedValue(bytes.buffer),
+  });
+  services.createAttachmentUploadTarget.mockResolvedValue({
+    attachment: {
+      attachmentId: 'attachment-upload',
+      meetingId: 'meeting-1',
+      groupId: 'group-1',
+      fileName: file.name,
+      contentType: 'text/plain',
+      sizeBytes: file.size,
+      checksum: 'signed-checksum',
+      objectKey: 'uploads/group-1/meeting-1/attachment-upload',
+      status: 'PENDING_UPLOAD',
+      createdAt: '2026-08-08T08:00:00.000Z',
+      updatedAt: '2026-08-08T08:00:00.000Z',
+    },
+    uploadUrl: 'https://example.com/signed-upload',
+    uploadExpiresAt: '2026-08-08T08:05:00.000Z',
+  });
+  services.completeAttachmentUpload.mockResolvedValue({
+    attachment: {
+      ...(await services.createAttachmentUploadTarget()).attachment,
+      status: 'UPLOADED',
+    },
+    aiJob: {
+      aiJobId: 'aij-upload',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      type: 'INGEST_SOURCE',
+      status: 'QUEUED',
+      attempt: 0,
+      requestId: 'request-upload',
+      provider: 'BEDROCK',
+      createdAt: '2026-08-08T08:00:01.000Z',
+      updatedAt: '2026-08-08T08:00:01.000Z',
+    },
+  });
+  const uploadFetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(null, { status: 200 }));
+
+  renderDetail('MEMBER');
+  fireEvent.change(await screen.findByLabelText('Chọn tài liệu'), {
+    target: { files: [file] },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Tải tài liệu lên' }));
+
+  await waitFor(() => expect(uploadFetch).toHaveBeenCalledTimes(1));
+  expect(uploadFetch).toHaveBeenCalledWith(
+    'https://example.com/signed-upload',
+    expect.objectContaining({
+      method: 'PUT',
+      headers: { 'content-type': 'text/plain' },
+      body: file,
+    }),
+  );
+  expect(
+    Object.keys((uploadFetch.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>),
+  ).not.toContain('x-amz-meta-checksum');
+  uploadFetch.mockRestore();
+});
+
 it('không hiển thị thao tác sinh output cho thành viên không phải organizer', async () => {
   services.getMeeting.mockResolvedValue(meetingFixture('meeting-1', 'admin'));
   renderDetail('MEMBER');
