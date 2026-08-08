@@ -134,6 +134,42 @@ const setup = (payload: AIRequestPayload, chunks: SourceChunk[] = []) => {
 };
 
 describe('AIExecutionService grounding rules', () => {
+  it('persists PENDING Task Proposals without creating real Tasks', async () => {
+    const payload: AIRequestPayload = {
+      operation: 'TASK_PROPOSALS',
+      actorId: 'admin-1',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      request: {},
+    };
+    const chunk = indexedChunk();
+    const { generator, proposals, service } = setup(payload, [chunk]);
+    vi.mocked(generator.taskProposals).mockResolvedValue([
+      {
+        proposalId: 'model-id-is-replaced',
+        groupId: 'group-1',
+        meetingId: 'meeting-1',
+        title: 'Hoàn thiện báo cáo',
+        missingFields: ['assigneeId', 'priority'],
+        citations: [chunk.citation],
+        status: 'PENDING',
+      },
+    ]);
+
+    const result = (await service.execute('job-1')) as TaskProposal[];
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      proposalId: expect.stringMatching(/^proposal_/),
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      status: 'PENDING',
+      missingFields: ['assigneeId', 'priority'],
+    });
+    expect(proposals.save).toHaveBeenCalledOnce();
+    expect(proposals.save).toHaveBeenCalledWith(result, 'admin-1');
+  });
+
   it('returns insufficientContext without calling the model when no approved source exists', async () => {
     const payload: AIRequestPayload = {
       operation: 'GROUP_SEARCH',

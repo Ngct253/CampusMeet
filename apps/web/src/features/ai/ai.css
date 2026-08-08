@@ -765,6 +765,7 @@ button.ai-source-rail__card:not(:disabled):hover {
   gap: 0.42rem;
 }
 
+.ai-proposal-fields input,
 .ai-proposal-fields select {
   background: var(--ai-white);
   border: 1px solid #bdcadc;

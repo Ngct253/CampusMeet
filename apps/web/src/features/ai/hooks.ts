@@ -1,6 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type {
   AIJob,
+  ConfirmTaskProposalRequest,
+  ConfirmTaskProposalResponse,
   GenerateMeetingDraftRequest,
   GroupKnowledgeQuery,
   GroupProgressAnalysisRequest,
@@ -70,6 +72,15 @@ export const createAIHooks = (service: AIService) => ({
         service.taskProposals(meetingId, request, idempotencyKey),
     });
   },
+  useConfirmTaskProposal() {
+    return useMutation<
+      ConfirmTaskProposalResponse,
+      Error,
+      { proposalId: string; request: ConfirmTaskProposalRequest }
+    >({
+      mutationFn: ({ proposalId, request }) => service.confirmTaskProposal(proposalId, request),
+    });
+  },
   useProgressAnalysis() {
     return useMutation<
       AIJob,
@@ -88,5 +99,6 @@ export const {
   useGroupSearch: useGroupSearchMutation,
   useMinutesDraft: useMinutesDraftMutation,
   useTaskProposals: useTaskProposalsMutation,
+  useConfirmTaskProposal: useConfirmTaskProposalMutation,
   useProgressAnalysis: useProgressAnalysisMutation,
 } = createAIHooks(aiService);

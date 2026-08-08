@@ -116,7 +116,7 @@ Mỗi entity logic vẫn tồn tại. Việc gom bảng dùng composite `PK/SK`,
 - Partial transcript không lưu hoặc ingest. Final segment ghi idempotent theo `sessionId + sequence`/`ResultId`.
 - Chat current-meeting có thể đọc final segment được phép trực tiếp; approved transcript/minutes/file mới ingest vào Knowledge Base cho selected/whole-group RAG.
 - Retrieval luôn filter group/meeting-set/ACL/source status trước khi model nhận chunk.
-- AI output là draft có citation. Task/tool proposal chỉ thực thi sau preview, authorization, optimistic version và idempotency.
+- AI output là draft có citation. Task Proposal chỉ trở thành Task sau preview và xác nhận của active Group Admin; backend tạo Task và liên kết proposal atomically bằng DynamoDB transaction xuyên `task-data`/`ai-work`. Proposal ID là identity chống tạo Task trùng khi concurrent confirm hoặc retry. Tool proposal vẫn cần contract thực thi riêng.
 - Phân tích tiến độ chỉ diễn giải snapshot task/meeting do backend tính; không đánh giá cá nhân.
 - CampusMeet web là sản phẩm chính; Meet Add-on chỉ là client surface dùng chung API, data và authorization.
 
