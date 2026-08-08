@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
-import { S3ImmutableObjectStore } from '../src/integrations/s3';
+import { S3ImmutableObjectStore, createImmutableUserContentKey } from '../src/integrations/s3';
 
 const key = 'uploads/group-1/meeting-1/transcripts/tx/v1/content.txt';
 const content = 'Speaker 1: Xin chào';
 const bytes = Buffer.from(content, 'utf8');
 const sha256 = createHash('sha256').update(bytes).digest('hex');
+const checksumSha256 = createHash('sha256').update(bytes).digest('base64');
 const storeWith = (...responses: Array<{ value?: unknown; error?: unknown }>) => {
   const send = vi.fn();
   for (const response of responses) {
@@ -48,6 +49,7 @@ describe('S3ImmutableObjectStore', () => {
           ContentLength: bytes.length,
           ContentType: 'text/plain',
           Metadata: { sha256 },
+          ChecksumSHA256: checksumSha256,
         },
       },
     );
@@ -72,7 +74,21 @@ describe('S3ImmutableObjectStore', () => {
     ],
     [
       'content type',
-      { ContentLength: bytes.length, ContentType: 'application/json', Metadata: { sha256 } },
+      {
+        ContentLength: bytes.length,
+        ContentType: 'application/json',
+        Metadata: { sha256 },
+        ChecksumSHA256: checksumSha256,
+      },
+    ],
+    [
+      'S3 checksum',
+      {
+        ContentLength: bytes.length,
+        ContentType: 'text/plain',
+        Metadata: { sha256 },
+        ChecksumSHA256: 'wrong',
+      },
     ],
   ])('rejects replay with mismatched %s', async (_label, head) => {
     const precondition = Object.assign(new Error('exists'), { $metadata: { httpStatusCode: 412 } });
@@ -102,5 +118,19 @@ describe('S3ImmutableObjectStore', () => {
     await expect(
       store.writeImmutable({ objectKey: key, content, contentType: 'text/plain' }),
     ).rejects.toBe(denied);
+  });
+
+  it('builds the same immutable key from the same logical identity', () => {
+    const input = {
+      namespace: 'transcripts',
+      groupId: 'group-1',
+      resourceId: 'meeting-1',
+      version: 2,
+      fileName: 'content.txt',
+    };
+    expect(createImmutableUserContentKey(input)).toBe(
+      'uploads/group-1/transcripts/meeting-1/v2/content.txt',
+    );
+    expect(createImmutableUserContentKey(input)).toBe(createImmutableUserContentKey(input));
   });
 });

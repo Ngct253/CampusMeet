@@ -1,6 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   GetCommand,
+  PutCommand,
   QueryCommand,
   TransactWriteCommand,
   type DynamoDBDocumentClient,
@@ -15,8 +16,13 @@ import {
   type Transcript,
   type TranscriptSegment,
 } from '@campusmeet/shared';
-import type { TranscriptRepository } from '../domain/transcript-ports';
-import { BadRequestError, ConflictError, ResourceNotFoundError } from '../utils/errors';
+import type { TranscriptApprovalHandoff, TranscriptRepository } from '../domain/transcript-ports';
+import {
+  BadRequestError,
+  ConflictError,
+  ResourceNotFoundError,
+  UnprocessableEntityError,
+} from '../utils/errors';
 import { documentClient, tableName, type DynamoItem } from './client';
 
 const integrity = (): never => {
@@ -26,6 +32,12 @@ export const transcriptReferenceKey = (version: number, transcriptId: string) =>
   `TRANSCRIPT#${String(version).padStart(TRANSCRIPT_VERSION_PADDING, '0')}#${transcriptId}`;
 export const transcriptSegmentKey = (sequence: number, segmentId: string) =>
   `SEGMENT#${String(sequence).padStart(TRANSCRIPT_SEQUENCE_PADDING, '0')}#${segmentId}`;
+export const transcriptApprovalHandoffKey = (version: number) =>
+  `APPROVAL_HANDOFF#${String(version).padStart(TRANSCRIPT_VERSION_PADDING, '0')}`;
+const approvalIntentKey = (actorId: string, idempotencyKey: string) => ({
+  PK: `IDEMPOTENCY#TRANSCRIPT_APPROVAL#${createHash('sha256').update(`${actorId}:${idempotencyKey}`).digest('hex')}`,
+  SK: 'RESULT',
+});
 type Cursor = {
   v: 1;
   meetingId: string;
@@ -131,6 +143,54 @@ const parseSegment = (item: DynamoItem, transcriptId: string): TranscriptSegment
     throw new Error('TRANSCRIPT_DATA_INTEGRITY');
   return parsed.data;
 };
+const parseHandoff = (
+  item: DynamoItem | undefined,
+  transcriptId: string,
+  version: number,
+): TranscriptApprovalHandoff | null => {
+  if (!item) return null;
+  if (
+    typeof item.transcriptId !== 'string' ||
+    typeof item.meetingId !== 'string' ||
+    typeof item.groupId !== 'string' ||
+    !Number.isInteger(item.approvedVersion) ||
+    typeof item.artifactObjectKey !== 'string' ||
+    typeof item.artifactChecksum !== 'string' ||
+    typeof item.aiJobId !== 'string' ||
+    typeof item.createdAt !== 'string' ||
+    typeof item.updatedAt !== 'string'
+  )
+    integrity();
+  const handoff = {
+    transcriptId: item.transcriptId,
+    meetingId: item.meetingId,
+    groupId: item.groupId,
+    approvedVersion: item.approvedVersion,
+    artifactObjectKey: item.artifactObjectKey,
+    artifactChecksum: item.artifactChecksum,
+    aiJobId: item.aiJobId,
+    aiOperation: item.aiOperation,
+    aiJobType: item.aiJobType,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  } as TranscriptApprovalHandoff;
+  if (
+    item.PK !== `TRANSCRIPT#${transcriptId}` ||
+    item.SK !== transcriptApprovalHandoffKey(version) ||
+    item.entityType !== 'TRANSCRIPT_APPROVAL_HANDOFF' ||
+    handoff.transcriptId !== transcriptId ||
+    handoff.approvedVersion !== version ||
+    handoff.aiOperation !== 'INGEST_SOURCE' ||
+    handoff.aiJobType !== 'INGEST_SOURCE' ||
+    !handoff.meetingId ||
+    !handoff.groupId ||
+    !handoff.artifactObjectKey ||
+    !handoff.artifactChecksum ||
+    !handoff.aiJobId
+  )
+    integrity();
+  return handoff;
+};
 
 export class DynamoDbTranscriptRepository implements TranscriptRepository {
   constructor(
@@ -149,6 +209,236 @@ export class DynamoDbTranscriptRepository implements TranscriptRepository {
       }),
     );
     return parseMeta(result.Item, id);
+  }
+  async getAllSegments(transcriptId: string, version: number) {
+    const segments: TranscriptSegment[] = [];
+    let exclusiveStartKey: DynamoItem | undefined;
+    const seenKeys = new Set<string>();
+    do {
+      const page = await this.database.send(
+        new QueryCommand({
+          TableName: this.meetingTable,
+          KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+          ExpressionAttributeValues: {
+            ':pk': `TRANSCRIPT#${transcriptId}`,
+            ':prefix': 'SEGMENT#',
+          },
+          ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+          ConsistentRead: true,
+        }),
+      );
+      for (const item of page.Items ?? []) {
+        const segment = parseSegment(item, transcriptId);
+        if (segment.version > version) integrity();
+        segments.push(segment);
+      }
+      exclusiveStartKey = page.LastEvaluatedKey;
+      if (exclusiveStartKey) {
+        const serialized = JSON.stringify(exclusiveStartKey);
+        if (seenKeys.has(serialized)) integrity();
+        seenKeys.add(serialized);
+      }
+    } while (exclusiveStartKey);
+    if (!segments.length) integrity();
+    return segments.sort(
+      (left, right) =>
+        left.sequence - right.sequence ||
+        (left.segmentId < right.segmentId ? -1 : left.segmentId > right.segmentId ? 1 : 0),
+    );
+  }
+  async getApprovalHandoff(transcriptId: string, version: number) {
+    const result = await this.database.send(
+      new GetCommand({
+        TableName: this.meetingTable,
+        Key: { PK: `TRANSCRIPT#${transcriptId}`, SK: transcriptApprovalHandoffKey(version) },
+        ConsistentRead: true,
+      }),
+    );
+    return parseHandoff(result.Item, transcriptId, version);
+  }
+  async getApprovalIntent(actorId: string, idempotencyKey: string) {
+    const key = approvalIntentKey(actorId, idempotencyKey);
+    const result = await this.database.send(
+      new GetCommand({ TableName: this.meetingTable, Key: key, ConsistentRead: true }),
+    );
+    if (!result.Item) return null;
+    if (
+      result.Item.PK !== key.PK ||
+      result.Item.SK !== key.SK ||
+      result.Item.entityType !== 'TRANSCRIPT_APPROVAL_IDEMPOTENCY' ||
+      typeof result.Item.transcriptId !== 'string' ||
+      !Number.isInteger(result.Item.expectedVersion)
+    )
+      integrity();
+    return {
+      transcriptId: result.Item.transcriptId,
+      expectedVersion: result.Item.expectedVersion,
+    };
+  }
+  async bindApprovalIntent(input: Parameters<TranscriptRepository['bindApprovalIntent']>[0]) {
+    const key = approvalIntentKey(input.actorId, input.idempotencyKey);
+    try {
+      await this.database.send(
+        new PutCommand({
+          TableName: this.meetingTable,
+          Item: {
+            ...key,
+            entityType: 'TRANSCRIPT_APPROVAL_IDEMPOTENCY',
+            transcriptId: input.transcriptId,
+            expectedVersion: input.expectedVersion,
+            aiJobId: input.aiJobId,
+            createdAt: new Date().toISOString(),
+          },
+          ConditionExpression: 'attribute_not_exists(PK)',
+        }),
+      );
+    } catch (error) {
+      if ((error as { name?: string }).name !== 'ConditionalCheckFailedException') throw error;
+      const existing = await this.getApprovalIntent(input.actorId, input.idempotencyKey);
+      if (
+        !existing ||
+        existing.transcriptId !== input.transcriptId ||
+        existing.expectedVersion !== input.expectedVersion
+      )
+        throw new ConflictError('Idempotency-Key đã được dùng cho một yêu cầu duyệt khác.');
+    }
+  }
+  async approve(input: Parameters<TranscriptRepository['approve']>[0]) {
+    const now = new Date().toISOString();
+    const eventId = randomUUID();
+    const nextTranscript = transcriptSchema.parse({
+      ...input.transcript,
+      status: 'APPROVED',
+      approvedVersion: input.transcript.version,
+      approvedBy: input.actorId,
+      approvedAt: now,
+      updatedAt: now,
+    });
+    const handoff: TranscriptApprovalHandoff = {
+      transcriptId: input.transcript.transcriptId,
+      meetingId: input.transcript.meetingId,
+      groupId: input.transcript.groupId,
+      approvedVersion: input.transcript.version,
+      artifactObjectKey: input.artifactObjectKey,
+      artifactChecksum: input.artifactChecksum,
+      aiJobId: input.preparedJob.aiJobId,
+      aiOperation: 'INGEST_SOURCE',
+      aiJobType: 'INGEST_SOURCE',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const intentKey = approvalIntentKey(input.actorId, input.idempotencyKey);
+    try {
+      await this.database.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Put: {
+                TableName: this.meetingTable,
+                Item: {
+                  PK: `TRANSCRIPT#${input.transcript.transcriptId}`,
+                  SK: 'META',
+                  entityType: 'TRANSCRIPT',
+                  ...nextTranscript,
+                },
+                ConditionExpression:
+                  '#version = :version AND #status = :ready AND meetingId = :meetingId AND groupId = :groupId',
+                ExpressionAttributeNames: { '#version': 'version', '#status': 'status' },
+                ExpressionAttributeValues: {
+                  ':version': input.transcript.version,
+                  ':ready': 'READY',
+                  ':meetingId': input.transcript.meetingId,
+                  ':groupId': input.transcript.groupId,
+                },
+              },
+            },
+            {
+              Put: {
+                TableName: this.meetingTable,
+                Item: {
+                  PK: `TRANSCRIPT#${input.transcript.transcriptId}`,
+                  SK: `APPROVAL#${now}#${eventId}`,
+                  entityType: 'TRANSCRIPT_APPROVAL',
+                  eventId,
+                  transcriptId: input.transcript.transcriptId,
+                  meetingId: input.transcript.meetingId,
+                  groupId: input.transcript.groupId,
+                  approvedVersion: input.transcript.version,
+                  actorId: input.actorId,
+                  requestId: input.requestId,
+                  handoffKey: transcriptApprovalHandoffKey(input.transcript.version),
+                  aiJobId: input.preparedJob.aiJobId,
+                  artifactObjectKey: input.artifactObjectKey,
+                  artifactChecksum: input.artifactChecksum,
+                  createdAt: now,
+                },
+                ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+              },
+            },
+            {
+              Put: {
+                TableName: this.meetingTable,
+                Item: {
+                  PK: `TRANSCRIPT#${input.transcript.transcriptId}`,
+                  SK: transcriptApprovalHandoffKey(input.transcript.version),
+                  entityType: 'TRANSCRIPT_APPROVAL_HANDOFF',
+                  ...handoff,
+                },
+                ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+              },
+            },
+            input.preparedJob.persistenceContribution,
+            {
+              Put: {
+                TableName: this.meetingTable,
+                Item: {
+                  ...intentKey,
+                  entityType: 'TRANSCRIPT_APPROVAL_IDEMPOTENCY',
+                  transcriptId: input.transcript.transcriptId,
+                  expectedVersion: input.request.expectedVersion,
+                  aiJobId: input.preparedJob.aiJobId,
+                  createdAt: now,
+                },
+                ConditionExpression: 'attribute_not_exists(PK)',
+              },
+            },
+          ],
+        }),
+      );
+      return { transcript: nextTranscript, handoff, created: true };
+    } catch (error) {
+      if ((error as { name?: string }).name !== 'TransactionCanceledException') throw error;
+      const intent = await this.getApprovalIntent(input.actorId, input.idempotencyKey);
+      if (
+        intent &&
+        (intent.transcriptId !== input.transcript.transcriptId ||
+          intent.expectedVersion !== input.request.expectedVersion)
+      )
+        throw new ConflictError('Idempotency-Key đã được dùng cho một yêu cầu duyệt khác.');
+      const [current, existingHandoff] = await Promise.all([
+        this.getById(input.transcript.transcriptId),
+        this.getApprovalHandoff(input.transcript.transcriptId, input.transcript.version),
+      ]);
+      if (
+        current?.status === 'APPROVED' &&
+        current.approvedVersion === input.transcript.version &&
+        existingHandoff
+      ) {
+        await this.bindApprovalIntent({
+          actorId: input.actorId,
+          idempotencyKey: input.idempotencyKey,
+          transcriptId: input.transcript.transcriptId,
+          expectedVersion: input.request.expectedVersion,
+          aiJobId: existingHandoff.aiJobId,
+        });
+        return { transcript: current, handoff: existingHandoff, created: false };
+      }
+      if (current && current.version !== input.transcript.version)
+        throw new ConflictError('Transcript đã được cập nhật bởi yêu cầu khác.');
+      if (current && current.status !== 'READY')
+        throw new UnprocessableEntityError('Transcript chưa sẵn sàng để duyệt.');
+      throw error;
+    }
   }
   async getCanonical(meetingId: string, groupId: string, limit: number, cursor?: string) {
     const refs = await this.database.send(

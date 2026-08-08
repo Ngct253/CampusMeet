@@ -42,6 +42,34 @@ export interface ImmutableObjectStore {
   }): Promise<{ objectKey: string; sha256: string; sizeBytes: number; replayed: boolean }>;
 }
 
+const immutableKeySegment = (value: string) => {
+  const normalized = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalized)) {
+    throw new Error('USER_CONTENT_OBJECT_KEY_INVALID');
+  }
+  return normalized;
+};
+
+export const createImmutableUserContentKey = (input: {
+  namespace: string;
+  groupId: string;
+  resourceId: string;
+  version: number;
+  fileName: string;
+}) => {
+  if (!Number.isSafeInteger(input.version) || input.version < 1) {
+    throw new Error('USER_CONTENT_OBJECT_KEY_INVALID');
+  }
+  return [
+    'uploads',
+    immutableKeySegment(input.groupId),
+    immutableKeySegment(input.namespace),
+    immutableKeySegment(input.resourceId),
+    `v${input.version}`,
+    immutableKeySegment(input.fileName),
+  ].join('/');
+};
+
 const validateUploadKey = (objectKey: string) => {
   if (
     !objectKey.startsWith('uploads/') ||
@@ -93,7 +121,8 @@ export class S3ImmutableObjectStore implements ImmutableObjectStore {
       if (
         existing.ContentLength !== bytes.byteLength ||
         existing.ContentType !== input.contentType ||
-        existing.Metadata?.sha256 !== sha256
+        existing.Metadata?.sha256 !== sha256 ||
+        existing.ChecksumSHA256 !== digest.toString('base64')
       ) {
         throw new Error('IMMUTABLE_USER_CONTENT_DATA_INTEGRITY');
       }

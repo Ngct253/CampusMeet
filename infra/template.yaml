@@ -274,6 +274,14 @@ Resources:
                 Effect: Allow
                 Action: states:StartExecution
                 Resource: !Ref AIStateMachineArn
+              - Sid: ReconcileM4AIOrchestration
+                Effect: Allow
+                Action: states:DescribeExecution
+                Resource: !Sub
+                  - '${ExecutionPrefix}:*'
+                  - ExecutionPrefix: !Join
+                      - ':execution:'
+                      - !Split [':stateMachine:', !Ref AIStateMachineArn]
       Tags: *ResourceTags
 
   GoogleSyncSchedulerRole:
