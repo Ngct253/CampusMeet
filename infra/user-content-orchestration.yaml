@@ -163,6 +163,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
                   - dynamodb:Query
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
