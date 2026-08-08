@@ -376,14 +376,22 @@ Chi tiết: [Thiết kế kỹ thuật upload/live transcript/AI](thiet-ke-ky-th
 
 Application stack yêu cầu các parameter sau và không có fallback/mock:
 
-| Parameter                    | Nguồn                  | Mục đích                                                                  |
-| ---------------------------- | ---------------------- | ------------------------------------------------------------------------- |
-| `UserContentBucketName`      | Output stack M4        | Worker đọc source và chỉ ghi/xóa normalized source dưới `kb/*`            |
-| `BedrockEmbeddingModelId`    | Mặc định M5            | Cohere Embed Multilingual v3 cho tài liệu đa ngôn ngữ                     |
-| `BedrockEmbeddingDimensions` | Mặc định M5            | 1024 chiều, khớp model và S3 Vector Index                                 |
-| `BedrockGenerationModelArn`  | Cấu hình dev đã review | Truyền vào `Converse` và giới hạn `bedrock:InvokeModel` vào đúng resource |
+| Parameter                            | Nguồn                  | Mục đích                                                                  |
+| ------------------------------------ | ---------------------- | ------------------------------------------------------------------------- |
+| `UserContentBucketName`              | Output stack M4        | Worker đọc source và chỉ ghi/xóa normalized source dưới `kb/*`            |
+| `BedrockEmbeddingModelId`            | Mặc định M5            | Cohere Embed Multilingual v3 cho tài liệu đa ngôn ngữ                     |
+| `BedrockEmbeddingDimensions`         | Mặc định M5            | 1024 chiều, khớp model và S3 Vector Index                                 |
+| `BedrockGenerationModelArn`          | Cấu hình dev đã review | Truyền vào `Converse` và giới hạn `bedrock:InvokeModel` vào đúng resource |
+| `BedrockGenerationFoundationModelId` | Cấu hình dev đã review | Model nền của inference profile, dùng để giới hạn IAM ở các region đích   |
 
-`infra/parameters.example.json` chỉ chứa placeholder công khai. CloudFormation Rule từ chối change set nếu một trong các placeholder này chưa được thay. Model ARN có thể là foundation model hoặc inference profile được phép dùng trong account; không hard-code account ID hoặc model ARN thật vào Git.
+`infra/parameters.example.json` chỉ chứa placeholder công khai. CloudFormation Rule từ chối change set nếu một trong các placeholder này chưa được thay. Môi trường dev dùng geographic APAC inference profile: `BedrockGenerationModelArn` là ARN profile ở region nguồn, còn `BedrockGenerationFoundationModelId` phải khớp model nền của profile. Worker role chỉ được invoke profile đó và cùng model nền ở các region đích khi request mang đúng `bedrock:InferenceProfileArn`; không hard-code account ID hoặc model ARN thật vào Git.
+
+Kiểm tra profile và các region đích trước khi deploy:
+
+```powershell
+aws bedrock list-inference-profiles --type-equals SYSTEM_DEFINED --region ap-southeast-1
+aws bedrock get-inference-profile --inference-profile-identifier <apac-profile-id> --region ap-southeast-1
+```
 
 Kiểm tra local, không deploy:
 

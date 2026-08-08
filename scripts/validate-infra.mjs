@@ -113,6 +113,7 @@ for (const parameter of [
   'BedrockEmbeddingModelId',
   'BedrockEmbeddingDimensions',
   'BedrockGenerationModelArn',
+  'BedrockGenerationFoundationModelId',
   'ExistingKnowledgeVectorIndexArn',
 ]) {
   assert.equal(
@@ -133,7 +134,7 @@ for (const marker of [
   'GOOGLE_SYNC_SCHEDULER_ROLE_ARN:',
   'Stream: !Ref MeetingDataStreamArn',
   'GoogleMeetingSyncRecord',
-  'Path: \'/{proxy+}\'',
+  "Path: '/{proxy+}'",
   'Method: OPTIONS',
   'Auth: { Authorizer: NONE }',
   'MaximumRetryAttempts: 3',
@@ -175,6 +176,9 @@ for (const marker of [
   'bedrock:StartIngestionJob',
   'bedrock:GetIngestionJob',
   'bedrock:InvokeModel',
+  'Sid: InvokeConfiguredGenerationProfile',
+  "Resource: !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/${BedrockGenerationFoundationModelId}'",
+  'bedrock:InferenceProfileArn: !Ref BedrockGenerationModelArn',
   'AIWorkerLogGroup:',
   'AIWorkerErrorAlarm:',
   'AIWorkerDurationAlarm:',
