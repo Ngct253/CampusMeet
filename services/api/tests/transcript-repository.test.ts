@@ -5,6 +5,7 @@ import {
   decodeTranscriptCursor,
   encodeTranscriptCursor,
   transcriptReferenceKey,
+  transcriptApprovalHandoffKey,
   transcriptSegmentKey,
   DynamoDbTranscriptRepository,
 } from '../src/repositories/transcripts';
@@ -257,6 +258,161 @@ describe('edit transaction invariants', () => {
       }),
     ).rejects.toMatchObject({ statusCode: 409 });
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('approval transaction invariants', () => {
+  const preparedJob = {
+    aiJobId: 'aij-approval',
+    job: {
+      aiJobId: 'aij-approval',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      type: 'INGEST_SOURCE' as const,
+      status: 'QUEUED' as const,
+      attempt: 0,
+      requestId: 'request-1',
+      createdAt: '2026-08-08T00:00:00.000Z',
+      updatedAt: '2026-08-08T00:00:00.000Z',
+    },
+    payload: {
+      operation: 'INGEST_SOURCE' as const,
+      actorId: 'admin',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      sourceId: 'tx',
+      sourceType: 'TRANSCRIPT' as const,
+      sourceVersion: 1,
+      approved: true as const,
+      inputObjectKey: 'uploads/group-1/meeting-1/transcripts/tx/v1/content.txt',
+      contentType: 'text/plain' as const,
+    },
+    persistenceContribution: {
+      Put: {
+        TableName: 'ai-work',
+        Item: { PK: 'AIJOB#aij-approval', SK: 'META' },
+        ConditionExpression: 'attribute_not_exists(PK)',
+      },
+    },
+  };
+
+  it('writes approval, text-free audit, unique handoff, AIJob, and HTTP intent atomically', async () => {
+    const { repository, send } = repositoryWith({});
+    const result = await repository.approve({
+      transcript,
+      actorId: 'admin',
+      requestId: 'request-1',
+      idempotencyKey: 'idem-1',
+      request: { expectedVersion: 1 },
+      artifactObjectKey: 'uploads/group-1/meeting-1/transcripts/tx/v1/content.txt',
+      artifactChecksum: 'sha256',
+      preparedJob,
+    });
+    const writes = send.mock.calls[0]![0].input.TransactItems;
+    expect(writes).toHaveLength(5);
+    expect(writes[0].Put).toMatchObject({
+      Item: {
+        status: 'APPROVED',
+        version: 1,
+        approvedVersion: 1,
+        approvedBy: 'admin',
+      },
+      ConditionExpression: expect.stringContaining('#status = :ready'),
+    });
+    expect(writes[1].Put.Item).toMatchObject({
+      entityType: 'TRANSCRIPT_APPROVAL',
+      approvedVersion: 1,
+      aiJobId: 'aij-approval',
+    });
+    expect(writes[1].Put.Item).not.toHaveProperty('text');
+    expect(writes[1].Put.Item).not.toHaveProperty('segments');
+    expect(writes[2].Put).toMatchObject({
+      Item: {
+        SK: transcriptApprovalHandoffKey(1),
+        entityType: 'TRANSCRIPT_APPROVAL_HANDOFF',
+        aiJobId: 'aij-approval',
+      },
+      ConditionExpression: 'attribute_not_exists(PK) AND attribute_not_exists(SK)',
+    });
+    expect(writes[3]).toBe(preparedJob.persistenceContribution);
+    expect(writes[4].Put.Item).toMatchObject({
+      entityType: 'TRANSCRIPT_APPROVAL_IDEMPOTENCY',
+      transcriptId: 'tx',
+      expectedVersion: 1,
+    });
+    expect(result.transcript).toMatchObject({ status: 'APPROVED', version: 1 });
+  });
+
+  it('returns a concurrent approval winner and its authoritative job', async () => {
+    const cancelled = Object.assign(new Error('cancelled'), {
+      name: 'TransactionCanceledException',
+    });
+    const approved = {
+      ...transcript,
+      status: 'APPROVED' as const,
+      approvedVersion: 1,
+      approvedBy: 'other-admin',
+      approvedAt: '2026-08-08T01:00:00.000Z',
+      updatedAt: '2026-08-08T01:00:00.000Z',
+    };
+    const handoff = {
+      PK: 'TRANSCRIPT#tx',
+      SK: transcriptApprovalHandoffKey(1),
+      entityType: 'TRANSCRIPT_APPROVAL_HANDOFF',
+      transcriptId: 'tx',
+      meetingId: 'meeting-1',
+      groupId: 'group-1',
+      approvedVersion: 1,
+      artifactObjectKey: 'uploads/group-1/meeting-1/transcripts/tx/v1/content.txt',
+      artifactChecksum: 'sha256',
+      aiJobId: 'winner-job',
+      aiOperation: 'INGEST_SOURCE',
+      aiJobType: 'INGEST_SOURCE',
+      createdAt: '2026-08-08T01:00:00.000Z',
+      updatedAt: '2026-08-08T01:00:00.000Z',
+    };
+    const { repository } = repositoryWith(
+      Promise.reject(cancelled),
+      {},
+      { Item: meta(approved) },
+      { Item: handoff },
+    );
+    await expect(
+      repository.approve({
+        transcript,
+        actorId: 'admin',
+        requestId: 'request-1',
+        idempotencyKey: 'different-key',
+        request: { expectedVersion: 1 },
+        artifactObjectKey: handoff.artifactObjectKey,
+        artifactChecksum: 'sha256',
+        preparedJob,
+      }),
+    ).resolves.toMatchObject({ created: false, handoff: { aiJobId: 'winner-job' } });
+  });
+
+  it('maps a concurrent edit to version conflict only after authoritative reread', async () => {
+    const cancelled = Object.assign(new Error('cancelled'), {
+      name: 'TransactionCanceledException',
+    });
+    const { repository } = repositoryWith(
+      Promise.reject(cancelled),
+      {},
+      { Item: meta({ ...transcript, version: 2 }) },
+      {},
+    );
+    await expect(
+      repository.approve({
+        transcript,
+        actorId: 'admin',
+        requestId: 'request-1',
+        idempotencyKey: 'idem',
+        request: { expectedVersion: 1 },
+        artifactObjectKey: 'uploads/group-1/meeting-1/transcripts/tx/v1/content.txt',
+        artifactChecksum: 'sha256',
+        preparedJob,
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
   });
 });
 describe('transaction cancellation recovery', () => {

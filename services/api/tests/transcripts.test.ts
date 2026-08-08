@@ -6,14 +6,27 @@ const mocks = vi.hoisted(() => ({
   getCanonical: vi.fn(),
   getById: vi.fn(),
   updateSegment: vi.fn(),
+  getAllSegments: vi.fn(),
+  getApprovalHandoff: vi.fn(),
+  getApprovalIntent: vi.fn(),
+  bindApprovalIntent: vi.fn(),
+  approve: vi.fn(),
   getMeeting: vi.fn(),
   getMembership: vi.fn(),
+  writeImmutable: vi.fn(),
+  prepareJob: vi.fn(),
+  ensureStarted: vi.fn(),
 }));
 vi.mock('../src/repositories/transcripts', () => ({
   DynamoDbTranscriptRepository: class {
     getCanonical = mocks.getCanonical;
     getById = mocks.getById;
     updateSegment = mocks.updateSegment;
+    getAllSegments = mocks.getAllSegments;
+    getApprovalHandoff = mocks.getApprovalHandoff;
+    getApprovalIntent = mocks.getApprovalIntent;
+    bindApprovalIntent = mocks.bindApprovalIntent;
+    approve = mocks.approve;
   },
 }));
 vi.mock('../src/repositories/dynamodb', () => ({
@@ -26,11 +39,25 @@ vi.mock('../src/repositories/collaboration', () => ({
     getMembership = mocks.getMembership;
   },
 }));
-import { meetingTranscriptsHandler, transcriptSegmentHandler } from '../src/handlers/transcripts';
+vi.mock('../src/integrations/s3', () => ({
+  immutableObjectStore: { writeImmutable: mocks.writeImmutable },
+}));
+vi.mock('../src/ai/aws-adapters', () => ({
+  createProductionAIJobOrchestrator: () => ({
+    prepareJob: mocks.prepareJob,
+    enqueue: vi.fn(),
+    ensureStarted: mocks.ensureStarted,
+  }),
+}));
+import {
+  meetingTranscriptsHandler,
+  transcriptApprovalHandler,
+  transcriptSegmentHandler,
+} from '../src/handlers/transcripts';
 const payload = (response: unknown) =>
   JSON.parse(String((response as APIGatewayProxyStructuredResultV2).body));
 
-const authenticated = (path: string, method: 'GET' | 'PATCH') => {
+const authenticated = (path: string, method: 'GET' | 'PATCH' | 'POST') => {
   const event = apiEvent(path);
   event.requestContext.http.method = method;
   (
@@ -64,6 +91,54 @@ beforeEach(() => {
     updatedAt: '2026-08-08T00:00:00.000Z',
   });
   mocks.updateSegment.mockResolvedValue({ transcript: {}, segment: {} });
+  mocks.getApprovalIntent.mockResolvedValue(null);
+  mocks.getAllSegments.mockResolvedValue([
+    {
+      segmentId: 'seg',
+      transcriptId: 'tx',
+      sequence: 1,
+      startMs: 0,
+      endMs: 100,
+      text: 'Text',
+      confidence: 1,
+      languageCode: 'vi-VN',
+      speakerLabel: 'Speaker 1',
+      isFinal: true,
+      version: 1,
+    },
+  ]);
+  mocks.writeImmutable.mockResolvedValue({ sha256: 'checksum' });
+  mocks.prepareJob.mockReturnValue({
+    aiJobId: 'aij-1',
+    persistenceContribution: { Put: {} },
+  });
+  const approvedTranscript = {
+    transcriptId: 'tx',
+    meetingId: 'meeting-1',
+    groupId: 'group-1',
+    status: 'APPROVED',
+    version: 1,
+    approvedVersion: 1,
+    approvedBy: 'admin-1',
+    approvedAt: '2026-08-08T01:00:00.000Z',
+    createdAt: '2026-08-08T00:00:00.000Z',
+    updatedAt: '2026-08-08T01:00:00.000Z',
+  };
+  mocks.approve.mockResolvedValue({
+    transcript: approvedTranscript,
+    handoff: { aiJobId: 'aij-1' },
+  });
+  mocks.ensureStarted.mockResolvedValue({
+    aiJobId: 'aij-1',
+    groupId: 'group-1',
+    meetingId: 'meeting-1',
+    type: 'INGEST_SOURCE',
+    status: 'QUEUED',
+    attempt: 0,
+    requestId: 'request-1',
+    createdAt: '2026-08-08T01:00:00.000Z',
+    updatedAt: '2026-08-08T01:00:00.000Z',
+  });
 });
 describe('GET Transcript handler', () => {
   it('authenticates and forwards default limit 50', async () => {
@@ -138,5 +213,31 @@ describe('PATCH Transcript segment handler', () => {
     event.body = JSON.stringify({ expectedVersion: 1, text: 'Changed' });
     const response = await transcriptSegmentHandler(event, {} as never, () => undefined);
     expect(response).toMatchObject({ statusCode: 401 });
+  });
+});
+describe('POST Transcript approval handler', () => {
+  const call = async (body: unknown, key?: string) => {
+    const event = authenticated('/transcripts/tx/approve', 'POST');
+    event.pathParameters = { transcriptId: 'tx' };
+    event.body = JSON.stringify(body);
+    if (key) event.headers['idempotency-key'] = key;
+    return transcriptApprovalHandler(event, {} as never, () => undefined);
+  };
+  it('parses the shared contract and required idempotency key', async () => {
+    const response = await call({ expectedVersion: 1 }, 'idem-1');
+    expect(response).toMatchObject({ statusCode: 200 });
+    expect(mocks.approve).toHaveBeenCalled();
+    expect(payload(response)).toMatchObject({
+      success: true,
+      data: { transcript: { status: 'APPROVED', version: 1 }, aiJob: { aiJobId: 'aij-1' } },
+    });
+  });
+  it.each([
+    [{ expectedVersion: 1 }, undefined],
+    [{ expectedVersion: 0 }, 'idem'],
+    [{ expectedVersion: 1, approvedBy: 'attacker' }, 'idem'],
+  ])('returns 400 for missing key or malformed body', async (body, key) => {
+    const response = await call(body, key);
+    expect(response).toMatchObject({ statusCode: 400 });
   });
 });
