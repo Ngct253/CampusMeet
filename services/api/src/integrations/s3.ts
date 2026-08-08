@@ -7,7 +7,10 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ServiceConfigurationError } from '../utils/errors';
 
-const defaultClient = new S3Client({ region: process.env.AWS_REGION ?? 'ap-southeast-1' });
+const defaultClient = new S3Client({
+  region: process.env.AWS_REGION ?? 'ap-southeast-1',
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+});
 
 const bucketName = () => {
   const value = process.env.USER_CONTENT_BUCKET ?? process.env.S3_BUCKET_NAME;
