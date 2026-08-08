@@ -22,6 +22,10 @@ const services = vi.hoisted(() => ({
   updateMeetingMinutes: vi.fn(),
   convertActionItemToTask: vi.fn(),
   retryGoogleMeetingSync: vi.fn(),
+  getMeetingAttachments: vi.fn(),
+  createAttachmentUploadTarget: vi.fn(),
+  completeAttachmentUpload: vi.fn(),
+  getAttachmentDownloadTarget: vi.fn(),
 }));
 
 vi.mock('../../groups/service', () => ({
@@ -38,6 +42,13 @@ vi.mock('../service', () => ({
   updateMeetingMinutes: services.updateMeetingMinutes,
   convertActionItemToTask: services.convertActionItemToTask,
   retryGoogleMeetingSync: services.retryGoogleMeetingSync,
+}));
+
+vi.mock('../attachments.service', () => ({
+  getMeetingAttachments: services.getMeetingAttachments,
+  createAttachmentUploadTarget: services.createAttachmentUploadTarget,
+  completeAttachmentUpload: services.completeAttachmentUpload,
+  getAttachmentDownloadTarget: services.getAttachmentDownloadTarget,
 }));
 
 const authMock = vi.hoisted(() => ({ userId: 'user-1' }));
@@ -182,6 +193,10 @@ beforeEach(() => {
   );
   services.updateMeetingMinutes.mockReset();
   services.convertActionItemToTask.mockReset();
+  services.getMeetingAttachments.mockResolvedValue([]);
+  services.createAttachmentUploadTarget.mockReset();
+  services.completeAttachmentUpload.mockReset();
+  services.getAttachmentDownloadTarget.mockReset();
 });
 
 function renderPage(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
@@ -267,7 +282,7 @@ it('áp dụng agenda preset và xác nhận trước khi ghi đè nội dung hi
   expect(preset).toHaveValue('weekly-progress');
   fireEvent.click(screen.getByRole('button', { name: 'Áp dụng mẫu' }));
   expect(screen.getByDisplayValue('Kết quả công việc tuần qua')).toBeInTheDocument();
-  expect(screen.getAllByText(/^Mục chương trình \d+$/)).toHaveLength(5);
+  expect(screen.getByLabelText('Tiêu đề mục chương trình 5')).toHaveValue('Kết luận và phân công');
 
   fireEvent.change(preset, { target: { value: 'kickoff' } });
   fireEvent.click(screen.getByRole('button', { name: 'Áp dụng mẫu' }));
@@ -298,6 +313,7 @@ it('render detail, submit edit và xác nhận cancel', async () => {
   fireEvent.click(screen.getByRole('button', { name: /lưu thay đổi/i }));
   await waitFor(() => expect(services.updateMeeting).toHaveBeenCalledTimes(1));
 
+  fireEvent.click(screen.getByText('Tùy chọn hủy cuộc họp'));
   fireEvent.click(screen.getByRole('button', { name: /^hủy cuộc họp$/i }));
   expect(confirm).toHaveBeenCalledTimes(1);
   await waitFor(() => expect(services.cancelMeeting).toHaveBeenCalledTimes(1));
@@ -356,6 +372,126 @@ it('dùng giờ 24 tiếng không phụ thuộc CH hoặc SA', async () => {
   expect(screen.getByText('Lan')).toBeInTheDocument();
   expect(screen.getByText('lan@example.edu')).toBeInTheDocument();
   expect(screen.queryByText(/\b(?:CH|SA)\b/)).not.toBeInTheDocument();
+});
+
+it('chỉ cho tải tài liệu đã sẵn sàng và dùng tên định dạng thân thiện', async () => {
+  services.getMeetingAttachments.mockResolvedValue([
+    {
+      attachmentId: 'attachment-ready',
+      meetingId: 'meeting-1',
+      groupId: 'group-1',
+      fileName: 'ke-hoach.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 1_048_576,
+      checksum: 'checksum-ready',
+      objectKey: 'uploads/group-1/meeting-1/attachment-ready',
+      status: 'READY',
+      createdAt: '2026-08-08T08:00:00.000Z',
+      updatedAt: '2026-08-08T08:01:00.000Z',
+      readyAt: '2026-08-08T08:01:00.000Z',
+    },
+    {
+      attachmentId: 'attachment-processing',
+      meetingId: 'meeting-1',
+      groupId: 'group-1',
+      fileName: 'ghi-chu.docx',
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      sizeBytes: 2_097_152,
+      checksum: 'checksum-processing',
+      objectKey: 'uploads/group-1/meeting-1/attachment-processing',
+      status: 'UPLOADED',
+      createdAt: '2026-08-08T08:00:00.000Z',
+      updatedAt: '2026-08-08T08:01:00.000Z',
+    },
+  ]);
+  services.getAttachmentDownloadTarget.mockResolvedValue({
+    attachment: (await services.getMeetingAttachments())[0],
+    downloadUrl: 'https://example.com/download',
+    downloadExpiresAt: '2026-08-08T08:15:00.000Z',
+  });
+  const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+  renderDetail('MEMBER');
+
+  expect(await screen.findByText('PDF · 1.0 MB')).toBeInTheDocument();
+  expect(screen.getByText('Word · 2.0 MB')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Chưa sẵn sàng' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Tải xuống' }));
+  await waitFor(() =>
+    expect(services.getAttachmentDownloadTarget).toHaveBeenCalledWith('attachment-ready'),
+  );
+  open.mockRestore();
+});
+
+it('gửi đúng metadata checksum bắt buộc trong URL upload S3', async () => {
+  const bytes = new TextEncoder().encode('Nội dung kiểm thử upload');
+  const file = new File([bytes], 'ghi-chu.txt', { type: 'text/plain' });
+  Object.defineProperty(file, 'arrayBuffer', {
+    value: vi.fn().mockResolvedValue(bytes.buffer),
+  });
+  services.createAttachmentUploadTarget.mockResolvedValue({
+    attachment: {
+      attachmentId: 'attachment-upload',
+      meetingId: 'meeting-1',
+      groupId: 'group-1',
+      fileName: file.name,
+      contentType: 'text/plain',
+      sizeBytes: file.size,
+      checksum: 'signed-checksum',
+      objectKey: 'uploads/group-1/meeting-1/attachment-upload',
+      status: 'PENDING_UPLOAD',
+      createdAt: '2026-08-08T08:00:00.000Z',
+      updatedAt: '2026-08-08T08:00:00.000Z',
+    },
+    uploadUrl: 'https://example.com/signed-upload',
+    uploadExpiresAt: '2026-08-08T08:05:00.000Z',
+  });
+  services.completeAttachmentUpload.mockResolvedValue({
+    attachment: {
+      ...(await services.createAttachmentUploadTarget()).attachment,
+      status: 'UPLOADED',
+    },
+    aiJob: {
+      aiJobId: 'aij-upload',
+      groupId: 'group-1',
+      meetingId: 'meeting-1',
+      type: 'INGEST_SOURCE',
+      status: 'QUEUED',
+      attempt: 0,
+      requestId: 'request-upload',
+      provider: 'BEDROCK',
+      createdAt: '2026-08-08T08:00:01.000Z',
+      updatedAt: '2026-08-08T08:00:01.000Z',
+    },
+  });
+  const uploadFetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(null, { status: 200 }));
+
+  renderDetail('MEMBER');
+  fireEvent.change(await screen.findByLabelText('Chọn tài liệu'), {
+    target: { files: [file] },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Tải tài liệu lên' }));
+
+  await waitFor(() => expect(uploadFetch).toHaveBeenCalledTimes(1));
+  expect(uploadFetch).toHaveBeenCalledWith(
+    'https://example.com/signed-upload',
+    expect.objectContaining({
+      method: 'PUT',
+      headers: {
+        'content-type': 'text/plain',
+        'x-amz-meta-checksum': expect.any(String),
+      },
+      body: file,
+    }),
+  );
+  expect(
+    ((uploadFetch.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>)[
+      'x-amz-meta-checksum'
+    ],
+  ).toMatch(/^[a-f0-9]{64}$/);
+  uploadFetch.mockRestore();
 });
 
 it('không hiển thị thao tác sinh output cho thành viên không phải organizer', async () => {
@@ -927,7 +1063,7 @@ it('quản lý agenda khi create, reorder deterministic, trim và giữ draft kh
   const add = screen.getByRole('button', { name: 'Thêm mục chương trình' });
   fireEvent.click(add);
   fireEvent.click(add);
-  const titles = screen.getAllByLabelText('Tiêu đề', { selector: 'input[maxlength="200"]' });
+  const titles = screen.getAllByLabelText(/Tiêu đề mục chương trình \d+/);
   fireEvent.change(titles[0]!, { target: { value: '  Mục đầu  ' } });
   fireEvent.change(titles[1]!, { target: { value: 'Mục sau' } });
 
@@ -1038,7 +1174,7 @@ it('edit nạp, sửa, thêm, xóa, reorder agenda và cập nhật detail/versi
   fireEvent.change(screen.getByDisplayValue('Một'), { target: { value: 'Một mới' } });
   fireEvent.click(screen.getByRole('button', { name: 'Xóa mục chương trình 2' }));
   fireEvent.click(screen.getByRole('button', { name: 'Thêm mục chương trình' }));
-  fireEvent.change(screen.getAllByLabelText('Tiêu đề').at(-1)!, {
+  fireEvent.change(screen.getByLabelText('Tiêu đề mục chương trình 2'), {
     target: { value: 'Ba' },
   });
   fireEvent.click(screen.getByRole('button', { name: 'Di chuyển mục chương trình 2 lên' }));

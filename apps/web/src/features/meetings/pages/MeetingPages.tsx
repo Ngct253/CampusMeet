@@ -960,6 +960,27 @@ const attachmentStatusLabels: Record<Attachment['status'], string> = {
   EXPIRED: 'Đã hết hạn',
 };
 
+const attachmentTypeLabels: Record<string, string> = {
+  'text/plain': 'Văn bản',
+  'text/markdown': 'Markdown',
+  'text/csv': 'CSV',
+  'text/tab-separated-values': 'TSV',
+  'application/json': 'JSON',
+  'application/x-ndjson': 'NDJSON',
+  'text/html': 'HTML',
+  'application/xhtml+xml': 'XHTML',
+  'application/xml': 'XML',
+  'text/yaml': 'YAML',
+  'text/calendar': 'Lịch iCalendar',
+  'application/pdf': 'PDF',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
+  'application/vnd.oasis.opendocument.text': 'Tài liệu OpenDocument',
+  'application/vnd.oasis.opendocument.presentation': 'Trình chiếu OpenDocument',
+  'application/vnd.oasis.opendocument.spreadsheet': 'Bảng tính OpenDocument',
+};
+
 const googleSyncLabel: Record<string, string> = {
   NOT_REQUESTED: 'Chưa đồng bộ',
   PENDING: 'Đang đồng bộ',
@@ -1028,7 +1049,8 @@ function AttachmentListItem({
       <div className="meeting-attachment-copy">
         <strong>{attachment.fileName}</strong>
         <small>
-          {attachment.contentType} · {(attachment.sizeBytes / (1024 * 1024)).toFixed(1)} MB
+          {attachmentTypeLabels[attachment.contentType] ?? 'Tài liệu'} ·{' '}
+          {(attachment.sizeBytes / (1024 * 1024)).toFixed(1)} MB
         </small>
       </div>
       <span className={`meeting-status meeting-status-${attachment.status.toLowerCase()}`}>
@@ -1038,9 +1060,13 @@ function AttachmentListItem({
         type="button"
         className="button-quiet"
         onClick={() => onDownload(attachment.attachmentId)}
-        disabled={downloading}
+        disabled={downloading || attachment.status !== 'READY'}
       >
-        {downloading ? 'Đang lấy link…' : 'Tải xuống'}
+        {downloading
+          ? 'Đang chuẩn bị…'
+          : attachment.status === 'READY'
+            ? 'Tải xuống'
+            : 'Chưa sẵn sàng'}
       </button>
     </li>
   );
@@ -1053,6 +1079,12 @@ function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
     queryKey: ['meetings', meeting.id, 'attachments'],
     queryFn: () => getMeetingAttachments(meeting.id),
     enabled: Boolean(meeting.id),
+    refetchInterval: (query) =>
+      query.state.data?.some(
+        (attachment) => attachment.status === 'PENDING_UPLOAD' || attachment.status === 'UPLOADED',
+      )
+        ? 3_000
+        : false,
   });
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -1110,8 +1142,8 @@ function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
       <span className="section-kicker">Tệp đính kèm</span>
       <h2>Tải tài liệu lên</h2>
       <p>
-        Tối đa 10 tệp cho mỗi cuộc họp, mỗi tệp tối đa 50 MB. Tài liệu sẽ được kiểm tra và xử lý sau
-        khi tải lên.
+        Hỗ trợ PDF, Word, PowerPoint, Excel và các định dạng văn bản phổ biến. Tối đa 10 tài liệu,
+        mỗi tài liệu không quá 50 MB.
       </p>
       <label className="meeting-upload-field">
         Chọn tài liệu
@@ -1139,6 +1171,11 @@ function MeetingAttachmentsPanel({ meeting }: { meeting: Meeting }) {
       {uploadMutation.isError && (
         <p className="error" role="alert">
           {uploadMutation.error.message}
+        </p>
+      )}
+      {downloadMutation.isError && (
+        <p className="error" role="alert">
+          Chưa thể tải tài liệu xuống. Vui lòng thử lại sau.
         </p>
       )}
       {attachmentsQuery.isPending ? (
@@ -1269,107 +1306,119 @@ function MeetingForm({
 
   return (
     <form className="app-form meeting-form" onSubmit={submit}>
-      <label>
-        Tiêu đề
-        <input
-          value={title}
-          aria-invalid={Boolean(titleError)}
-          aria-describedby={titleError ? 'meeting-title-error' : undefined}
-          onChange={(event) => {
-            setTitle(event.target.value);
-            if (event.target.value.trim().length >= 2) setTitleError('');
-          }}
-          minLength={2}
-          maxLength={150}
-          required
-        />
-      </label>
-      {titleError && (
-        <p className="meeting-field-error" id="meeting-title-error" role="alert">
-          {titleError}
-        </p>
-      )}
-      <div className="meeting-time-fields">
-        <label className="meeting-date-field">
-          Ngày họp
+      <section className="meeting-form-section">
+        <div className="meeting-form-section-heading">
+          <h3>Thông tin cuộc họp</h3>
+          <p>Đặt tên rõ ràng và chọn thời gian diễn ra.</p>
+        </div>
+        <label>
+          Tiêu đề
           <input
-            type="date"
-            value={meetingDate}
-            onChange={(event) => setMeetingDate(event.target.value)}
+            value={title}
+            aria-invalid={Boolean(titleError)}
+            aria-describedby={titleError ? 'meeting-title-error' : undefined}
+            onChange={(event) => {
+              setTitle(event.target.value);
+              if (event.target.value.trim().length >= 2) setTitleError('');
+            }}
+            minLength={2}
+            maxLength={150}
+            placeholder="Ví dụ: Họp tiến độ tuần"
             required
           />
         </label>
+        {titleError && (
+          <p className="meeting-field-error" id="meeting-title-error" role="alert">
+            {titleError}
+          </p>
+        )}
+        <div className="meeting-time-fields">
+          <label className="meeting-date-field">
+            Ngày họp
+            <input
+              type="date"
+              value={meetingDate}
+              onChange={(event) => setMeetingDate(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Bắt đầu
+            <select
+              value={startTime}
+              onChange={(event) => {
+                setStartTime(event.target.value);
+                setTimeError('');
+              }}
+              required
+              aria-invalid={Boolean(timeError)}
+              aria-describedby={timeError ? 'meeting-time-error' : undefined}
+            >
+              {startTime && !timeOptions.includes(startTime) && (
+                <option value={startTime}>{startTime}</option>
+              )}
+              {timeOptions.map((time) => (
+                <option key={time} value={time}>
+                  {time}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Kết thúc
+            <select
+              value={endTime}
+              onChange={(event) => {
+                setEndTime(event.target.value);
+                setTimeError('');
+              }}
+              required
+              aria-invalid={Boolean(timeError)}
+              aria-describedby={timeError ? 'meeting-time-error' : undefined}
+            >
+              {endTime && !timeOptions.includes(endTime) && (
+                <option value={endTime}>{endTime}</option>
+              )}
+              {timeOptions.map((time) => (
+                <option key={time} value={time}>
+                  {time}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {timeError && (
+          <p className="meeting-field-error" id="meeting-time-error" role="alert">
+            {timeError}
+          </p>
+        )}
         <label>
-          Bắt đầu
-          <select
-            value={startTime}
+          Mục tiêu hoặc ghi chú <span>(không bắt buộc)</span>
+          <textarea
+            value={description}
+            aria-invalid={Boolean(descriptionError)}
+            aria-describedby={descriptionError ? 'meeting-description-error' : undefined}
             onChange={(event) => {
-              setStartTime(event.target.value);
-              setTimeError('');
+              setDescription(event.target.value);
+              if (event.target.value.trim().length <= 2000) setDescriptionError('');
             }}
-            required
-            aria-invalid={Boolean(timeError)}
-            aria-describedby={timeError ? 'meeting-time-error' : undefined}
-          >
-            {startTime && !timeOptions.includes(startTime) && (
-              <option value={startTime}>{startTime}</option>
-            )}
-            {timeOptions.map((time) => (
-              <option key={time} value={time}>
-                {time}
-              </option>
-            ))}
-          </select>
+            rows={2}
+            maxLength={2000}
+            placeholder="Nêu ngắn gọn mục tiêu cần đạt được sau cuộc họp"
+          />
         </label>
-        <label>
-          Kết thúc
-          <select
-            value={endTime}
-            onChange={(event) => {
-              setEndTime(event.target.value);
-              setTimeError('');
-            }}
-            required
-            aria-invalid={Boolean(timeError)}
-            aria-describedby={timeError ? 'meeting-time-error' : undefined}
-          >
-            {endTime && !timeOptions.includes(endTime) && (
-              <option value={endTime}>{endTime}</option>
-            )}
-            {timeOptions.map((time) => (
-              <option key={time} value={time}>
-                {time}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {timeError && (
-        <p className="meeting-field-error" id="meeting-time-error" role="alert">
-          {timeError}
-        </p>
-      )}
-      <label>
-        Nội dung <span>(không bắt buộc)</span>
-        <textarea
-          value={description}
-          aria-invalid={Boolean(descriptionError)}
-          aria-describedby={descriptionError ? 'meeting-description-error' : undefined}
-          onChange={(event) => {
-            setDescription(event.target.value);
-            if (event.target.value.trim().length <= 2000) setDescriptionError('');
-          }}
-          rows={3}
-          maxLength={2000}
-        />
-      </label>
-      {descriptionError && (
-        <p className="meeting-field-error" id="meeting-description-error" role="alert">
-          {descriptionError}
-        </p>
-      )}
+        {descriptionError && (
+          <p className="meeting-field-error" id="meeting-description-error" role="alert">
+            {descriptionError}
+          </p>
+        )}
+      </section>
       <fieldset className="meeting-agenda-editor">
-        <legend>Chương trình họp</legend>
+        <legend className="sr-only">Chương trình họp</legend>
+        <div className="meeting-form-section-heading">
+          <h3>Chương trình họp</h3>
+          <p>Dùng mẫu có sẵn hoặc điều chỉnh từng nội dung theo nhu cầu.</p>
+        </div>
         <div className="meeting-agenda-preset">
           <label>
             Mẫu chương trình họp
@@ -1411,61 +1460,18 @@ function MeetingForm({
           <div className="meeting-agenda-editor-list">
             {agenda.map((item, index) => (
               <div className="meeting-agenda-editor-item" key={item.localId}>
-                <div className="meeting-agenda-editor-heading">
-                  <strong>Mục chương trình {index + 1}</strong>
-                  <div className="meeting-agenda-actions">
-                    <button
-                      type="button"
-                      aria-label={`Di chuyển mục chương trình ${index + 1} lên`}
-                      disabled={index === 0}
-                      onClick={() =>
-                        setAgenda((current) => {
-                          const next = [...current];
-                          [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
-                          return next;
-                        })
-                      }
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Di chuyển mục chương trình ${index + 1} xuống`}
-                      disabled={index === agenda.length - 1}
-                      onClick={() =>
-                        setAgenda((current) => {
-                          const next = [...current];
-                          [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
-                          return next;
-                        })
-                      }
-                    >
-                      ↓
-                    </button>
-                    <button
-                      className="button-danger-quiet"
-                      type="button"
-                      aria-label={`Xóa mục chương trình ${index + 1}`}
-                      onClick={() => {
-                        setAgenda((current) =>
-                          current.filter((entry) => entry.localId !== item.localId),
-                        );
-                        setAgendaErrors((current) => {
-                          const next = { ...current };
-                          delete next[item.localId];
-                          return next;
-                        });
-                      }}
-                    >
-                      Xóa
-                    </button>
-                  </div>
-                </div>
-                <label>
-                  Tiêu đề
+                <span className="meeting-agenda-index" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <div className="meeting-agenda-editor-content">
+                  <label className="sr-only" htmlFor={`${item.localId}-title`}>
+                    Tiêu đề mục chương trình {index + 1}
+                  </label>
                   <input
+                    id={`${item.localId}-title`}
                     value={item.title}
                     maxLength={200}
+                    placeholder="Nhập nội dung cần trao đổi"
                     aria-invalid={Boolean(agendaErrors[item.localId])}
                     aria-describedby={
                       agendaErrors[item.localId] ? `${item.localId}-error` : undefined
@@ -1485,32 +1491,84 @@ function MeetingForm({
                         });
                     }}
                   />
-                </label>
-                {agendaErrors[item.localId] && (
-                  <p className="meeting-field-error" id={`${item.localId}-error`} role="alert">
-                    {agendaErrors[item.localId]}
-                  </p>
-                )}
-                <details className="meeting-agenda-description" open={Boolean(item.description)}>
-                  <summary>{item.description ? 'Mô tả' : 'Thêm mô tả'}</summary>
-                  <label>
-                    <span className="sr-only">Mô tả mục chương trình {index + 1}</span>
-                    <textarea
-                      value={item.description}
-                      rows={2}
-                      maxLength={1000}
-                      placeholder="Ghi chú ngắn cho nội dung này"
-                      onChange={(event) => {
-                        const description = event.target.value;
-                        setAgenda((current) =>
-                          current.map((entry) =>
-                            entry.localId === item.localId ? { ...entry, description } : entry,
-                          ),
-                        );
-                      }}
-                    />
-                  </label>
-                </details>
+                  {agendaErrors[item.localId] && (
+                    <p className="meeting-field-error" id={`${item.localId}-error`} role="alert">
+                      {agendaErrors[item.localId]}
+                    </p>
+                  )}
+                  <details className="meeting-agenda-description" open={Boolean(item.description)}>
+                    <summary>{item.description ? 'Mô tả chi tiết' : 'Thêm mô tả'}</summary>
+                    <label>
+                      <span className="sr-only">Mô tả mục chương trình {index + 1}</span>
+                      <textarea
+                        value={item.description}
+                        rows={2}
+                        maxLength={1000}
+                        placeholder="Thông tin chuẩn bị hoặc kết quả mong đợi"
+                        onChange={(event) => {
+                          const description = event.target.value;
+                          setAgenda((current) =>
+                            current.map((entry) =>
+                              entry.localId === item.localId ? { ...entry, description } : entry,
+                            ),
+                          );
+                        }}
+                      />
+                    </label>
+                  </details>
+                </div>
+                <div className="meeting-agenda-actions">
+                  <button
+                    className="button-quiet"
+                    type="button"
+                    aria-label={`Di chuyển mục chương trình ${index + 1} lên`}
+                    title="Di chuyển lên"
+                    disabled={index === 0}
+                    onClick={() =>
+                      setAgenda((current) => {
+                        const next = [...current];
+                        [next[index - 1], next[index]] = [next[index]!, next[index - 1]!];
+                        return next;
+                      })
+                    }
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="button-quiet"
+                    type="button"
+                    aria-label={`Di chuyển mục chương trình ${index + 1} xuống`}
+                    title="Di chuyển xuống"
+                    disabled={index === agenda.length - 1}
+                    onClick={() =>
+                      setAgenda((current) => {
+                        const next = [...current];
+                        [next[index], next[index + 1]] = [next[index + 1]!, next[index]!];
+                        return next;
+                      })
+                    }
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="button-danger-quiet"
+                    type="button"
+                    aria-label={`Xóa mục chương trình ${index + 1}`}
+                    title="Xóa nội dung"
+                    onClick={() => {
+                      setAgenda((current) =>
+                        current.filter((entry) => entry.localId !== item.localId),
+                      );
+                      setAgendaErrors((current) => {
+                        const next = { ...current };
+                        delete next[item.localId];
+                        return next;
+                      });
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1524,7 +1582,14 @@ function MeetingForm({
         </button>
       </fieldset>
       <fieldset className="meeting-attendees">
-        <legend>Người tham dự</legend>
+        <legend className="sr-only">Người tham dự</legend>
+        <div className="meeting-form-section-heading meeting-attendees-heading">
+          <div>
+            <h3>Người tham dự</h3>
+            <p>Chọn thành viên cần nhận lịch và tham gia cuộc họp.</p>
+          </div>
+          <span>{attendeeIds.length} đã chọn</span>
+        </div>
         <div>
           {group.members.map(({ membership, user }) => {
             const name = user?.displayName || user?.email || membership.userId;
@@ -1555,9 +1620,12 @@ function MeetingForm({
           {error}
         </p>
       )}
-      <button type="submit" disabled={pending}>
-        {pending ? 'Đang lưu…' : submitLabel}
-      </button>
+      <div className="meeting-form-actions">
+        <span>Kiểm tra lại thời gian và người tham dự trước khi lưu.</span>
+        <button type="submit" disabled={pending}>
+          {pending ? 'Đang lưu…' : submitLabel}
+        </button>
+      </div>
     </form>
   );
 }
@@ -2071,53 +2139,58 @@ export function MeetingDetailPage() {
                     {reloadSuccess}
                   </p>
                 )}
-                <div className="meeting-cancel-row">
-                  <div>
-                    <strong>Hủy cuộc họp</strong>
-                    <p>Cuộc họp vẫn được giữ trong lịch sử.</p>
-                    <label>
-                      Lý do hủy <span>(không bắt buộc)</span>
-                      <textarea
-                        value={cancelReason}
-                        rows={2}
-                        maxLength={500}
-                        aria-invalid={Boolean(cancelReasonError)}
-                        aria-describedby={
-                          cancelReasonError ? 'meeting-cancel-reason-error' : undefined
-                        }
-                        onChange={(event) => {
-                          setCancelReason(event.target.value);
-                          if (event.target.value.trim().length <= 500) setCancelReasonError('');
-                        }}
-                      />
-                    </label>
-                    {cancelReasonError && (
-                      <p
-                        className="meeting-field-error"
-                        id="meeting-cancel-reason-error"
-                        role="alert"
-                      >
-                        {cancelReasonError}
+                <details className="meeting-cancel-panel">
+                  <summary>Tùy chọn hủy cuộc họp</summary>
+                  <div className="meeting-cancel-row">
+                    <div>
+                      <strong>Chỉ hủy khi cuộc họp không còn diễn ra</strong>
+                      <p>
+                        Cuộc họp sẽ chuyển vào lịch sử; biên bản và công việc đã tạo vẫn được giữ.
                       </p>
-                    )}
+                      <label>
+                        Lý do hủy <span>(không bắt buộc)</span>
+                        <textarea
+                          value={cancelReason}
+                          rows={2}
+                          maxLength={500}
+                          aria-invalid={Boolean(cancelReasonError)}
+                          aria-describedby={
+                            cancelReasonError ? 'meeting-cancel-reason-error' : undefined
+                          }
+                          onChange={(event) => {
+                            setCancelReason(event.target.value);
+                            if (event.target.value.trim().length <= 500) setCancelReasonError('');
+                          }}
+                        />
+                      </label>
+                      {cancelReasonError && (
+                        <p
+                          className="meeting-field-error"
+                          id="meeting-cancel-reason-error"
+                          role="alert"
+                        >
+                          {cancelReasonError}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      className="button-danger-quiet"
+                      type="button"
+                      disabled={cancelMutation.isPending}
+                      onClick={() => {
+                        const reason = cancelReason.trim();
+                        if (reason.length > 500) {
+                          setCancelReasonError('Lý do hủy không được vượt quá 500 ký tự.');
+                          return;
+                        }
+                        if (window.confirm('Xác nhận hủy cuộc họp này?'))
+                          cancelMutation.mutate(reason || undefined);
+                      }}
+                    >
+                      {cancelMutation.isPending ? 'Đang hủy…' : 'Hủy cuộc họp'}
+                    </button>
                   </div>
-                  <button
-                    className="button-danger-quiet"
-                    type="button"
-                    disabled={cancelMutation.isPending}
-                    onClick={() => {
-                      const reason = cancelReason.trim();
-                      if (reason.length > 500) {
-                        setCancelReasonError('Lý do hủy không được vượt quá 500 ký tự.');
-                        return;
-                      }
-                      if (window.confirm('Hủy cuộc họp này?'))
-                        cancelMutation.mutate(reason || undefined);
-                    }}
-                  >
-                    Hủy cuộc họp
-                  </button>
-                </div>
+                </details>
                 {cancelMutation.isError && (
                   <p className="error" role="alert">
                     {meetingErrorMessage(cancelMutation.error, 'cancel')}

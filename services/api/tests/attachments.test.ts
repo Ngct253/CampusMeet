@@ -36,21 +36,20 @@ const queuedJob: AIJob = {
 describe('DynamoDbAttachmentRepository.completeUpload', () => {
   beforeEach(() => {
     process.env.MEETING_DATA_TABLE = 'meeting-data-test';
+    process.env.AI_WORK_TABLE = 'ai-work-test';
     vi.restoreAllMocks();
   });
 
   it('xác minh S3 và tạo đúng AIJob ingestion trước khi chuyển sang UPLOADED', async () => {
     const send = vi.spyOn(documentClient, 'send');
-    send
-      .mockResolvedValueOnce({ Item: attachmentItem } as never)
-      .mockResolvedValueOnce({
-        Attributes: {
-          ...attachmentItem,
-          status: 'UPLOADED',
-          aiJobId: queuedJob.aiJobId,
-          updatedAt: '2026-08-06T00:00:01.000Z',
-        },
-      } as never);
+    send.mockResolvedValueOnce({ Item: attachmentItem } as never).mockResolvedValueOnce({
+      Attributes: {
+        ...attachmentItem,
+        status: 'UPLOADED',
+        aiJobId: queuedJob.aiJobId,
+        updatedAt: '2026-08-06T00:00:01.000Z',
+      },
+    } as never);
     const objects = {
       createUploadUrl: vi.fn(),
       createDownloadUrl: vi.fn(),
@@ -100,5 +99,60 @@ describe('DynamoDbAttachmentRepository.completeUpload', () => {
       repository.completeUpload('att-1', 'abc123', 'request-1', 'user-1'),
     ).rejects.toMatchObject({ statusCode: 422 });
     expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('chuyển tệp sang READY khi job xử lý đã hoàn tất', async () => {
+    const send = vi.spyOn(documentClient, 'send');
+    send
+      .mockResolvedValueOnce({
+        Items: [{ ...attachmentItem, status: 'UPLOADED', aiJobId: 'aij-1' }],
+      } as never)
+      .mockResolvedValueOnce({ Item: { status: 'COMPLETED' } } as never)
+      .mockResolvedValueOnce({
+        Attributes: {
+          ...attachmentItem,
+          status: 'READY',
+          aiJobId: 'aij-1',
+          readyAt: '2026-08-06T00:00:02.000Z',
+          updatedAt: '2026-08-06T00:00:02.000Z',
+        },
+      } as never);
+    const repository = new DynamoDbAttachmentRepository({
+      createUploadUrl: vi.fn(),
+      createDownloadUrl: vi.fn(),
+      head: vi.fn(),
+    });
+
+    const result = await repository.listByMeeting('meeting-1');
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.status).toBe('READY');
+    expect(result[0]?.readyAt).toBe('2026-08-06T00:00:02.000Z');
+  });
+
+  it('chuyển tệp sang REJECTED khi job xử lý thất bại', async () => {
+    const send = vi.spyOn(documentClient, 'send');
+    send
+      .mockResolvedValueOnce({
+        Items: [{ ...attachmentItem, status: 'UPLOADED', aiJobId: 'aij-1' }],
+      } as never)
+      .mockResolvedValueOnce({ Item: { status: 'FAILED' } } as never)
+      .mockResolvedValueOnce({
+        Attributes: {
+          ...attachmentItem,
+          status: 'REJECTED',
+          aiJobId: 'aij-1',
+          updatedAt: '2026-08-06T00:00:02.000Z',
+        },
+      } as never);
+    const repository = new DynamoDbAttachmentRepository({
+      createUploadUrl: vi.fn(),
+      createDownloadUrl: vi.fn(),
+      head: vi.fn(),
+    });
+
+    const result = await repository.listByMeeting('meeting-1');
+
+    expect(result[0]?.status).toBe('REJECTED');
   });
 });

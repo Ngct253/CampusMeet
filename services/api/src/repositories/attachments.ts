@@ -1,7 +1,20 @@
 import { createHash } from 'node:crypto';
 import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import type { Attachment, AttachmentDownloadTarget, CompleteUploadResponse, CreateUploadUrlResponse, UploadAttachmentRequest } from '@campusmeet/shared';
-import { attachmentSchema, createUploadUrlResponseSchema, completeUploadResponseSchema, attachmentDownloadTargetSchema, documentContentTypeSchema, maxAttachmentsPerMeeting } from '@campusmeet/shared';
+import type {
+  Attachment,
+  AttachmentDownloadTarget,
+  CompleteUploadResponse,
+  CreateUploadUrlResponse,
+  UploadAttachmentRequest,
+} from '@campusmeet/shared';
+import {
+  attachmentSchema,
+  createUploadUrlResponseSchema,
+  completeUploadResponseSchema,
+  attachmentDownloadTargetSchema,
+  documentContentTypeSchema,
+  maxAttachmentsPerMeeting,
+} from '@campusmeet/shared';
 import { createProductionAIJobOrchestrator } from '../ai/aws-adapters';
 import type { AIJobOrchestrator } from '../ai/ports';
 import { attachmentObjectStore, type AttachmentObjectStore } from '../integrations/s3';
@@ -9,7 +22,8 @@ import { ConflictError, ResourceNotFoundError, UnprocessableEntityError } from '
 import { documentClient, stringValue, tableName, type DynamoItem } from './client';
 
 const toAttachment = (item: DynamoItem): Attachment | undefined => {
-  const attachmentId = stringValue(item, 'attachmentId') ?? stringValue(item, 'PK')?.replace(/^ATTACHMENT#/, '');
+  const attachmentId =
+    stringValue(item, 'attachmentId') ?? stringValue(item, 'PK')?.replace(/^ATTACHMENT#/, '');
   const meetingId = stringValue(item, 'meetingId');
   const groupId = stringValue(item, 'groupId');
   const fileName = stringValue(item, 'fileName');
@@ -53,6 +67,8 @@ const toAttachment = (item: DynamoItem): Attachment | undefined => {
   return attachment.success ? attachment.data : undefined;
 };
 
+const attachmentJobId = (item: DynamoItem) => stringValue(item, 'aiJobId');
+
 export class DynamoDbAttachmentRepository {
   private get table() {
     return tableName('MEETING_DATA_TABLE');
@@ -67,6 +83,58 @@ export class DynamoDbAttachmentRepository {
     return this.configuredJobs ?? createProductionAIJobOrchestrator();
   }
 
+  private async reconcileProcessingState(item: DynamoItem): Promise<Attachment | undefined> {
+    const attachment = toAttachment(item);
+    const aiJobId = attachmentJobId(item);
+    if (!attachment || attachment.status !== 'UPLOADED' || !aiJobId) return attachment;
+
+    const job = await documentClient.send(
+      new GetCommand({
+        TableName: tableName('AI_WORK_TABLE'),
+        Key: { PK: `AIJOB#${aiJobId}`, SK: 'META' },
+        ConsistentRead: true,
+      }),
+    );
+    const jobStatus = job.Item ? stringValue(job.Item, 'status') : undefined;
+    const nextStatus =
+      jobStatus === 'COMPLETED' ? 'READY' : jobStatus === 'FAILED' ? 'REJECTED' : null;
+    if (!nextStatus) return attachment;
+
+    const now = new Date().toISOString();
+    try {
+      const updated = await documentClient.send(
+        new UpdateCommand({
+          TableName: this.table,
+          Key: { PK: `ATTACHMENT#${attachment.attachmentId}`, SK: 'META' },
+          UpdateExpression:
+            nextStatus === 'READY'
+              ? 'SET #status = :status, updatedAt = :updatedAt, readyAt = :readyAt'
+              : 'SET #status = :status, updatedAt = :updatedAt',
+          ConditionExpression: '#status = :uploaded AND aiJobId = :aiJobId',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: {
+            ':status': nextStatus,
+            ':uploaded': 'UPLOADED',
+            ':aiJobId': aiJobId,
+            ':updatedAt': now,
+            ...(nextStatus === 'READY' ? { ':readyAt': now } : {}),
+          },
+          ReturnValues: 'ALL_NEW',
+        }),
+      );
+      return updated.Attributes ? (toAttachment(updated.Attributes) ?? attachment) : attachment;
+    } catch {
+      const current = await documentClient.send(
+        new GetCommand({
+          TableName: this.table,
+          Key: { PK: `ATTACHMENT#${attachment.attachmentId}`, SK: 'META' },
+          ConsistentRead: true,
+        }),
+      );
+      return current.Item ? (toAttachment(current.Item) ?? attachment) : attachment;
+    }
+  }
+
   async listByMeeting(meetingId: string): Promise<Attachment[]> {
     const result = await documentClient.send(
       new QueryCommand({
@@ -79,10 +147,10 @@ export class DynamoDbAttachmentRepository {
         },
       }),
     );
-    return (result.Items ?? []).flatMap((item) => {
-      const attachment = toAttachment(item);
-      return attachment ? [attachment] : [];
-    });
+    const attachments = await Promise.all(
+      (result.Items ?? []).map((item) => this.reconcileProcessingState(item)),
+    );
+    return attachments.flatMap((attachment) => (attachment ? [attachment] : []));
   }
 
   async getById(attachmentId: string): Promise<Attachment | null> {
@@ -92,7 +160,7 @@ export class DynamoDbAttachmentRepository {
         Key: { PK: `ATTACHMENT#${attachmentId}`, SK: 'META' },
       }),
     );
-    return result.Item ? (toAttachment(result.Item) ?? null) : null;
+    return result.Item ? ((await this.reconcileProcessingState(result.Item)) ?? null) : null;
   }
 
   async createUploadTarget(
@@ -107,7 +175,16 @@ export class DynamoDbAttachmentRepository {
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const uploadExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
     const attachmentId = createHash('sha256')
-      .update([groupId, request.meetingId, request.fileName, request.contentType, request.sizeBytes, request.checksum].join(':'))
+      .update(
+        [
+          groupId,
+          request.meetingId,
+          request.fileName,
+          request.contentType,
+          request.sizeBytes,
+          request.checksum,
+        ].join(':'),
+      )
       .digest('hex')
       .slice(0, 32);
     const objectKey = `uploads/${groupId}/${request.meetingId}/${attachmentId}`;
@@ -215,8 +292,7 @@ export class DynamoDbAttachmentRepository {
       new UpdateCommand({
         TableName: this.table,
         Key: { PK: `ATTACHMENT#${attachmentId}`, SK: 'META' },
-        UpdateExpression:
-          'SET #status = :status, updatedAt = :updatedAt, aiJobId = :aiJobId',
+        UpdateExpression: 'SET #status = :status, updatedAt = :updatedAt, aiJobId = :aiJobId',
         ExpressionAttributeNames: { '#status': 'status' },
         ExpressionAttributeValues: {
           ':status': 'UPLOADED',
@@ -226,7 +302,9 @@ export class DynamoDbAttachmentRepository {
         ReturnValues: 'ALL_NEW',
       }),
     );
-    const nextAttachment = updated.Attributes ? (toAttachment(updated.Attributes) ?? attachment) : attachment;
+    const nextAttachment = updated.Attributes
+      ? (toAttachment(updated.Attributes) ?? attachment)
+      : attachment;
     return completeUploadResponseSchema.parse({
       attachment: nextAttachment,
       aiJob,

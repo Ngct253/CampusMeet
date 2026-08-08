@@ -126,13 +126,60 @@ Resources:
                   "action": "EXECUTE"
                 }
               },
+              "ResultPath": "$.workerResult",
+              "Retry": [{
+                "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "AI_RATE_LIMITED"],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }],
+              "Next": "RequiresIngestionCheck"
+            },
+            "RequiresIngestionCheck": {
+              "Type": "Choice",
+              "Choices": [{
+                "Variable": "$.workerResult.Payload.ingestionJobId",
+                "IsPresent": true,
+                "Next": "WaitForIngestion"
+              }],
+              "Default": "Completed"
+            },
+            "WaitForIngestion": {
+              "Type": "Wait",
+              "Seconds": 10,
+              "Next": "CheckIngestion"
+            },
+            "CheckIngestion": {
+              "Type": "Task",
+              "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${AIWorkerFunctionArn}",
+                "Payload": {
+                  "aiJobId.$": "$.aiJobId",
+                  "action": "CHECK_INGESTION",
+                  "ingestionJobId.$": "$.workerResult.Payload.ingestionJobId"
+                }
+              },
+              "ResultPath": "$.ingestionResult",
               "Retry": [{
                 "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
                 "IntervalSeconds": 2,
                 "MaxAttempts": 3,
                 "BackoffRate": 2
               }],
-              "End": true
+              "Next": "IngestionCompleted"
+            },
+            "IngestionCompleted": {
+              "Type": "Choice",
+              "Choices": [{
+                "Variable": "$.ingestionResult.Payload.pending",
+                "BooleanEquals": true,
+                "Next": "WaitForIngestion"
+              }],
+              "Default": "Completed"
+            },
+            "Completed": {
+              "Type": "Succeed"
             }
           }
         }
