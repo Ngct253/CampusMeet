@@ -4,3 +4,4 @@ export * from './enums';
 export * from './upload';
 export * from './types';
 export * from './ai';
+export * from './transcript';

@@ -158,6 +158,7 @@ Active group member/admin
 - `languageCode` không thuộc allowlist bị từ chối; frontend mặc định `vi-VN`, không có `AUTO` hoặc Deepgram.
 - Heartbeat quá hạn chuyển session sang `FAILED`; reconnect kiểm tra lại quyền, cấp URL mới và tiếp tục từ sequence cuối.
 - Khoảng audio thiếu được lưu, không suy đoán nội dung từ agenda hoặc participant metadata.
+- M2 tạo đúng một canonical Transcript identity cho mỗi Meeting trong slice đầu, ghi final segment và sở hữu `LIVE → FINALIZING → READY|FAILED`; M2 không sở hữu edit/approval hoặc KnowledgeSource ingestion.
 
 ## 7. M3 — Transcript editor, minutes, task và dashboard
 
@@ -175,6 +176,15 @@ Meeting
 → dashboard thay đổi
 → AI draft chỉ được áp dụng sau preview + xác nhận
 ```
+
+### Contract Transcript edit/approval
+
+- Shared contract strict nằm tại `packages/shared/src/transcript/`: lifecycle chỉ `LIVE|FINALIZING|READY|APPROVED|FAILED`, current `version` 1–`9_999_999_999`, optional approval metadata và paged canonical `TranscriptWithSegments`. Multi-provider/multiple canonical transcript không thuộc slice này.
+- Active member được GET canonical Transcript. Meeting Organizer đang active hoặc active Group Admin được PATCH segment khi `READY|APPROVED` và approve khi `READY`; không có uploader permission riêng. Persisted Transcript/Meeting quyết định `groupId` và Organizer, không tin client context.
+- Edit tăng version đúng một; edit từ `APPROVED` về `READY` và giữ `approvedVersion` cũ. Approval không tăng version, đặt exact `approvedVersion`, actor/time server-side và cần `Idempotency-Key`. Condition khóa identity/context + expected version + lifecycle; stale nhận `409`, lifecycle sai nhận `422`.
+- M3 ghi edit/approval audit metadata nhưng không đưa full transcript vào META/event. Approval phải freeze đúng content version N thành immutable artifact và tạo/recover một logical `INGEST_SOURCE` job; retry sau handoff failure không tạo Transcript version/job trùng.
+- M5 chỉ normalize/ingest/retrieve frozen approved artifact theo exact `sourceVersion`; không đọc mutable current segment rồi gắn nhãn approved. `expectedTranscriptVersion`, khi có, là exact approved/frozen version; enforcement là M5 runtime follow-up.
+- Shared runtime ingestion status `PENDING|PROCESSING|READY|FAILED|STALE` vẫn authoritative; bộ tên conceptual cũ chưa được dùng để đổi runtime.
 
 ### Tệp và việc cần làm
 
@@ -205,6 +215,9 @@ Meeting
 - Dashboard không Scan.
 - Transcript update bằng version cũ trả `409`.
 - Transcript approval bằng version cũ trả `409`; retry không tạo ingestion job trùng.
+- Concurrent edit/edit và edit/approve trên cùng version chỉ một mutation thắng; audit chỉ ứng với mutation thắng.
+- GET no-transcript trả `{ transcript: null, segments: [] }`; cursor segment opaque, scoped đúng Meeting/Transcript và không lộ raw DynamoDB key.
+- Edit sau approval không làm mất approved artifact cũ; ingestion exact version không fallback sang current mutable content.
 - Proposal retry chỉ thực thi Task/Minutes API một lần.
 - Group khác không đọc minutes/task.
 - `GroupProgressSnapshot` chỉ chứa dữ liệu xác định của một group; không chấm điểm/xếp hạng cá nhân.

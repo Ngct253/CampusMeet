@@ -121,18 +121,18 @@ Bảng này chứa các aggregate liên quan trực tiếp tới cuộc họp. K
 
 ### 6.1 Meeting aggregate
 
-| Entity               | PK                    | SK                                      | Index                                                                                                                                 |
-| -------------------- | --------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Meeting metadata     | `MEETING#<meetingId>` | `META`                                  | `GSI1PK=GROUP#<groupId>`, `GSI1SK=MEETING#<startAt>#<meetingId>`; `GSI2PK=USER#<organizerId>`, `GSI2SK=MEETING#<startAt>#<meetingId>` |
-| Google Meeting sync  | `MEETING#<meetingId>` | `INTEGRATION#GOOGLE`                    | Không cần; Scheduler nhận trực tiếp `meetingId` + `syncRevision`                                                                      |
-| Attendee             | `MEETING#<meetingId>` | `ATTENDEE#<userId>`                     | Không cần                                                                                                                             |
-| Agenda item          | `MEETING#<meetingId>` | `AGENDA#<order>#<agendaItemId>`         | Không cần                                                                                                                             |
-| Minutes version      | `MEETING#<meetingId>` | `MINUTES#VERSION#<paddedVersion>`       | Không cần                                                                                                                             |
-| Reminder             | `MEETING#<meetingId>` | `REMINDER#<runAt>#<reminderId>`         | Khi cần worker query: `GSI1PK=REMINDER_STATUS#<status>`, `GSI1SK=<runAt>#<reminderId>`                                                |
-| Attachment metadata  | `MEETING#<meetingId>` | `ATTACHMENT#<createdAt>#<attachmentId>` | Có thể dùng sparse `GSI1PK=ATTACHMENT_STATUS#<status>` cho quarantine worker                                                          |
-| Recording metadata   | `MEETING#<meetingId>` | `RECORDING#<createdAt>#<recordingId>`   | Không cần                                                                                                                             |
-| Live session         | `MEETING#<meetingId>` | `LIVE_SESSION#<sessionId>`              | TTL chỉ cho session tạm đã đóng nếu retention cho phép                                                                                |
-| Transcript reference | `MEETING#<meetingId>` | `TRANSCRIPT#<version>#<transcriptId>`   | Không cần                                                                                                                             |
+| Entity               | PK                    | SK                                             | Index                                                                                                                                 |
+| -------------------- | --------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Meeting metadata     | `MEETING#<meetingId>` | `META`                                         | `GSI1PK=GROUP#<groupId>`, `GSI1SK=MEETING#<startAt>#<meetingId>`; `GSI2PK=USER#<organizerId>`, `GSI2SK=MEETING#<startAt>#<meetingId>` |
+| Google Meeting sync  | `MEETING#<meetingId>` | `INTEGRATION#GOOGLE`                           | Không cần; Scheduler nhận trực tiếp `meetingId` + `syncRevision`                                                                      |
+| Attendee             | `MEETING#<meetingId>` | `ATTENDEE#<userId>`                            | Không cần                                                                                                                             |
+| Agenda item          | `MEETING#<meetingId>` | `AGENDA#<order>#<agendaItemId>`                | Không cần                                                                                                                             |
+| Minutes version      | `MEETING#<meetingId>` | `MINUTES#VERSION#<paddedVersion>`              | Không cần                                                                                                                             |
+| Reminder             | `MEETING#<meetingId>` | `REMINDER#<runAt>#<reminderId>`                | Khi cần worker query: `GSI1PK=REMINDER_STATUS#<status>`, `GSI1SK=<runAt>#<reminderId>`                                                |
+| Attachment metadata  | `MEETING#<meetingId>` | `ATTACHMENT#<createdAt>#<attachmentId>`        | Có thể dùng sparse `GSI1PK=ATTACHMENT_STATUS#<status>` cho quarantine worker                                                          |
+| Recording metadata   | `MEETING#<meetingId>` | `RECORDING#<createdAt>#<recordingId>`          | Không cần                                                                                                                             |
+| Live session         | `MEETING#<meetingId>` | `LIVE_SESSION#<sessionId>`                     | TTL chỉ cho session tạm đã đóng nếu retention cho phép                                                                                |
+| Transcript reference | `MEETING#<meetingId>` | `TRANSCRIPT#<10-digit-version>#<transcriptId>` | Không cần                                                                                                                             |
 
 Một item chỉ xuất hiện trong GSI khi có đủ key của index. Việc GSI1 được dùng cho cả meeting timeline, reminder worker và attachment worker là index overloading có chủ đích; prefix khác nhau ngăn truy vấn lẫn dữ liệu.
 
@@ -161,23 +161,32 @@ Consent phải giữ actor, consent text/version, source capture, timestamp và 
 
 ### 6.3 Transcript aggregate
 
-| Entity              | PK                          | SK                                     |
-| ------------------- | --------------------------- | -------------------------------------- |
-| Transcript metadata | `TRANSCRIPT#<transcriptId>` | `META`                                 |
-| Final segment       | `TRANSCRIPT#<transcriptId>` | `SEGMENT#<paddedSequence>#<segmentId>` |
-| Edit/version event  | `TRANSCRIPT#<transcriptId>` | `EDIT#<createdAt>#<eventId>`           |
-| Approval event      | `TRANSCRIPT#<transcriptId>` | `APPROVAL#<createdAt>#<eventId>`       |
+| Entity                | PK                          | SK                                        |
+| --------------------- | --------------------------- | ----------------------------------------- |
+| Transcript metadata   | `TRANSCRIPT#<transcriptId>` | `META`                                    |
+| Final/current segment | `TRANSCRIPT#<transcriptId>` | `SEGMENT#<10-digit-sequence>#<segmentId>` |
+| Edit/version event    | `TRANSCRIPT#<transcriptId>` | `EDIT#<createdAt>#<eventId>`              |
+| Approval event        | `TRANSCRIPT#<transcriptId>` | `APPROVAL#<createdAt>#<eventId>`          |
 
 Quy tắc transcript:
+
+`entityType` lần lượt là `TRANSCRIPT`, `TRANSCRIPT_SEGMENT`, `TRANSCRIPT_EDIT`, `TRANSCRIPT_APPROVAL`; Meeting reference dùng `TRANSCRIPT_REFERENCE`. Reference mỗi version là immutable và cùng stable `transcriptId`; query reverse trên padded version chọn current canonical reference.
 
 - Partial result không lưu.
 - Final segment ghi idempotent theo `sessionId + sequence` hoặc `ResultId`.
 - Segment giữ timestamp, confidence, language code và `Speaker N`; không tự ánh xạ danh tính.
-- Optimistic update dùng `version` và condition expression.
-- Approval chỉ do Organizer hoặc Group Admin thực hiện trên `expectedVersion`; metadata giữ `approvedVersion`, `approvedBy`, `approvedAt` và idempotency reference.
-- Approval retry không tạo AIJob/KnowledgeSource version trùng; chỉnh sửa transcript sau approval tạo version mới chưa duyệt và làm KnowledgeSource cũ `STALE` khi version mới được ingest.
+- Mỗi Meeting có tối đa một canonical Transcript trong slice M3 này. M2 tạo stable `transcriptId`, final/current segment và producer transition `LIVE → FINALIZING → READY` hoặc `FAILED`; multi-provider/multiple canonical transcript nằm ngoài phạm vi. Meeting reference dùng version decimal 10 chữ số (`0000000001` đến `9999999999`) để query latest đúng thứ tự; sequence cũng là integer 0–`9999999999` và pad 10 chữ số.
+- Metadata giữ current materialized state `status`, `version`, optional `approvedVersion/approvedBy/approvedAt`, timestamps cùng persisted `meetingId/groupId`. `version` và `approvedVersion` nằm trong 1–`9999999999`; approval không tăng version. `APPROVED` yêu cầu `approvedVersion=version`. Edit từ `APPROVED` tăng version đúng một, đưa status về `READY` và giữ approval metadata của version cũ.
+- Optimistic edit condition trên đúng `TRANSCRIPT#id/META`, persisted Meeting/group context, exact `expectedVersion` và current state `READY|APPROVED`; transaction update metadata + đúng segment và put đúng một immutable edit event. Approval condition trên cùng identity/context, exact version và state `READY`; transaction cập nhật approval metadata và put đúng một immutable approval event. Vì condition khóa cả version lẫn observed state, concurrent edit/edit hoặc edit/approve trên cùng expected version chỉ một mutation thắng; stale caller nhận `409`, invalid lifecycle nhận `422`.
+- Edit event chỉ lưu audit metadata cần thiết như `eventId`, `transcriptId`, `segmentId`, actor, before/after version, changed-field names, timestamp/request reference; không sao chép toàn bộ transcript text. Approval event lưu actor, exact approved version, timestamp và idempotency/handoff reference; không lưu full transcript. Full text không nằm trong META hoặc audit event để tránh giới hạn DynamoDB item 400 KB; segment vẫn là current materialized items và approved content được freeze thành immutable S3 artifact.
+- Approval chỉ do Organizer đồng thời là active member hoặc active Group Admin thực hiện trên `expectedVersion`; metadata giữ `approvedVersion`, `approvedBy`, `approvedAt` và idempotency reference. GET cho active member query canonical reference theo Meeting rồi query segment base partition theo `SEGMENT#` có cursor; cursor opaque được scope theo meeting/transcript và API không trả raw `LastEvaluatedKey`.
+- Approval version N phải tạo/reference immutable frozen artifact chứa đúng nội dung N, conceptual key `uploads/<groupId>/<meetingId>/transcripts/<transcriptId>/v<N>/content.txt`. Handoff sang M5 dùng `sourceType=TRANSCRIPT`, exact `transcriptId/meetingId/groupId`, `sourceVersion=N`, `approved=true` và immutable `inputObjectKey`; worker không đọc mutable current segments để giả làm version N.
+- Approval retry cùng Idempotency-Key + Transcript/version resolve cùng authoritative approval và logical ingestion job; cùng key khác Transcript/version trả `409`. Concurrent approval tạo tối đa một logical ingestion job. Nếu approval đã durable nhưng enqueue/start lỗi, retry phải recover handoff mà không tạo Transcript version hoặc logical job mới. Cách hiện thực recovery thuộc runtime PR sau nhưng boundary này là bắt buộc.
+- Chỉnh sửa transcript sau approval không làm nội dung approved version cũ mất hiệu lực; KnowledgeSource cũ chỉ `STALE` khi version approved mới được ingest. `expectedTranscriptVersion` ở generation là exact frozen approved source version và không được fallback sang current/latest mutable content.
 - Query segment theo trang bằng `PK=TRANSCRIPT#id` và sort-key range.
 - Audio/raw chunk nằm trong S3.
+
+Shared AI runtime hiện dùng ingestion status `PENDING|PROCESSING|READY|FAILED|STALE`; tên conceptual cũ `NOT_REQUESTED|QUEUED|SYNCING|INDEXED|FAILED|STALE` không thay đổi enum/runtime trong contract PR này và cần compatibility decision riêng nếu muốn rename.
 
 ## 7. Task-data table
 
