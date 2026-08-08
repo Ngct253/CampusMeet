@@ -144,6 +144,7 @@
   position: sticky;
   top: 1.5rem;
   min-width: 0;
+  container-type: inline-size;
 }
 .create-meeting-panel > p {
   margin: 0.4rem 0 1rem;
@@ -151,11 +152,11 @@
 }
 .meeting-time-fields {
   display: grid;
-  grid-template-columns: minmax(9rem, 1.25fr) repeat(2, minmax(7rem, 0.75fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 .meeting-date-field {
-  grid-column: auto;
+  grid-column: 1 / -1;
 }
 .meeting-form,
 .meeting-time-fields label,
@@ -195,10 +196,8 @@
   background: #fff;
 }
 .meeting-form-section-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
+  display: grid;
+  gap: 0.2rem;
 }
 .meeting-form-section-heading h3 {
   margin: 0;
@@ -317,6 +316,12 @@
   color: var(--color-primary-dark);
   font-size: 0.78rem;
   font-weight: 750;
+}
+.meeting-attendees-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
 }
 .meeting-attendees > div {
   max-height: 11rem;
@@ -810,6 +815,14 @@
   }
   .create-meeting-panel {
     position: static;
+  }
+}
+@container (max-width: 24rem) {
+  .meeting-agenda-preset {
+    grid-template-columns: 1fr;
+  }
+  .meeting-agenda-preset button {
+    width: 100%;
   }
 }
 @media (max-width: 600px) {
