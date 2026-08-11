@@ -50,6 +50,11 @@ import {
   transcriptSegmentHandler,
 } from './handlers/transcripts';
 import { getRequestId } from './utils/request';
+import {
+  appendLiveTranscriptionSegmentsHandler, completeRecordingHandler, liveTranscriptionHeartbeatHandler,
+  liveTranscriptionSessionHandler, meetingRecordingsHandler, prepareRecordingUploadHandler, reconnectLiveTranscriptionHandler,
+  reportLiveTranscriptionGapHandler, startLiveTranscriptionHandler, stopLiveTranscriptionHandler,
+} from './handlers/live-transcription';
 import { notImplemented } from './utils/response';
 import { createRouter } from './utils/router';
 
@@ -118,6 +123,16 @@ const findRoute = createRouter([
     path: '/transcripts/:transcriptId/approve',
     handler: transcriptApprovalHandler,
   },
+  { method: 'POST', path: '/meetings/:meetingId/recordings', handler: meetingRecordingsHandler },
+  { method: 'POST', path: '/meetings/:meetingId/recordings/:recordingId/upload-url', handler: prepareRecordingUploadHandler },
+  { method: 'POST', path: '/meetings/:meetingId/recordings/:recordingId/complete', handler: completeRecordingHandler },
+  { method: 'POST', path: '/meetings/:meetingId/live-transcription', handler: startLiveTranscriptionHandler },
+  { method: 'GET', path: '/meetings/:meetingId/live-transcription/:sessionId', handler: liveTranscriptionSessionHandler },
+  { method: 'POST', path: '/meetings/:meetingId/live-transcription/:sessionId/segments', handler: appendLiveTranscriptionSegmentsHandler },
+  { method: 'POST', path: '/meetings/:meetingId/live-transcription/:sessionId/heartbeat', handler: liveTranscriptionHeartbeatHandler },
+  { method: 'POST', path: '/meetings/:meetingId/live-transcription/:sessionId/reconnect', handler: reconnectLiveTranscriptionHandler },
+  { method: 'POST', path: '/meetings/:meetingId/live-transcription/:sessionId/gaps', handler: reportLiveTranscriptionGapHandler },
+  { method: 'POST', path: '/meetings/:meetingId/live-transcription/:sessionId/stop', handler: stopLiveTranscriptionHandler },
   { method: 'PUT', path: '/meetings/:meetingId/minutes', handler: minutesHandler },
   {
     method: 'POST',

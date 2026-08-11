@@ -12,6 +12,10 @@ Parameters:
     Default: campusmeet-dev
     AllowedPattern: '^[a-z0-9-]+$'
     Description: Prefix of the separately deployed DynamoDB data foundation.
+  TranscribeLanguageAllowlist:
+    Type: CommaDelimitedList
+    Default: vi-VN,en-US
+    Description: Explicit Amazon Transcribe language codes allowed for M2 live sessions; AUTO is not supported.
   MeetingDataStreamArn:
     Type: String
     AllowedPattern: '^arn:[^:]+:dynamodb:[^:]+:[0-9]{12}:table/.+/stream/.+$'
@@ -282,6 +286,10 @@ Resources:
                   - ExecutionPrefix: !Join
                       - ':execution:'
                       - !Split [':stateMachine:', !Ref AIStateMachineArn]
+              - Sid: StartM2LiveTranscription
+                Effect: Allow
+                Action: transcribe:StartStreamTranscriptionWebSocket
+                Resource: '*'
       Tags: *ResourceTags
 
   GoogleSyncSchedulerRole:
@@ -417,6 +425,7 @@ Resources:
           SCHEDULER_EXECUTION_ROLE_ARN: !Ref SchedulerExecutionRoleArn
           SES_FROM_EMAIL: !Ref SesFromEmail
           SES_CONFIGURATION_SET: !Ref SesConfigurationSetName
+          TRANSCRIBE_LANGUAGE_ALLOWLIST: !Join [',', !Ref TranscribeLanguageAllowlist]
       Events:
         Health:
           Type: HttpApi

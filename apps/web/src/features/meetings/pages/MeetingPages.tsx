@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { createElement, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Priority,
@@ -20,6 +20,7 @@ import { environment } from '../../../config/environment';
 import { ApiClientError } from '../../../lib/api-client';
 import { MeetingAIWorkspace } from '../../ai';
 import { TranscriptPanel } from '../../transcripts';
+import { LiveCapturePanel } from '../LiveCapturePanel';
 import { getGroup } from '../../groups/service';
 import {
   cancelMeeting,
@@ -2200,6 +2201,7 @@ export function MeetingDetailPage() {
               </div>
             </details>
           )}
+        {createElement(LiveCapturePanel, { meetingId: meeting.id, canControl: canGenerateMeetingOutputs })}
         <TranscriptPanel
           meeting={meeting}
           group={groupQuery.data}
